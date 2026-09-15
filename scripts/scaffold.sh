@@ -11,7 +11,7 @@
 # sync with them.
 #
 # Usage:
-#   scripts/scaffold.sh [--force] [--help]
+#   scripts/scaffold.sh [--submodules] [--force] [--help]
 
 set -euo pipefail
 
@@ -22,21 +22,25 @@ usage() {
 scaffold.sh — create or refresh the ProwseTk project skeleton.
 
 Usage:
-  scripts/scaffold.sh [--force] [--help]
+  scripts/scaffold.sh [--submodules] [--force] [--help]
 
 Options:
-  -f, --force   overwrite existing files
-  -h, --help    show this help and exit
+  -f, --force        overwrite existing files
+  -s, --submodules   grab submodules
+  -h, --help         show this help and exit
 
 Environment:
   PROWSETK_DIR  target directory; defaults to the parent of this script.
 USAGE_EOF
 }
 
+SUBMODULES=OFF
+
 for arg in "$@"; do
     case "$arg" in
         -f|--force) FORCE=1 ;;
         -h|--help)  usage; exit 0 ;;
+	-s|--submodules) SUBMODULES=ON  ;;
         *)
             printf 'scaffold.sh: unknown option: %s\n' "$arg" >&2
             usage >&2
@@ -106,6 +110,14 @@ for d in \
 do
     make_dir "${ROOT}/${d}"
 done
+
+# --------------------------------------------------------------------------
+# Submodules
+# --------------------------------------------------------------------------
+
+if [[ $SUBMODULES = ON ]]; then
+	sh $SCRIPTS_DIR/submodules.sh
+fi
 
 # ---------------------------------------------------------------------------
 # .gitignore  (canonical copy)

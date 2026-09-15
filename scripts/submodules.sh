@@ -1,28 +1,28 @@
-git submodule add https://github.com/c-ares/c-ares.git
-git submodule add https://github.com/fmtlib/fmt.git
-git submodule add https://github.com/google/gumbo-parser.git
-git submodule add https://github.com/jemalloc/jemalloc.git
-git submodule add https://github.com/pantor/inja.git
-git submodule add https://github.com/satoren/kaguya.git
-git submodule add https://github.com/lexbor/lexbor.git
-git submodule add https://github.com/netsurf-browser/libdom.git
-git submodule add https://github.com/enki/libev.git
-git submodule add https://github.com/file/file.git
-git submodule add https://github.com/sustrik/libmill.git
-git submodule add https://github.com/nodejs/llhttp.git
-git submodule add https://github.com/lua/lua.git
-git submodule add https://github.com/Mbed-TLS/mbedtls.git
-git submodule add https://github.com/cbodley/nexus.git
-git submodule add https://github.com/zeux/pugixml.git
-git submodule add https://github.com/quickjs-ng/quickjs.git
-git submodule add https://github.com/google/re2.git
-git submodule add https://github.com/simdjson/simdjson.git
-git submodule add https://github.com/gabime/spdlog.git
-git submodule add https://github.com/marzer/tomlplusplus.git
-git submodule add https://github.com/uriparser/uriparser.git
-git submodule add https://github.com/nodejs/uvwasi.git
-git submodule add https://github.com/WebAssembly/wasi-libc.git
-git submodule add https://github.com/WebAssembly/wasi-sdk.git
-git submodule add https://github.com/bytecodealliance/wasmtime-cpp.git
-git submodule add https://github.com/jbeder/yaml-cpp.git
-git submodule add https://github.com/facebook/zstd.git
+git submodule add https://github.com/c-ares/c-ares.git		    third_party/c-ares
+git submodule add https://github.com/fmtlib/fmt.git		    third_party/fmt
+git submodule add https://github.com/google/gumbo-parser.git	    third_party/gumbo-parser
+git submodule add https://github.com/jemalloc/jemalloc.git	    third_party/jemalloc
+git submodule add https://github.com/pantor/inja.git		    third_party/inja
+git submodule add https://github.com/satoren/kaguya.git		    third_party/kaguya
+git submodule add https://github.com/lexbor/lexbor.git		    third_party/lexbor
+git submodule add https://github.com/netsurf-browser/libdom.git	    third_party/libdom
+git submodule add https://github.com/enki/libev.git		    third_party/libev
+git submodule add https://github.com/file/file.git		    third_party/libmagic
+git submodule add https://github.com/sustrik/libmill.git	    third_party/libmill
+git submodule add https://github.com/nodejs/llhttp.git		    third_party/llhttp
+git submodule add https://github.com/lua/lua.git		    third_party/lua
+git submodule add https://github.com/Mbed-TLS/mbedtls.git	    third_party/mbedtls
+git submodule add https://github.com/cbodley/nexus.git		    third_party/nexus
+git submodule add https://github.com/zeux/pugixml.git		    third_party/pugixml
+git submodule add https://github.com/quickjs-ng/quickjs.git	    third_party/quickjs
+git submodule add https://github.com/google/re2.git		    third_party/re2
+git submodule add https://github.com/simdjson/simdjson.git	    third_party/simdjson
+git submodule add https://github.com/gabime/spdlog.git		    third_party/spdlog
+git submodule add https://github.com/marzer/tomlplusplus.git	    third_party/tomlplusplus
+git submodule add https://github.com/uriparser/uriparser.git	    third_party/uriparser
+git submodule add https://github.com/nodejs/uvwasi.git		    third_party/uvwasi
+git submodule add https://github.com/WebAssembly/wasi-libc.git	    third_party/wasi-libc
+git submodule add https://github.com/WebAssembly/wasi-sdk.git	    third_party/wasi-sdk
+git submodule add https://github.com/bytecodealliance/wasmtime-cpp.git third_party/wasmtime-cpp
+git submodule add https://github.com/jbeder/yaml-cpp.git	    third_party/yaml-cpp
+git submodule add https://github.com/facebook/zstd.git		    third_party/zstd
