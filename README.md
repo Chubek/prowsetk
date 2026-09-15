@@ -807,8 +807,12 @@ interface endpoint-extraction {
         inspect-scripts: bool,
         observe-network: bool,
         infer-schemas: bool,
+        include-provenance: bool,
+        redact-secrets: bool,
         max-depth: u32,
         max-pages: u32,
+        minimum-confidence: f64,
+        openapi-version: string,
     }
 
     record extraction-result {
@@ -877,6 +881,11 @@ Generated output must:
 
 The extension must never represent an inferred value as definitively known when
 the source information is incomplete.
+
+The built-in extractor currently resolves discovered URLs against the document
+base URL, normalizes HTTP methods for OpenAPI output, infers query parameter
+names from discovered URLs, respects `observe_network`, and merges duplicate
+method/path discoveries while retaining higher-confidence provenance.
 
 Configurable behavior:
 

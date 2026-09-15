@@ -92,8 +92,18 @@
       "execution": { "noTestsAction": "error" }
     },
     {
+      "name": "release",
+      "configurePreset": "release",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "ignore" }
+    },
+    {
       "name": "asan",
       "configurePreset": "asan",
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=0",
+        "LSAN_OPTIONS": "detect_leaks=0"
+      },
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     },

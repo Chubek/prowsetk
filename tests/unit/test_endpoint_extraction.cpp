@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include "prowsetk/document.hpp"
 #include "prowsetk/endpoint_extraction.hpp"
 
@@ -90,6 +92,78 @@ TEST(EndpointExtraction, ObservedNetworkEndpointsHaveHighConfidence) {
     EXPECT_DOUBLE_EQ(result.endpoints[0].confidence, 0.95);
     EXPECT_EQ(result.endpoints[0].method, "post");
     EXPECT_EQ(result.endpoints[0].response_content_type, "application/json");
+}
+
+TEST(EndpointExtraction, ObservedNetworkCanBeDisabled) {
+    EndpointExtractionOptions options;
+    options.observe_network = false;
+    EndpointExtractor extractor(options);
+    extractor.observe("POST", "https://example.com/api/orders", 201,
+                      "application/json");
+
+    const auto document = parse_html("<html></html>", "https://example.com/");
+    const auto result = extractor.extract(*document);
+
+    EXPECT_TRUE(result.endpoints.empty());
+}
+
+TEST(EndpointExtraction, FetchOptionsInferHttpMethodAndQueryParameters) {
+    const auto document = parse_html(R"HTML(
+        <script>
+          fetch('/api/orders?customer=42', { method: 'PATCH' });
+          fetch("/api/search?q=term");
+        </script>
+    )HTML",
+                                     "https://example.com/");
+
+    EndpointExtractor extractor;
+    const auto result = extractor.extract(*document);
+
+    bool found_patch = false;
+    bool found_get = false;
+    for (const auto& endpoint : result.endpoints) {
+        if (endpoint.path == "/api/orders") {
+            found_patch = true;
+            EXPECT_EQ(endpoint.method, "patch");
+            EXPECT_NE(std::find(endpoint.parameters.begin(),
+                                endpoint.parameters.end(), "customer"),
+                      endpoint.parameters.end());
+        }
+        if (endpoint.path == "/api/search") {
+            found_get = true;
+            EXPECT_EQ(endpoint.method, "get");
+            EXPECT_NE(std::find(endpoint.parameters.begin(),
+                                endpoint.parameters.end(), "q"),
+                      endpoint.parameters.end());
+        }
+    }
+    EXPECT_TRUE(found_patch);
+    EXPECT_TRUE(found_get);
+}
+
+TEST(EndpointExtraction, MergesDuplicateDiscoveriesByMethodAndPath) {
+    EndpointExtractor extractor;
+    extractor.observe("POST", "https://example.com/api/login?from=network", 200,
+                      "application/json");
+    const auto document = parse_html(R"HTML(
+        <form action="/api/login?from=form" method="POST">
+          <input name="username">
+        </form>
+    )HTML",
+                                     "https://example.com/");
+
+    const auto result = extractor.extract(*document);
+
+    ASSERT_EQ(result.endpoints.size(), 1u);
+    EXPECT_EQ(result.endpoints[0].path, "/api/login");
+    EXPECT_EQ(result.endpoints[0].method, "post");
+    EXPECT_DOUBLE_EQ(result.endpoints[0].confidence, 0.95);
+    EXPECT_NE(std::find(result.endpoints[0].parameters.begin(),
+                        result.endpoints[0].parameters.end(), "username"),
+              result.endpoints[0].parameters.end());
+    EXPECT_NE(std::find(result.endpoints[0].parameters.begin(),
+                        result.endpoints[0].parameters.end(), "from"),
+              result.endpoints[0].parameters.end());
 }
 
 TEST(EndpointExtraction, ConfidenceThresholdFiltersResults) {

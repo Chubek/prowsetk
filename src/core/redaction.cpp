@@ -84,7 +84,7 @@ std::string Redactor::redact_url(std::string_view url) const {
     } catch (...) {
         return std::string(url);
     }
-    if (parsed.query.empty()) {
+    if (!parsed.has_query) {
         return std::string(url);
     }
 

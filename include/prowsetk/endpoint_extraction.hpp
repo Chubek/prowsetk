@@ -29,7 +29,7 @@ struct EndpointExtractionOptions {
 struct DiscoveredEndpoint {
     std::string url;
     std::string path;
-    std::string method = "GET";
+    std::string method = "get";
     std::string source;
     std::string discovery_method;
     double confidence = 0.0;

@@ -48,6 +48,10 @@ TEST(Url, KeepsQueryWhenReferenceHasNoPath) {
               "https://example.com/a?x=1#frag");
     EXPECT_EQ(resolve_url("https://example.com/a?x=1", "?y=2"),
               "https://example.com/a?y=2");
+    EXPECT_EQ(resolve_url("https://example.com/a?x=1", "?"),
+              "https://example.com/a?");
+    EXPECT_EQ(resolve_url("https://example.com/a?x=1", "#"),
+              "https://example.com/a?x=1#");
 }
 
 TEST(Url, NormalizesDefaultPortsAndDotSegments) {

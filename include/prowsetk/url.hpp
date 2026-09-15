@@ -17,6 +17,8 @@ struct Url {
     std::string query;
     std::string fragment;
     bool has_authority = false;
+    bool has_query = false;
+    bool has_fragment = false;
 
     bool is_absolute() const noexcept { return !scheme.empty(); }
     bool has_host() const noexcept { return has_authority && !host.empty(); }

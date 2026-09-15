@@ -52,6 +52,35 @@ bool is_raw_text_element(std::string_view name) {
     return name == "script" || name == "style";
 }
 
+std::string escape_text(std::string_view value) {
+    std::string result;
+    result.reserve(value.size());
+    for (char c : value) {
+        switch (c) {
+            case '&': result += "&amp;"; break;
+            case '<': result += "&lt;"; break;
+            case '>': result += "&gt;"; break;
+            default: result.push_back(c); break;
+        }
+    }
+    return result;
+}
+
+std::string escape_attribute(std::string_view value) {
+    std::string result;
+    result.reserve(value.size());
+    for (char c : value) {
+        switch (c) {
+            case '&': result += "&amp;"; break;
+            case '"': result += "&quot;"; break;
+            case '<': result += "&lt;"; break;
+            case '>': result += "&gt;"; break;
+            default: result.push_back(c); break;
+        }
+    }
+    return result;
+}
+
 bool is_rcdata_element(std::string_view name) {
     return name == "textarea" || name == "title";
 }
@@ -150,6 +179,42 @@ void append_child(const std::shared_ptr<Node>& parent,
     parent->children.push_back(child);
 }
 
+std::string serialize_impl(const Node& node, std::string_view parent_name) {
+    switch (node.type) {
+        case NodeType::Document: {
+            std::string result;
+            for (const auto& child : node.children) {
+                result += serialize_impl(*child, {});
+            }
+            return result;
+        }
+        case NodeType::Text:
+            return is_raw_text_element(parent_name) ? node.text
+                                                    : escape_text(node.text);
+        case NodeType::Comment:
+            return "<!--" + node.text + "-->";
+        case NodeType::Doctype:
+            return "<!" + node.text + ">";
+        case NodeType::Element:
+            break;
+    }
+
+    std::string result = "<" + node.name;
+    for (const auto& attr : node.attributes) {
+        result += " " + attr.name + "=\"" + escape_attribute(attr.value) + "\"";
+    }
+    if (is_void_element(node.name)) {
+        result += ">";
+        return result;
+    }
+    result += ">";
+    for (const auto& child : node.children) {
+        result += serialize_impl(*child, node.name);
+    }
+    result += "</" + node.name + ">";
+    return result;
+}
+
 }  // namespace
 
 std::shared_ptr<Node> make_node(NodeType type) {
@@ -191,38 +256,7 @@ bool Node::remove_attribute(std::string_view attribute_name) {
 }
 
 std::string serialize(const Node& node) {
-    switch (node.type) {
-        case NodeType::Document: {
-            std::string result;
-            for (const auto& child : node.children) {
-                result += serialize(*child);
-            }
-            return result;
-        }
-        case NodeType::Text:
-            return node.text;
-        case NodeType::Comment:
-            return "<!--" + node.text + "-->";
-        case NodeType::Doctype:
-            return "<!" + node.text + ">";
-        case NodeType::Element:
-            break;
-    }
-
-    std::string result = "<" + node.name;
-    for (const auto& attr : node.attributes) {
-        result += " " + attr.name + "=\"" + attr.value + "\"";
-    }
-    if (node.children.empty()) {
-        result += "></" + node.name + ">";
-        return result;
-    }
-    result += ">";
-    for (const auto& child : node.children) {
-        result += serialize(*child);
-    }
-    result += "</" + node.name + ">";
-    return result;
+    return serialize_impl(node, {});
 }
 
 std::string text_content(const Node& node) {

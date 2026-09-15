@@ -85,6 +85,29 @@ TEST(Document, RawTextElementsAreNotParsedAsMarkup) {
     EXPECT_NE(scripts[1]->text().find("x = 1 < 2"), std::string::npos);
 }
 
+TEST(Document, SerializesEscapedTextAndAttributes) {
+    const auto document =
+        parse_html("<div data-x=\"a &amp; &quot;b&quot;\">1 < 2 &amp; 3</div>"
+                   "<img src=\"/x?a=1&amp;b=2\">");
+
+    auto div = document->query_selector("div");
+    ASSERT_NE(div, nullptr);
+    div->set_attribute("title", "\"quoted\" & <tag>");
+
+    const std::string html = document->html();
+    EXPECT_NE(html.find("1 &lt; 2 &amp; 3"), std::string::npos);
+    EXPECT_NE(html.find("title=\"&quot;quoted&quot; &amp; &lt;tag&gt;\""),
+              std::string::npos);
+    EXPECT_NE(html.find("<img src=\"/x?a=1&amp;b=2\">"), std::string::npos);
+}
+
+TEST(Document, KeepsRawTextSerializationForScriptsAndStyles) {
+    const auto document =
+        parse_html("<script>if (a < b && c > d) run();</script>");
+    EXPECT_NE(document->html().find("if (a < b && c > d) run();"),
+              std::string::npos);
+}
+
 TEST(Element, TraversalAndMutation) {
     const auto document = parse_html(kHtml, "https://example.com/");
     auto heading = document->get_element_by_id("heading");

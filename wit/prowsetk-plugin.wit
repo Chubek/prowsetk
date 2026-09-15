@@ -31,7 +31,34 @@ interface document-extractor {
     extract: func(url: string, html: string) -> result<string, string>;
 }
 
+interface endpoint-extraction {
+    record extraction-options {
+        follow-links: bool,
+        inspect-scripts: bool,
+        observe-network: bool,
+        infer-schemas: bool,
+        include-provenance: bool,
+        redact-secrets: bool,
+        max-depth: u32,
+        max-pages: u32,
+        minimum-confidence: f64,
+        openapi-version: string,
+    }
+
+    record extraction-result {
+        openapi-yaml: string,
+        endpoint-count: u32,
+        warnings: list<string>,
+    }
+
+    extract: func(
+        start-url: string,
+        options: extraction-options
+    ) -> result<extraction-result, string>;
+}
+
 world prowsetk-plugin {
     export network-hooks;
     export document-extractor;
+    export endpoint-extraction;
 }

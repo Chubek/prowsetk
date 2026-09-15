@@ -113,10 +113,10 @@ std::string Url::to_string() const {
         }
     }
     result += path;
-    if (!query.empty()) {
+    if (has_query) {
         result += "?" + query;
     }
-    if (!fragment.empty()) {
+    if (has_fragment) {
         result += "#" + fragment;
     }
     return result;
@@ -180,12 +180,14 @@ Url parse_url(std::string_view input) {
     const auto hash = rest.find('#');
     if (hash != std::string::npos) {
         url.fragment = rest.substr(hash + 1);
+        url.has_fragment = true;
         rest.erase(hash);
     }
 
     const auto question = rest.find('?');
     if (question != std::string::npos) {
         url.query = rest.substr(question + 1);
+        url.has_query = true;
         rest.erase(question);
     }
 
@@ -200,6 +202,7 @@ Url resolve_url(const Url& base, std::string_view reference) {
     if (!ref.scheme.empty()) {
         target = ref;
         target.path = remove_dot_segments(ref.path);
+        target.has_query = ref.has_query;
         return target;
     }
 
@@ -211,6 +214,7 @@ Url resolve_url(const Url& base, std::string_view reference) {
         target.port = ref.port;
         target.path = remove_dot_segments(ref.path);
         target.query = ref.query;
+        target.has_query = ref.has_query;
     } else {
         target.has_authority = base.has_authority;
         target.userinfo = base.userinfo;
@@ -218,7 +222,8 @@ Url resolve_url(const Url& base, std::string_view reference) {
         target.port = base.port;
         if (ref.path.empty()) {
             target.path = base.path;
-            target.query = ref.query.empty() ? base.query : ref.query;
+            target.query = ref.has_query ? ref.query : base.query;
+            target.has_query = ref.has_query ? true : base.has_query;
         } else {
             if (ref.path[0] == '/') {
                 target.path = remove_dot_segments(ref.path);
@@ -227,9 +232,11 @@ Url resolve_url(const Url& base, std::string_view reference) {
                     remove_dot_segments(merge_paths(base, ref.path));
             }
             target.query = ref.query;
+            target.has_query = ref.has_query;
         }
     }
     target.fragment = ref.fragment;
+    target.has_fragment = ref.has_fragment;
     return target;
 }
 
