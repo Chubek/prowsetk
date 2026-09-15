@@ -118,3 +118,87 @@
 [submodule "third_party/zstd"]
 	path = third_party/zstd
 	url = https://github.com/facebook/zstd.git
+[submodule "c-ares"]
+	path = c-ares
+	url = https://github.com/c-ares/c-ares.git
+[submodule "fmt"]
+	path = fmt
+	url = https://github.com/fmtlib/fmt.git
+[submodule "gumbo-parser"]
+	path = gumbo-parser
+	url = https://github.com/google/gumbo-parser.git
+[submodule "jemalloc"]
+	path = jemalloc
+	url = https://github.com/jemalloc/jemalloc.git
+[submodule "inja"]
+	path = inja
+	url = https://github.com/pantor/inja.git
+[submodule "kaguya"]
+	path = kaguya
+	url = https://github.com/satoren/kaguya.git
+[submodule "lexbor"]
+	path = lexbor
+	url = https://github.com/lexbor/lexbor.git
+[submodule "libdom"]
+	path = libdom
+	url = https://github.com/netsurf-browser/libdom.git
+[submodule "libev"]
+	path = libev
+	url = https://github.com/enki/libev.git
+[submodule "file"]
+	path = file
+	url = https://github.com/file/file.git
+[submodule "libmill"]
+	path = libmill
+	url = https://github.com/sustrik/libmill.git
+[submodule "llhttp"]
+	path = llhttp
+	url = https://github.com/nodejs/llhttp.git
+[submodule "lua"]
+	path = lua
+	url = https://github.com/lua/lua.git
+[submodule "mbedtls"]
+	path = mbedtls
+	url = https://github.com/Mbed-TLS/mbedtls.git
+[submodule "nexus"]
+	path = nexus
+	url = https://github.com/cbodley/nexus.git
+[submodule "pugixml"]
+	path = pugixml
+	url = https://github.com/zeux/pugixml.git
+[submodule "quickjs"]
+	path = quickjs
+	url = https://github.com/quickjs-ng/quickjs.git
+[submodule "re2"]
+	path = re2
+	url = https://github.com/google/re2.git
+[submodule "simdjson"]
+	path = simdjson
+	url = https://github.com/simdjson/simdjson.git
+[submodule "spdlog"]
+	path = spdlog
+	url = https://github.com/gabime/spdlog.git
+[submodule "tomlplusplus"]
+	path = tomlplusplus
+	url = https://github.com/marzer/tomlplusplus.git
+[submodule "uriparser"]
+	path = uriparser
+	url = https://github.com/uriparser/uriparser.git
+[submodule "uvwasi"]
+	path = uvwasi
+	url = https://github.com/nodejs/uvwasi.git
+[submodule "wasi-libc"]
+	path = wasi-libc
+	url = https://github.com/WebAssembly/wasi-libc.git
+[submodule "wasi-sdk"]
+	path = wasi-sdk
+	url = https://github.com/WebAssembly/wasi-sdk.git
+[submodule "wasmtime-cpp"]
+	path = wasmtime-cpp
+	url = https://github.com/bytecodealliance/wasmtime-cpp.git
+[submodule "yaml-cpp"]
+	path = yaml-cpp
+	url = https://github.com/jbeder/yaml-cpp.git
+[submodule "zstd"]
+	path = zstd
+	url = https://github.com/facebook/zstd.git

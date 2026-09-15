@@ -6,7 +6,7 @@
 # present in the index are unaffected by this rule; it only prevents stray
 # vendored drops from being committed.
 # ---------------------------------------------------------------------------
-/third_party/
+third_party/
 
 # ---------------------------------------------------------------------------
 # Build output
