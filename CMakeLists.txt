@@ -27,6 +27,8 @@ endif()
 
 add_subdirectory(src)
 
+prowsetk_export_package()
+
 if(PROWSETK_BUILD_TESTS)
     add_subdirectory(tests)
 endif()

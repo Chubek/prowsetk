@@ -1,8 +1,5 @@
-prowsetk_add_executable(prowsetk_integration_smoke
-    test_smoke_integration.cpp)
-target_link_libraries(prowsetk_integration_smoke PRIVATE ProwseTk::core)
+prowsetk_gtest(prowsetk_integration_navigation "prowsetk.integration.network."
+    "integration;network" test_navigation.cpp)
 
-add_test(NAME prowsetk.integration.smoke COMMAND prowsetk_integration_smoke)
-set_tests_properties(prowsetk.integration.smoke PROPERTIES
-    TIMEOUT 60
-    LABELS "integration;core")
+prowsetk_gtest(prowsetk_integration_lua "prowsetk.integration.lua."
+    "integration;lua" test_lua_binding.cpp)

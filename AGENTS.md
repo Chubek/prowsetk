@@ -5,6 +5,13 @@ implements, extends, or reviews ProwseTk. Read `README.md` first; it is the
 architecture of record. When this file and `README.md` disagree, `README.md`
 wins and this file must be corrected.
 
+## 0. MCP Tools
+
+You must use the following MCP tools installed on this agent in development of ProwseTk:
+
+- `prowsetk_oracle`
+- `http_oracle`
+
 ## 1. Mission
 
 ProwseTk is an embeddable C++ toolkit for programmable, headless web browsers.

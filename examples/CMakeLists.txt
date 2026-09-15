@@ -1,0 +1,5 @@
+prowsetk_add_executable(prowsetk_example_scrape basic_scrape.cpp)
+target_link_libraries(prowsetk_example_scrape PRIVATE ProwseTk::core)
+
+prowsetk_add_executable(prowsetk_example_lua lua_automation.cpp)
+target_link_libraries(prowsetk_example_lua PRIVATE ProwseTk::core)
