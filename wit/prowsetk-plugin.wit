@@ -1,0 +1,37 @@
+package prowsetk:plugin@0.1.0;
+
+interface types {
+    record request {
+        method: string,
+        url: string,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+
+    record response {
+        status: u16,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+
+    variant hook-result {
+        continue,
+        reject(string),
+        replace-request(request),
+    }
+}
+
+interface network-hooks {
+    before-request: func(req: types.request) -> result<types.hook-result, string>;
+    after-response: func(req: types.request, res: types.response)
+        -> result<types.hook-result, string>;
+}
+
+interface document-extractor {
+    extract: func(url: string, html: string) -> result<string, string>;
+}
+
+world prowsetk-plugin {
+    export network-hooks;
+    export document-extractor;
+}

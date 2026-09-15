@@ -1,0 +1,142 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Default (RelWithDebInfo, tests + examples)",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "PROWSETK_BUILD_TESTS": "ON",
+        "PROWSETK_BUILD_EXAMPLES": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug (tests + examples)",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "PROWSETK_BUILD_TESTS": "ON",
+        "PROWSETK_BUILD_EXAMPLES": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release (no tests, no examples)",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "PROWSETK_BUILD_TESTS": "OFF",
+        "PROWSETK_BUILD_EXAMPLES": "OFF"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "Debug + AddressSanitizer/UBSan (tests)",
+      "inherits": "debug",
+      "cacheVariables": {
+        "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address,undefined",
+        "PROWSETK_BUILD_EXAMPLES": "OFF"
+      }
+    },
+    {
+      "name": "coverage",
+      "displayName": "Coverage instrumentation (tests)",
+      "inherits": "debug",
+      "cacheVariables": {
+        "CMAKE_C_FLAGS": "--coverage -O0 -g",
+        "CMAKE_CXX_FLAGS": "--coverage -O0 -g",
+        "CMAKE_EXE_LINKER_FLAGS": "--coverage",
+        "CMAKE_SHARED_LINKER_FLAGS": "--coverage",
+        "PROWSETK_BUILD_EXAMPLES": "OFF"
+      }
+    },
+    {
+      "name": "wasm",
+      "displayName": "Default + WebAssembly runtime (tests)",
+      "inherits": "default",
+      "cacheVariables": {
+        "PROWSETK_ENABLE_WASM": "ON",
+        "PROWSETK_WASM_RUNTIME": "wasmtime",
+        "PROWSETK_ENABLE_WASI": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "default",  "configurePreset": "default" },
+    { "name": "debug",    "configurePreset": "debug" },
+    { "name": "release",  "configurePreset": "release" },
+    { "name": "asan",     "configurePreset": "asan" },
+    { "name": "coverage", "configurePreset": "coverage" },
+    { "name": "wasm",     "configurePreset": "wasm" }
+  ],
+  "testPresets": [
+    {
+      "name": "default",
+      "configurePreset": "default",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "wasm",
+      "configurePreset": "wasm",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "ci",
+      "displayName": "CI: default",
+      "steps": [
+        { "type": "configure", "name": "default" },
+        { "type": "build",     "name": "default" },
+        { "type": "test",      "name": "default" }
+      ]
+    },
+    {
+      "name": "ci-asan",
+      "displayName": "CI: AddressSanitizer/UBSan",
+      "steps": [
+        { "type": "configure", "name": "asan" },
+        { "type": "build",     "name": "asan" },
+        { "type": "test",      "name": "asan" }
+      ]
+    },
+    {
+      "name": "ci-wasm",
+      "displayName": "CI: WebAssembly runtime",
+      "steps": [
+        { "type": "configure", "name": "wasm" },
+        { "type": "build",     "name": "wasm" },
+        { "type": "test",      "name": "wasm" }
+      ]
+    }
+  ]
+}
