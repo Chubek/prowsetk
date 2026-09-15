@@ -22,6 +22,13 @@ prowsetk_gtest(prowsetk_unit_dom "prowsetk.unit.document."
 prowsetk_gtest(prowsetk_unit_css "prowsetk.unit.document.css."
     "unit;document" test_css_selector.cpp)
 
+prowsetk_gtest(prowsetk_unit_xpath "prowsetk.unit.document.xpath."
+    "unit;document" test_xpath.cpp)
+if(PROWSETK_HAVE_PUGIXML)
+    target_compile_definitions(prowsetk_unit_xpath PRIVATE
+        PROWSETK_HAVE_PUGIXML=1)
+endif()
+
 prowsetk_gtest(prowsetk_unit_network "prowsetk.unit.network."
     "unit;network" test_network.cpp)
 

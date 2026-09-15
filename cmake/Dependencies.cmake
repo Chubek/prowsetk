@@ -48,6 +48,53 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# pugixml — optional XPath 1.0 engine for flatworm DOM queries. Vendored under
+# third_party/pugixml and exposed as ProwseTk::pugixml.
+# ---------------------------------------------------------------------------
+set(PROWSETK_PUGIXML_SOURCE_DIR "${PROJECT_SOURCE_DIR}/third_party/pugixml")
+if(EXISTS "${PROWSETK_PUGIXML_SOURCE_DIR}/src/pugixml.cpp")
+    if(NOT TARGET prowsetk_pugixml)
+        add_library(prowsetk_pugixml STATIC
+            "${PROWSETK_PUGIXML_SOURCE_DIR}/src/pugixml.cpp")
+        target_include_directories(prowsetk_pugixml PUBLIC
+            "$<BUILD_INTERFACE:${PROWSETK_PUGIXML_SOURCE_DIR}/src>"
+            "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+        install(FILES
+            "${PROWSETK_PUGIXML_SOURCE_DIR}/src/pugiconfig.hpp"
+            "${PROWSETK_PUGIXML_SOURCE_DIR}/src/pugixml.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+        add_library(ProwseTk::pugixml ALIAS prowsetk_pugixml)
+    endif()
+    set(PROWSETK_HAVE_PUGIXML ON CACHE INTERNAL "pugixml available")
+    message(STATUS "ProwseTk: using vendored pugixml for XPath")
+else()
+    set(PROWSETK_HAVE_PUGIXML OFF CACHE INTERNAL "pugixml available")
+    message(STATUS "ProwseTk: pugixml missing; XPath disabled")
+endif()
+
+# ---------------------------------------------------------------------------
+# tomlplusplus — optional Prowse.toml project-configuration parsing. Vendored
+# single-header library exposed as ProwseTk::tomlplusplus.
+# ---------------------------------------------------------------------------
+set(PROWSETK_TOMLPLUSPLUS_SOURCE_DIR
+    "${PROJECT_SOURCE_DIR}/third_party/tomlplusplus")
+if(EXISTS "${PROWSETK_TOMLPLUSPLUS_SOURCE_DIR}/toml.hpp")
+    if(NOT TARGET prowsetk_tomlplusplus)
+        add_library(prowsetk_tomlplusplus INTERFACE)
+        target_include_directories(prowsetk_tomlplusplus INTERFACE
+            "${PROWSETK_TOMLPLUSPLUS_SOURCE_DIR}")
+        add_library(ProwseTk::tomlplusplus ALIAS prowsetk_tomlplusplus)
+    endif()
+    set(PROWSETK_HAVE_TOMLPLUSPLUS ON CACHE INTERNAL
+        "tomlplusplus available")
+    message(STATUS "ProwseTk: using vendored tomlplusplus for Prowse.toml")
+else()
+    set(PROWSETK_HAVE_TOMLPLUSPLUS OFF CACHE INTERNAL
+        "tomlplusplus available")
+    message(STATUS "ProwseTk: tomlplusplus missing; Prowse.toml disabled")
+endif()
+
+# ---------------------------------------------------------------------------
 # GoogleTest — used by the test suite when available.
 # ---------------------------------------------------------------------------
 if(PROWSETK_BUILD_TESTS)
