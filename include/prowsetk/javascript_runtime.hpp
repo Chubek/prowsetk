@@ -12,7 +12,7 @@ namespace prowsetk {
 
 struct ScriptOptions {
     int timeout_ms = 5000;
-    std::size_t memory_limit_bytes = 16u * 1024u * 1024u;
+    std::size_t memory_limit_bytes = std::size_t{16} * 1024u * 1024u;
 };
 
 struct ScriptResult {

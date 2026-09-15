@@ -33,3 +33,9 @@ prowsetk_gtest(prowsetk_unit_plugins "prowsetk.unit.plugin."
 target_compile_definitions(prowsetk_unit_plugins PRIVATE
     TEST_PLUGIN_PATH="$<TARGET_FILE:prowsetk_test_plugin>")
 add_dependencies(prowsetk_unit_plugins prowsetk_test_plugin)
+
+prowsetk_gtest(prowsetk_unit_javascript "prowsetk.unit.javascript."
+    "unit;javascript" test_javascript_runtime.cpp)
+
+prowsetk_gtest(prowsetk_unit_web_platform "prowsetk.unit.web-platform."
+    "unit;javascript" test_web_platform.cpp)

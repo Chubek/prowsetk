@@ -161,6 +161,14 @@ An XPath interface into the DOM is exposed through the Lua extension layer as
 `lprowsext.dom.xpath`. XPath substantially increases scraping reach compared with
 plain CSS selectors.
 
+When the vendored QuickJS-NG source is available, the core provides a
+persistent page-context JavaScript runtime with string globals, exception
+reporting, per-evaluation memory limits, and interrupt-based execution
+deadlines. Browser host bindings such as `console` and `fetch` remain
+unavailable until their Flatworm adapters are installed; runtime capability
+queries report that distinction instead of treating ECMAScript execution as
+full Web API support.
+
 ## Public C++ API
 
 The public C++ API separates browser responsibilities into focused components.

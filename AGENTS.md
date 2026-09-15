@@ -12,6 +12,8 @@ You must use the following MCP tools installed on this agent in development of P
 - `prowsetk_oracle`
 - `http_oracle`
 
+Use `absyn_cache` to cache C/C++ files, and read back from them, instead of reading the files (unless they have been changed). Same goes for `python_absyn` with Python files.
+
 ## 1. Mission
 
 ProwseTk is an embeddable C++ toolkit for programmable, headless web browsers.

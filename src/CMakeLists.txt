@@ -20,6 +20,7 @@ set(PROWSETK_CORE_SOURCES
     endpoint/endpoint_extraction.cpp)
 
 prowsetk_add_library(prowsetk_core ${PROWSETK_CORE_SOURCES})
+set_target_properties(prowsetk_core PROPERTIES EXPORT_NAME core)
 
 target_include_directories(prowsetk_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(prowsetk_core PUBLIC ${CMAKE_DL_LIBS})
@@ -31,7 +32,9 @@ endif()
 
 if(PROWSETK_HAVE_QUICKJS)
     target_compile_definitions(prowsetk_core PRIVATE PROWSETK_HAVE_QUICKJS=1)
-    target_link_libraries(prowsetk_core PUBLIC ProwseTk::quickjs)
+    target_link_libraries(prowsetk_core PRIVATE ProwseTk::quickjs)
+    set_target_properties(qjs PROPERTIES EXPORT_NAME quickjs)
+    prowsetk_install_library(qjs)
 endif()
 
 add_library(ProwseTk::core ALIAS prowsetk_core)

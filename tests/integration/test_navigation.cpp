@@ -309,7 +309,7 @@ TEST(Navigation, SessionsHaveIsolatedStorage) {
     EXPECT_NE(first->id(), second->id());
 }
 
-TEST(Navigation, ReportsUnsupportedJavaScriptWhenEngineAbsent) {
+TEST(Navigation, ExecutesPageJavaScriptOrReportsUnavailableEngine) {
     BrowserConfig config;
     config.javascript = true;
     Browser browser(config);
@@ -326,8 +326,12 @@ TEST(Navigation, ReportsUnsupportedJavaScriptWhenEngineAbsent) {
     auto session = browser.create_session();
     session->navigate("https://example.com/");
 
-    EXPECT_EQ(unsupported, 1);
-    EXPECT_FALSE(browser.capabilities().has("javascript"));
+    if (browser.capabilities().has("javascript")) {
+        EXPECT_EQ(unsupported, 0);
+        EXPECT_EQ(session->evaluate_js("a + 1"), "2");
+    } else {
+        EXPECT_EQ(unsupported, 1);
+    }
 }
 
 TEST(Navigation, CapabilitiesReflectUnavailableWasm) {
