@@ -8,6 +8,7 @@ set(PROWSETK_CORE_SOURCES
     core/storage.cpp
     core/network_client.cpp
     core/javascript_runtime.cpp
+    core/quickjs_runtime.cpp
     core/web_platform.cpp
     core/wasm_runtime.cpp
     core/plugin_registry.cpp
@@ -26,6 +27,11 @@ if(PROWSETK_HAVE_LUA)
     target_include_directories(prowsetk_core PRIVATE ${LUA_INCLUDE_DIR})
     target_link_libraries(prowsetk_core PUBLIC ${LUA_LIBRARIES})
     target_compile_definitions(prowsetk_core PRIVATE PROWSETK_HAVE_LUA=1)
+endif()
+
+if(PROWSETK_HAVE_QUICKJS)
+    target_compile_definitions(prowsetk_core PRIVATE PROWSETK_HAVE_QUICKJS=1)
+    target_link_libraries(prowsetk_core PUBLIC ProwseTk::quickjs)
 endif()
 
 add_library(ProwseTk::core ALIAS prowsetk_core)

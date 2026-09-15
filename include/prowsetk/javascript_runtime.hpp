@@ -38,6 +38,10 @@ public:
 // into the build so that automation still runs deterministically.
 std::unique_ptr<JavaScriptRuntime> make_null_javascript_runtime();
 
+// Returns the QuickJS-backed runtime when ProwseTk is built with
+// PROWSETK_HAVE_QUICKJS, otherwise returns the null runtime.
+std::unique_ptr<JavaScriptRuntime> make_javascript_runtime();
+
 }  // namespace prowsetk
 
 #endif  // PROWSETK_JAVASCRIPT_RUNTIME_HPP

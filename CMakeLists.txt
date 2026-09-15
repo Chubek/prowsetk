@@ -5,6 +5,9 @@ project(ProwseTk
     DESCRIPTION "Embeddable, headless, programmable web browser toolkit"
     LANGUAGES C CXX)
 
+option(PROWSETK_ENABLE_JAVASCRIPT
+    "Build the QuickJS page JavaScript runtime" ON)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(ProwseTkHelpers)
 include(CompilerWarnings)

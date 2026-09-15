@@ -254,7 +254,7 @@ NetworkClient& Browser::network_client() { return *network_; }
 const NetworkClient& Browser::network_client() const { return *network_; }
 
 std::unique_ptr<JavaScriptRuntime> Browser::create_javascript_runtime() const {
-    return make_null_javascript_runtime();
+    return make_javascript_runtime();
 }
 
 CapabilitySet Browser::capabilities() const {
