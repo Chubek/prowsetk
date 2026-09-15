@@ -79,3 +79,76 @@ TEST(Storage, KeyValueStoreOperations) {
     EXPECT_FALSE(store.remove("k"));
     EXPECT_FALSE(store.get("k").has_value());
 }
+
+TEST(Storage, CookiePathMatchingUsesPathBoundaries) {
+    MemoryStorage storage;
+    Cookie cookie;
+    cookie.name = "scoped";
+    cookie.path = "/app";
+    storage.cookies().set(parse_url("https://example.com/app/start"), cookie);
+
+    EXPECT_EQ(storage.cookies().get(parse_url("https://example.com/app"))
+                  .size(),
+              1u);
+    EXPECT_EQ(storage.cookies().get(parse_url("https://example.com/app/next"))
+                  .size(),
+              1u);
+    EXPECT_TRUE(storage.cookies().get(parse_url("https://example.com/apple"))
+                    .empty());
+}
+
+TEST(Storage, DomainCookiesNormalizeAndHostOnlyCookiesDoNotLeak) {
+    MemoryStorage storage;
+    Cookie domain_cookie;
+    domain_cookie.name = "shared";
+    domain_cookie.domain = ".Example.COM";
+    domain_cookie.host_only = false;
+    storage.cookies().set(parse_url("https://www.example.com/"),
+                          domain_cookie);
+
+    Cookie host_cookie;
+    host_cookie.name = "host";
+    storage.cookies().set(parse_url("https://www.example.com/"), host_cookie);
+
+    EXPECT_EQ(storage.cookies().get(parse_url("https://api.example.com/"))
+                  .size(),
+              1u);
+    EXPECT_EQ(storage.cookies().get(parse_url("https://www.example.com/"))
+                  .size(),
+              2u);
+}
+
+TEST(Storage, SettingSameCookieReplacesAndExpiredCookieDeletes) {
+    MemoryStorage storage;
+    const auto origin = parse_url("https://example.com/");
+    Cookie cookie;
+    cookie.name = "session";
+    cookie.value = "first";
+    storage.cookies().set(origin, cookie);
+
+    cookie.value = "second";
+    storage.cookies().set(origin, cookie);
+    ASSERT_EQ(storage.cookies().get(origin).size(), 1u);
+    EXPECT_EQ(storage.cookies().get(origin)[0].value, "second");
+
+    cookie.expires_unix = 1;
+    storage.cookies().set(origin, cookie);
+    EXPECT_TRUE(storage.cookies().get(origin).empty());
+}
+
+TEST(Storage, CookieHeaderOrdersMoreSpecificPathsFirst) {
+    MemoryStorage storage;
+    const auto origin = parse_url("https://example.com/app/page");
+    Cookie broad;
+    broad.name = "scope";
+    broad.value = "broad";
+    broad.path = "/";
+    storage.cookies().set(origin, broad);
+    Cookie narrow = broad;
+    narrow.value = "narrow";
+    narrow.path = "/app";
+    storage.cookies().set(origin, narrow);
+
+    EXPECT_EQ(storage.cookies().cookie_header(origin),
+              "scope=narrow; scope=broad");
+}

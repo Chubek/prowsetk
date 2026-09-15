@@ -1,6 +1,11 @@
 #include "prowsetk/browser.hpp"
 
 #include <algorithm>
+#include <charconv>
+#include <ctime>
+#include <iomanip>
+#include <limits>
+#include <optional>
 #include <sstream>
 
 #include "prowsetk/error.hpp"
@@ -11,20 +16,202 @@
 namespace prowsetk {
 namespace {
 
+bool header_name_equal(std::string_view left, std::string_view right) {
+    return left.size() == right.size() &&
+           std::equal(left.begin(), left.end(), right.begin(),
+                      [](char a, char b) {
+                          return std::tolower(static_cast<unsigned char>(a)) ==
+                                 std::tolower(static_cast<unsigned char>(b));
+                      });
+}
+
 std::string header_value(
     const std::vector<std::pair<std::string, std::string>>& headers,
     std::string_view name) {
     for (const auto& [key, value] : headers) {
-        if (key.size() == name.size() &&
-            std::equal(key.begin(), key.end(), name.begin(),
-                       [](char a, char b) {
-                           return std::tolower(static_cast<unsigned char>(a)) ==
-                                  std::tolower(static_cast<unsigned char>(b));
-                       })) {
+        if (header_name_equal(key, name)) {
             return value;
         }
     }
     return {};
+}
+
+std::string trim(std::string value) {
+    const auto not_space = [](unsigned char c) {
+        return std::isspace(c) == 0;
+    };
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(),
+                                            not_space));
+    value.erase(std::find_if(value.rbegin(), value.rend(), not_space).base(),
+                value.end());
+    return value;
+}
+
+std::string lower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](char c) {
+        return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    });
+    return value;
+}
+
+std::int64_t utc_time(std::tm value) {
+#if defined(_WIN32)
+    return static_cast<std::int64_t>(_mkgmtime(&value));
+#else
+    return static_cast<std::int64_t>(::timegm(&value));
+#endif
+}
+
+std::optional<std::int64_t> parse_cookie_date(const std::string& value) {
+    const char* formats[] = {"%a, %d %b %Y %H:%M:%S GMT",
+                             "%A, %d-%b-%y %H:%M:%S GMT",
+                             "%a %b %d %H:%M:%S %Y"};
+    for (const char* format : formats) {
+        std::tm parsed{};
+        std::istringstream stream(value);
+        stream >> std::get_time(&parsed, format);
+        if (!stream.fail()) {
+            return utc_time(parsed);
+        }
+    }
+    return std::nullopt;
+}
+
+std::int64_t add_seconds(std::int64_t timestamp, std::int64_t seconds) {
+    const auto maximum = std::numeric_limits<std::int64_t>::max();
+    const auto minimum = std::numeric_limits<std::int64_t>::min();
+    if (seconds > 0 && seconds > maximum - timestamp) {
+        return maximum;
+    }
+    if (seconds < 0 && seconds < minimum + timestamp) {
+        return minimum;
+    }
+    return timestamp + seconds;
+}
+
+std::string default_cookie_path(const Url& origin) {
+    const std::string path = origin.path.empty() ? "/" : origin.path;
+    if (path.front() != '/') {
+        return "/";
+    }
+    const auto slash = path.rfind('/');
+    if (slash == 0) {
+        return "/";
+    }
+    return path.substr(0, slash);
+}
+
+std::optional<Cookie> parse_set_cookie(std::string_view header,
+                                       const Url& origin) {
+    const auto first_separator = header.find(';');
+    const std::string first = trim(std::string(header.substr(
+        0, first_separator == std::string_view::npos ? header.size()
+                                                       : first_separator)));
+    const auto equals = first.find('=');
+    if (equals == std::string::npos || equals == 0) {
+        return std::nullopt;
+    }
+
+    Cookie cookie;
+    cookie.name = trim(first.substr(0, equals));
+    cookie.value = trim(first.substr(equals + 1));
+    cookie.path = default_cookie_path(origin);
+    if (cookie.name.empty()) {
+        return std::nullopt;
+    }
+
+    std::optional<std::int64_t> max_age;
+    std::optional<std::int64_t> expires_date;
+    std::size_t start = first_separator == std::string_view::npos
+                            ? header.size()
+                            : first_separator + 1;
+    while (start < header.size()) {
+        const auto end = header.find(';', start);
+        const std::string attribute = trim(std::string(header.substr(
+            start, end == std::string_view::npos ? header.size() - start
+                                                   : end - start)));
+        const auto attribute_equals = attribute.find('=');
+        const std::string name = lower(trim(attribute.substr(0, attribute_equals)));
+        const std::string value =
+            attribute_equals == std::string::npos
+                ? std::string()
+                : trim(attribute.substr(attribute_equals + 1));
+        if (name == "domain" && !value.empty()) {
+            cookie.domain = value;
+            cookie.host_only = false;
+        } else if (name == "path" && !value.empty() && value.front() == '/') {
+            cookie.path = value;
+        } else if (name == "secure") {
+            cookie.secure = true;
+        } else if (name == "httponly") {
+            cookie.http_only = true;
+        } else if (name == "samesite") {
+            cookie.same_site = value;
+        } else if (name == "max-age") {
+            std::int64_t seconds = 0;
+            const auto* begin = value.data();
+            const auto* end_value = begin + value.size();
+            const auto parsed = std::from_chars(begin, end_value, seconds);
+            if (parsed.ec == std::errc() && parsed.ptr == end_value) {
+                max_age = seconds;
+            }
+        } else if (name == "expires") {
+            if (const auto parsed = parse_cookie_date(value)) {
+                expires_date = parsed;
+            }
+        }
+        if (end == std::string_view::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+
+    if (max_age.has_value()) {
+        const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+        cookie.expires_unix = add_seconds(now, *max_age);
+    } else if (expires_date.has_value()) {
+        cookie.expires_unix = expires_date;
+    }
+
+    if (cookie.secure && origin.scheme != "https") {
+        return std::nullopt;
+    }
+    if (!cookie.domain.empty()) {
+        while (!cookie.domain.empty() && cookie.domain.front() == '.') {
+            cookie.domain.erase(cookie.domain.begin());
+        }
+        cookie.domain = lower(cookie.domain);
+        if (cookie.domain != origin.host &&
+            (origin.host.size() <= cookie.domain.size() ||
+             origin.host.compare(origin.host.size() - cookie.domain.size(),
+                                 cookie.domain.size(), cookie.domain) != 0 ||
+             origin.host[origin.host.size() - cookie.domain.size() - 1] != '.')) {
+            return std::nullopt;
+        }
+    }
+    return cookie;
+}
+
+void apply_response_cookies(Browser& browser, const Url& origin,
+                            const HttpResponse& response) {
+    for (const auto& [name, value] : response.headers) {
+        if (!header_name_equal(name, "Set-Cookie")) {
+            continue;
+        }
+        const auto cookie = parse_set_cookie(value, origin);
+        if (!cookie) {
+            continue;
+        }
+        browser.storage().cookies().set(origin, *cookie);
+        Event event;
+        event.type = EventType::CookieChange;
+        event.url = origin.to_string();
+        event.name = cookie->name;
+        event.attributes["domain"] = cookie->domain.empty() ? origin.host
+                                                               : cookie->domain;
+        event.attributes["path"] = cookie->path;
+        browser.events().emit(event);
+    }
 }
 
 }  // namespace
@@ -159,6 +346,7 @@ HttpResponse Session::fetch(std::string_view url) {
         }
 
         HttpResponse response = browser_->network_client().send(request);
+        apply_response_cookies(*browser_, parsed, response);
 
         Event after;
         after.type = EventType::AfterResponse;
@@ -283,7 +471,7 @@ void Session::load_html(std::string_view html, std::string_view base_url) {
 
 void Session::set_header(std::string name, std::string value) {
     for (auto& [key, existing] : headers_) {
-        if (key == name) {
+        if (header_name_equal(key, name)) {
             existing = std::move(value);
             return;
         }

@@ -243,6 +243,11 @@ Performs HTTP and HTTPS requests.
 - Download limits
 - Compression handling
 
+Navigation applies valid `Set-Cookie` response headers before following a
+redirect or issuing the next request. Cookie scope is enforced by scheme,
+domain, and RFC-style path boundaries; replacement and expiration use the
+cookie name/domain/path identity.
+
 ### `JavaScriptRuntime`
 
 Provides JavaScript execution through QuickJS.
@@ -285,6 +290,11 @@ Provides storage backends for:
 - Session storage
 - Cache data
 - Application-defined persistence
+
+The default in-memory cookie jar supports host-only and domain cookies,
+`Secure`, `HttpOnly`, `SameSite`, `Max-Age`, and common HTTP-date `Expires`
+attributes. Invalid or out-of-scope response cookies are ignored, and cookie
+changes are reported through `EventType::CookieChange`.
 
 Storage is replaceable through C++ interfaces.
 

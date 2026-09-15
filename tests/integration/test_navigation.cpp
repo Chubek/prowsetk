@@ -137,6 +137,164 @@ TEST(Navigation, SendsSessionHeadersAndCookies) {
     EXPECT_TRUE(has_cookie);
 }
 
+TEST(Navigation, PersistsSetCookiesAcrossRedirects) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    HttpResponse redirect;
+    redirect.status = 302;
+    redirect.headers.emplace_back("Location", "/final");
+    redirect.headers.emplace_back("Set-Cookie", "sid=abc; Path=/; HttpOnly");
+    network->set_handler([redirect](const prowsetk::HttpRequest& request) {
+        if (request.url == "https://example.com/start") {
+            return redirect;
+        }
+        HttpResponse response;
+        response.status = 200;
+        response.body = "<title>Cookie landed</title>";
+        if (request.url == "https://example.com/final") {
+            for (const auto& [name, value] : request.headers) {
+                if (name == "Cookie" && value == "sid=abc") {
+                    return response;
+                }
+            }
+            response.status = 400;
+        }
+        return response;
+    });
+    auto* network_ptr = network.get();
+    browser.set_network_client(std::move(network));
+
+    int cookie_events = 0;
+    browser.events().subscribe(EventType::CookieChange,
+                               [&](prowsetk::Event& event) {
+                                   ++cookie_events;
+                                   EXPECT_EQ(event.name, "sid");
+                               });
+
+    auto session = browser.create_session();
+    session->navigate("https://example.com/start");
+
+    ASSERT_EQ(network_ptr->requests().size(), 2u);
+    EXPECT_EQ(session->document()->title(), "Cookie landed");
+    EXPECT_EQ(cookie_events, 1);
+}
+
+TEST(Navigation, SetHeaderReplacementIsCaseInsensitive) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    HttpResponse response;
+    response.status = 200;
+    response.body = "<title>Headers</title>";
+    network->set_response("https://example.com/", response);
+    auto* network_ptr = network.get();
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->set_header("X-Trace", "first");
+    session->set_header("x-trace", "second");
+    session->navigate("https://example.com/");
+
+    ASSERT_EQ(network_ptr->requests().size(), 1u);
+    int trace_headers = 0;
+    for (const auto& [name, value] : network_ptr->requests()[0].headers) {
+        if (name == "X-Trace" || name == "x-trace") {
+            ++trace_headers;
+            EXPECT_EQ(value, "second");
+        }
+    }
+    EXPECT_EQ(trace_headers, 1);
+}
+
+TEST(Navigation, ParsesCookieAttributesAndHonorsScope) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    network->set_handler([](const prowsetk::HttpRequest& request) {
+        HttpResponse response;
+        response.status = 200;
+        response.body = "<title>Cookie attributes</title>";
+        if (request.url == "https://www.example.com/login") {
+            response.headers.emplace_back(
+                "Set-Cookie",
+                "sid=abc; Domain=.example.com; Path=/account; Secure; "
+                "HttpOnly; SameSite=Lax; Max-Age=3600");
+            response.headers.emplace_back("Set-Cookie",
+                                          "bad=1; Domain=evil.test; Path=/");
+        }
+        return response;
+    });
+    auto* network_ptr = network.get();
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->navigate("https://www.example.com/login");
+
+    const auto stored = session->cookies().all();
+    ASSERT_EQ(stored.size(), 1u);
+    EXPECT_EQ(stored[0].name, "sid");
+    EXPECT_EQ(stored[0].domain, "example.com");
+    EXPECT_EQ(stored[0].path, "/account");
+    EXPECT_FALSE(stored[0].host_only);
+    EXPECT_TRUE(stored[0].secure);
+    EXPECT_TRUE(stored[0].http_only);
+    EXPECT_EQ(stored[0].same_site, "Lax");
+
+    session->navigate("https://www.example.com/login");
+    ASSERT_GE(network_ptr->requests().size(), 2u);
+    bool sent_cookie = false;
+    for (const auto& [name, value] : network_ptr->requests()[1].headers) {
+        if (name == "Cookie" && value == "sid=abc") {
+            sent_cookie = true;
+        }
+    }
+    EXPECT_FALSE(sent_cookie);
+
+    session->navigate("https://api.example.com/account/view");
+    bool sent_to_subdomain = false;
+    for (const auto& [name, value] : network_ptr->requests().back().headers) {
+        if (name == "Cookie" && value == "sid=abc") {
+            sent_to_subdomain = true;
+        }
+    }
+    EXPECT_TRUE(sent_to_subdomain);
+    EXPECT_EQ(session->cookies()
+                  .cookie_header(prowsetk::parse_url(
+                      "https://www.example.com/account/view")),
+              "sid=abc");
+}
+
+TEST(Navigation, ResponseCookieDeletionRemovesExistingCookie) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    int requests = 0;
+    network->set_handler([&requests](const prowsetk::HttpRequest&) {
+        HttpResponse response;
+        response.status = 200;
+        response.body = "<title>Cookie deletion</title>";
+        ++requests;
+        if (requests == 1) {
+            response.headers.emplace_back("Set-Cookie", "sid=abc; Path=/");
+        } else {
+            response.headers.emplace_back(
+                "Set-Cookie",
+                "sid=; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Max-Age=0; "
+                "Path=/");
+        }
+        return response;
+    });
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->navigate("https://example.com/");
+    ASSERT_EQ(session->cookies().cookie_header(
+                  prowsetk::parse_url("https://example.com/")),
+              "sid=abc");
+    session->navigate("https://example.com/");
+    EXPECT_TRUE(session->cookies()
+                    .cookie_header(prowsetk::parse_url(
+                        "https://example.com/"))
+                    .empty());
+}
+
 TEST(Navigation, SessionsHaveIsolatedStorage) {
     Browser browser;
     auto first = browser.create_session();

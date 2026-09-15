@@ -9,17 +9,29 @@
 namespace prowsetk {
 namespace {
 
+std::string to_lower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](char c) {
+        return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    });
+    return value;
+}
+
 bool domain_matches(const Cookie& cookie, const std::string& host) {
-    if (cookie.host_only) {
-        return host == cookie.domain;
+    const std::string cookie_domain = to_lower(cookie.domain);
+    const std::string request_host = to_lower(host);
+    if (cookie_domain.empty()) {
+        return false;
     }
-    if (host == cookie.domain) {
+    if (cookie.host_only) {
+        return request_host == cookie_domain;
+    }
+    if (request_host == cookie_domain) {
         return true;
     }
-    if (host.size() > cookie.domain.size() &&
-        host.compare(host.size() - cookie.domain.size(), cookie.domain.size(),
-                     cookie.domain) == 0 &&
-        host[host.size() - cookie.domain.size() - 1] == '.') {
+    if (request_host.size() > cookie_domain.size() &&
+        request_host.compare(request_host.size() - cookie_domain.size(),
+                             cookie_domain.size(), cookie_domain) == 0 &&
+        request_host[request_host.size() - cookie_domain.size() - 1] == '.') {
         return true;
     }
     return false;
@@ -29,10 +41,11 @@ bool path_matches(const Cookie& cookie, const std::string& request_path) {
     if (cookie.path.empty() || cookie.path == "/") {
         return true;
     }
-    if (request_path.compare(0, cookie.path.size(), cookie.path) == 0) {
-        return true;
+    if (request_path.compare(0, cookie.path.size(), cookie.path) != 0) {
+        return false;
     }
-    return false;
+    return request_path.size() == cookie.path.size() ||
+           cookie.path.back() == '/' || request_path[cookie.path.size()] == '/';
 }
 
 bool expired(const Cookie& cookie) {
@@ -50,14 +63,36 @@ class InMemoryCookieJar : public CookieJar {
 public:
     void set(const Url& origin, Cookie cookie) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (cookie.domain.empty()) {
-            cookie.domain = origin.host;
+        if (cookie.name.empty() || origin.host.empty()) {
+            return;
         }
-        if (cookie.path.empty()) {
+        if (cookie.domain.empty()) {
+            cookie.domain = to_lower(origin.host);
+            cookie.host_only = true;
+        } else {
+            while (!cookie.domain.empty() && cookie.domain.front() == '.') {
+                cookie.domain.erase(cookie.domain.begin());
+            }
+            cookie.domain = to_lower(cookie.domain);
+            if (!domain_matches(cookie, origin.host)) {
+                return;
+            }
+        }
+        if (cookie.path.empty() || cookie.path.front() != '/') {
             cookie.path = "/";
         }
-        cookies_.push_back(std::move(cookie));
-        (void)origin;
+
+        const auto same_cookie = [&cookie](const Cookie& existing) {
+            return existing.name == cookie.name &&
+                   existing.domain == cookie.domain &&
+                   existing.path == cookie.path;
+        };
+        cookies_.erase(std::remove_if(cookies_.begin(), cookies_.end(),
+                                      same_cookie),
+                       cookies_.end());
+        if (!expired(cookie)) {
+            cookies_.push_back(std::move(cookie));
+        }
     }
 
     std::vector<Cookie> get(const Url& origin) const override {
@@ -78,6 +113,10 @@ public:
             }
             result.push_back(cookie);
         }
+        std::stable_sort(result.begin(), result.end(),
+                         [](const Cookie& left, const Cookie& right) {
+                             return left.path.size() > right.path.size();
+                         });
         return result;
     }
 
