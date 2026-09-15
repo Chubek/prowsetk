@@ -1,0 +1,120 @@
+# ---------------------------------------------------------------------------
+# Vendored third-party dependencies.
+#
+# Populate with:
+#   git submodule update --init --recursive
+#
+# Paths live under third_party/, which .gitignore excludes from normal tracking.
+# ---------------------------------------------------------------------------
+
+[submodule "third_party/c-ares"]
+	path = third_party/c-ares
+	url = https://github.com/c-ares/c-ares.git
+
+[submodule "third_party/fmt"]
+	path = third_party/fmt
+	url = https://github.com/fmtlib/fmt.git
+
+[submodule "third_party/gumbo-parser"]
+	path = third_party/gumbo-parser
+	url = https://github.com/google/gumbo-parser.git
+
+[submodule "third_party/jemalloc"]
+	path = third_party/jemalloc
+	url = https://github.com/jemalloc/jemalloc.git
+
+[submodule "third_party/inja"]
+	path = third_party/inja
+	url = https://github.com/pantor/inja.git
+
+[submodule "third_party/kaguya"]
+	path = third_party/kaguya
+	url = https://github.com/satoren/kaguya.git
+
+[submodule "third_party/lexbor"]
+	path = third_party/lexbor
+	url = https://github.com/lexbor/lexbor.git
+
+[submodule "third_party/libdom"]
+	path = third_party/libdom
+	url = https://github.com/netsurf-browser/libdom.git
+
+[submodule "third_party/libev"]
+	path = third_party/libev
+	url = https://github.com/enki/libev.git
+
+[submodule "third_party/libmagic"]
+	path = third_party/libmagic
+	url = https://github.com/file/file.git
+
+[submodule "third_party/libmill"]
+	path = third_party/libmill
+	url = https://github.com/sustrik/libmill.git
+
+[submodule "third_party/llhttp"]
+	path = third_party/llhttp
+	url = https://github.com/nodejs/llhttp.git
+
+[submodule "third_party/lua"]
+	path = third_party/lua
+	url = https://github.com/lua/lua.git
+
+[submodule "third_party/mbedtls"]
+	path = third_party/mbedtls
+	url = https://github.com/Mbed-TLS/mbedtls.git
+
+[submodule "third_party/nexus"]
+	path = third_party/nexus
+	url = https://github.com/cbodley/nexus.git
+
+[submodule "third_party/pugixml"]
+	path = third_party/pugixml
+	url = https://github.com/zeux/pugixml.git
+
+[submodule "third_party/quickjs"]
+	path = third_party/quickjs
+	url = https://github.com/quickjs-ng/quickjs.git
+
+[submodule "third_party/re2"]
+	path = third_party/re2
+	url = https://github.com/google/re2.git
+
+[submodule "third_party/simdjson"]
+	path = third_party/simdjson
+	url = https://github.com/simdjson/simdjson.git
+
+[submodule "third_party/spdlog"]
+	path = third_party/spdlog
+	url = https://github.com/gabime/spdlog.git
+
+[submodule "third_party/tomlplusplus"]
+	path = third_party/tomlplusplus
+	url = https://github.com/marzer/tomlplusplus.git
+
+[submodule "third_party/uriparser"]
+	path = third_party/uriparser
+	url = https://github.com/uriparser/uriparser.git
+
+[submodule "third_party/uvwasi"]
+	path = third_party/uvwasi
+	url = https://github.com/nodejs/uvwasi.git
+
+[submodule "third_party/wasi-libc"]
+	path = third_party/wasi-libc
+	url = https://github.com/WebAssembly/wasi-libc.git
+
+[submodule "third_party/wasi-sdk"]
+	path = third_party/wasi-sdk
+	url = https://github.com/WebAssembly/wasi-sdk.git
+
+[submodule "third_party/wasmtime-cpp"]
+	path = third_party/wasmtime-cpp
+	url = https://github.com/bytecodealliance/wasmtime-cpp.git
+
+[submodule "third_party/yaml-cpp"]
+	path = third_party/yaml-cpp
+	url = https://github.com/jbeder/yaml-cpp.git
+
+[submodule "third_party/zstd"]
+	path = third_party/zstd
+	url = https://github.com/facebook/zstd.git

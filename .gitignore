@@ -1,0 +1,75 @@
+# ---------------------------------------------------------------------------
+# Vendored third-party libraries
+#
+# Dependencies are declared in .gitmodules and materialized under third_party/
+# with `git submodule update --init --recursive`. Submodule gitlinks already
+# present in the index are unaffected by this rule; it only prevents stray
+# vendored drops from being committed.
+# ---------------------------------------------------------------------------
+/third_party/
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+/build/
+/out/
+/cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake_install.cmake
+CTestTestfile.cmake
+install_manifest.txt
+compile_commands.json
+Makefile
+*.o
+*.obj
+*.lo
+*.a
+*.la
+*.so
+*.so.*
+*.dylib
+*.dll
+*.lib
+
+# ---------------------------------------------------------------------------
+# ProwseTk runtime state
+# ---------------------------------------------------------------------------
+.prowse/
+*.prowse-cache
+
+# ---------------------------------------------------------------------------
+# Test and coverage output
+# ---------------------------------------------------------------------------
+/Testing/
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+/test-results/
+coverage/
+
+# ---------------------------------------------------------------------------
+# Tooling and environments
+# ---------------------------------------------------------------------------
+/env/
+/venv/
+/.venv/
+__pycache__/
+*.py[cod]
+
+# ---------------------------------------------------------------------------
+# Editors and OS metadata
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+AGENTS.md
+.agents/
