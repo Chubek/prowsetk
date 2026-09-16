@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "prowsetk/event.hpp"
 
@@ -17,6 +18,15 @@ class Session;
 struct LuaResult {
     bool ok = false;
     std::string error;
+};
+
+// A named argument passed to a Lua driver entrypoint. `type` mirrors the
+// Prowse.toml argument types: "string", "integer", "boolean", "path", "url".
+// Values are coerced to native Lua values when the argument table is built.
+struct LuaArgument {
+    std::string name;
+    std::string type = "string";
+    std::string value;
 };
 
 // Runs Lua automation and extensions. The runtime owns one `lua_State` and
@@ -45,6 +55,15 @@ public:
 
     // Calls a previously loaded global function with no arguments.
     LuaResult call(std::string_view function_name);
+
+    // Calls a previously loaded global function (a driver's `main`), passing a
+    // single Lua table argument whose fields are `arguments` (values coerced to
+    // Lua numbers/booleans/strings per LuaArgument::type). When `return_value`
+    // is non-null, the function's first return value is converted with
+    // `tostring()` into it (so an integer exit code is retrievable).
+    LuaResult call_function(std::string_view function_name,
+                            const std::vector<LuaArgument>& arguments,
+                            std::string* return_value = nullptr);
 
     std::string last_error() const;
 

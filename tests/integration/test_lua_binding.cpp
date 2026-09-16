@@ -65,3 +65,55 @@ TEST(LuaBinding, CallableFunctions) {
     EXPECT_TRUE(lua.call("main").ok);
     EXPECT_FALSE(lua.call("does_not_exist").ok);
 }
+
+TEST(LuaBinding, CallFunctionWithTypedArguments) {
+    if (!LuaRuntime::available()) {
+        GTEST_SKIP() << "ProwseTk was built without Lua support";
+    }
+    LuaRuntime lua;
+    ASSERT_TRUE(
+        lua.run("function describe(args) "
+                "return tostring(args.url) .. '|' .. tostring(args.depth) .. "
+                "'|' .. tostring(args.flag) end")
+            .ok);
+    const std::vector<prowsetk::LuaArgument> args = {
+        {"url", "string", "https://example.com/"},
+        {"depth", "integer", "3"},
+        {"flag", "boolean", "true"},
+    };
+    std::string result;
+    ASSERT_TRUE(lua.call_function("describe", args, &result).ok)
+        << lua.last_error();
+    EXPECT_EQ(result, "https://example.com/|3|true");
+}
+
+TEST(LuaBinding, CallFunctionCapturesNumericReturn) {
+    if (!LuaRuntime::available()) {
+        GTEST_SKIP() << "ProwseTk was built without Lua support";
+    }
+    LuaRuntime lua;
+    ASSERT_TRUE(lua.run("function finish(args) return tonumber(args.code) end")
+                    .ok);
+    std::string result;
+    ASSERT_TRUE(lua.call_function("finish", {{"code", "integer", "7"}},
+                                  &result)
+                    .ok)
+        << lua.last_error();
+    EXPECT_EQ(result, "7");
+}
+
+TEST(LuaBinding, CallFunctionReportsErrors) {
+    if (!LuaRuntime::available()) {
+        GTEST_SKIP() << "ProwseTk was built without Lua support";
+    }
+    LuaRuntime lua;
+    ASSERT_TRUE(lua.run("function boom() error('kaboom') end").ok);
+    std::string result;
+    const auto call = lua.call_function("boom", {}, &result);
+    EXPECT_FALSE(call.ok);
+    EXPECT_NE(lua.last_error().find("kaboom"), std::string::npos);
+
+    const auto missing = lua.call_function("nope", {}, &result);
+    EXPECT_FALSE(missing.ok);
+    EXPECT_NE(lua.last_error().find("nope"), std::string::npos);
+}

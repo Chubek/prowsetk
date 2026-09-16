@@ -7,23 +7,14 @@
 #include <string_view>
 #include <vector>
 
+#include "prowsetk/document.hpp"
+
 namespace prowsetk::flatworm {
 
 enum class NodeType { Document, Element, Text, Comment, Doctype };
 
 struct Attribute {
     std::string name;
-    std::string value;
-};
-
-// A structured description of a DOM mutation, delivered to the owning
-// document's mutation listener (README "Events and Hooks": DOM mutation).
-struct MutationInfo {
-    // One of: "child-added", "child-removed", "attribute-set",
-    // "attribute-removed", "text-set".
-    std::string kind;
-    std::string node_name;
-    std::string attribute_name;
     std::string value;
 };
 

@@ -11,8 +11,20 @@
 namespace prowsetk {
 
 namespace flatworm {
+
 struct Node;
-struct MutationInfo;
+
+// A structured description of a DOM mutation, delivered to the owning
+// document's mutation listener (README "Events and Hooks": DOM mutation).
+struct MutationInfo {
+    // One of: "child-added", "child-removed", "attribute-set",
+    // "attribute-removed", "text-set".
+    std::string kind;
+    std::string node_name;
+    std::string attribute_name;
+    std::string value;
+};
+
 }  // namespace flatworm
 
 struct Attribute {

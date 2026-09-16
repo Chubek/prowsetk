@@ -29,6 +29,7 @@ complete browser compatibility or pixel-perfect rendering.
 - [Diagnostics and Instrumentation](#diagnostics-and-instrumentation)
 - [Security and Resource Limits](#security-and-resource-limits)
 - [Project Configuration (`Prowse.toml`)](#project-configuration-prowsetoml)
+- [Drivers](#drivers)
 - [Build and Runtime Strategy](#build-and-runtime-strategy)
 - [Dependencies](#dependencies)
 - [Compatibility Policy](#compatibility-policy)
@@ -981,6 +982,7 @@ alongside the document's own discoveries.
 ```sh
 prowsetk serve [--host 127.0.0.1] [--port 8080] [--web-root DIR] [--no-javascript]
 prowsetk endpoints --url https://example.com --output build/openapi.yaml
+prowsetk run crawl-site --url https://example.com --depth 2 --output build/pages.jsonl
 prowsetk version
 ```
 
@@ -1492,6 +1494,53 @@ site_name = "example"
 api_host = "api.example.com"
 default_locale = "en-US"
 ```
+
+## Drivers
+
+A **driver** is a Lua script that controls one or more browser sessions
+(README `[[drivers]]`). Drivers live in `drivers/` and are invoked with:
+
+```sh
+prowsetk run <name> [--arg VALUE ...] [--config Prowse.toml]
+```
+
+`prowsetk run` reads the driver's declaration from `Prowse.toml` (by default
+`Prowse.toml` in the working directory; override with `--config`), resolves the
+script relative to the project root, and runs it through the `lprowse` Lua
+runtime. Command-line `--arg VALUE` pairs are validated against the driver's
+declared `arguments`, coerced to their declared TOML type (`string`, `integer`,
+`boolean`, `path`, `url`), and applied over declared defaults. Missing required
+arguments, unknown arguments, unknown drivers, and disabled drivers are errors.
+Arguments declared `secret = true` are never echoed by the CLI or written to
+driver output.
+
+### Driver contract
+
+- A driver defines a global `main(args)` function, where `args` is a table of
+  named arguments (`args.url`, `args.depth`, ...) matching the declared
+  `arguments`.
+- `main` returns an integer exit code (`0` = success). Fatal failures raise
+  with `error()`, which propagates as a non-zero `prowsetk run` exit code.
+- Drivers use `require("lprowse")` (and `require("lprowsext")` where useful)
+  and create their own `browser`/`session`, so each invocation is isolated.
+
+### Offline runs
+
+Every shipped driver accepts an optional `html` argument. When given, the
+driver loads that document with `session:load_html` instead of navigating the
+network — a dry run for `login` and a single-page extraction for `crawl-site`.
+This keeps drivers deterministic and usable without a network.
+
+### Shipped drivers
+
+- `drivers/crawl_site.lua` — the `crawl-site` driver. Crawls a site up to
+  `depth` (same-origin links, deduplicated) and writes page metadata as JSONL
+  (`url`, `title`, `text_length`, `link_count`, `links`, `script_count`,
+  `form_count`, `meta`, `timestamp`).
+- `drivers/login.lua` — the `login` driver. Finds the login form, fills the
+  username/password fields, and submits it with `session:request`, reusing the
+  session cookie jar. Credentials are validated in memory but never written to
+  the `build/login.json` summary or logs.
 
 ## Build and Runtime Strategy
 

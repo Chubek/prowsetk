@@ -3,8 +3,11 @@
 #include <algorithm>
 #include <any>
 #include <atomic>
+#include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <new>
 #include <sstream>
 
 #include "prowsetk/browser.hpp"
@@ -36,7 +39,7 @@ struct LuaBrowser {
 
 struct LuaSession {
     std::shared_ptr<Session>* session = nullptr;
-    std::shared_ptr<std::atomic<bool>> alive;
+    std::shared_ptr<std::atomic<bool>> alive = nullptr;
 };
 
 struct LuaDocument {
@@ -49,7 +52,7 @@ struct LuaElement {
 
 struct LuaExtractor {
     int on_document_ref = LUA_NOREF;
-    std::shared_ptr<std::atomic<bool>> alive;
+    std::shared_ptr<std::atomic<bool>> alive = nullptr;
 };
 
 struct LuaEndpointResult {
@@ -132,6 +135,7 @@ LuaDocument* check_document(lua_State* L, int index);
 void push_endpoint_result(lua_State* L, EndpointExtractionResult result) {
     auto* userdata = static_cast<LuaEndpointResult*>(
         lua_newuserdatauv(L, sizeof(LuaEndpointResult), 0));
+    ::new (static_cast<void*>(userdata)) LuaEndpointResult{};
     userdata->result = new EndpointExtractionResult(std::move(result));
     luaL_setmetatable(L, kEndpointResultMeta);
 }
@@ -262,6 +266,7 @@ std::shared_ptr<Document> document_from(lua_State* L, int index) {
 void push_browser(lua_State* L, Browser* browser, bool owned) {
     auto* userdata =
         static_cast<LuaBrowser*>(lua_newuserdatauv(L, sizeof(LuaBrowser), 0));
+    ::new (static_cast<void*>(userdata)) LuaBrowser{};
     userdata->browser = browser;
     userdata->owned = owned;
     luaL_setmetatable(L, kBrowserMeta);
@@ -270,6 +275,7 @@ void push_browser(lua_State* L, Browser* browser, bool owned) {
 void push_session(lua_State* L, const std::shared_ptr<Session>& session) {
     auto* userdata =
         static_cast<LuaSession*>(lua_newuserdatauv(L, sizeof(LuaSession), 0));
+    ::new (static_cast<void*>(userdata)) LuaSession{};
     userdata->session = new std::shared_ptr<Session>(session);
     userdata->alive = std::make_shared<std::atomic<bool>>(true);
     luaL_setmetatable(L, kSessionMeta);
@@ -282,6 +288,7 @@ void push_document(lua_State* L, const std::shared_ptr<Document>& document) {
     }
     auto* userdata =
         static_cast<LuaDocument*>(lua_newuserdatauv(L, sizeof(LuaDocument), 0));
+    ::new (static_cast<void*>(userdata)) LuaDocument{};
     userdata->document = new std::shared_ptr<Document>(document);
     luaL_setmetatable(L, kDocumentMeta);
 }
@@ -293,6 +300,7 @@ void push_element(lua_State* L, const std::shared_ptr<Element>& element) {
     }
     auto* userdata =
         static_cast<LuaElement*>(lua_newuserdatauv(L, sizeof(LuaElement), 0));
+    ::new (static_cast<void*>(userdata)) LuaElement{};
     userdata->element = new std::shared_ptr<Element>(element);
     luaL_setmetatable(L, kElementMeta);
 }
@@ -990,6 +998,7 @@ int endpoint_result_write_yaml(lua_State* L) {
 int lprowsext_extractor_new(lua_State* L) {
     auto* userdata =
         static_cast<LuaExtractor*>(lua_newuserdatauv(L, sizeof(LuaExtractor), 0));
+    ::new (static_cast<void*>(userdata)) LuaExtractor{};
     userdata->on_document_ref = LUA_NOREF;
     userdata->alive = std::make_shared<std::atomic<bool>>(true);
     luaL_setmetatable(L, kExtractorMeta);
@@ -1489,7 +1498,7 @@ LuaResult LuaRuntime::run(std::string_view code, std::string_view chunk_name) {
         lua_pop(impl_->state, 1);
         return LuaResult{false, impl_->last_error};
     }
-    if (lua_pcall(impl_->state, 0, LUA_MULTRET, 0) != LUA_OK) {
+    if (lua_pcall(impl_->state, 0, 0, 0) != LUA_OK) {
         impl_->last_error = lua_tostring(impl_->state, -1) != nullptr
                                 ? lua_tostring(impl_->state, -1)
                                 : "Lua runtime error";
@@ -1541,6 +1550,88 @@ LuaResult LuaRuntime::call(std::string_view function_name) {
     return LuaResult{true, {}};
 #else
     (void)function_name;
+    impl_->last_error = "ProwseTk was built without Lua support";
+    return LuaResult{false, impl_->last_error};
+#endif
+}
+
+LuaResult LuaRuntime::call_function(std::string_view function_name,
+                                    const std::vector<LuaArgument>& arguments,
+                                    std::string* return_value) {
+#ifdef PROWSETK_HAVE_LUA
+    if (impl_->state == nullptr) {
+        impl_->last_error = "Lua state is not initialized";
+        return LuaResult{false, impl_->last_error};
+    }
+    lua_getglobal(impl_->state, std::string(function_name).c_str());
+    if (!lua_isfunction(impl_->state, -1)) {
+        lua_pop(impl_->state, 1);
+        impl_->last_error = "Lua global is not a function: " +
+                            std::string(function_name);
+        return LuaResult{false, impl_->last_error};
+    }
+    lua_newtable(impl_->state);
+    for (const auto& argument : arguments) {
+        lua_pushstring(impl_->state, argument.name.c_str());
+        if (argument.type == "integer") {
+            lua_pushinteger(
+                impl_->state,
+                static_cast<lua_Integer>(
+                    std::strtoll(argument.value.c_str(), nullptr, 10)));
+        } else if (argument.type == "boolean") {
+            bool parsed = false;
+            const std::string lower =
+                [&]() {
+                    std::string value = argument.value;
+                    std::transform(value.begin(), value.end(), value.begin(),
+                                   [](char c) {
+                                       return static_cast<char>(
+                                           std::tolower(
+                                               static_cast<unsigned char>(c)));
+                                   });
+                    return value;
+                }();
+            if (lower == "true" || lower == "1" || lower == "yes" ||
+                lower == "on") {
+                parsed = true;
+            }
+            lua_pushboolean(impl_->state, parsed ? 1 : 0);
+        } else {
+            lua_pushstring(impl_->state, argument.value.c_str());
+        }
+        lua_settable(impl_->state, -3);
+    }
+    const int results = return_value != nullptr ? 1 : 0;
+    if (lua_pcall(impl_->state, 1, results, 0) != LUA_OK) {
+        impl_->last_error = lua_tostring(impl_->state, -1) != nullptr
+                                ? lua_tostring(impl_->state, -1)
+                                : "Lua runtime error";
+        lua_pop(impl_->state, 1);
+        return LuaResult{false, impl_->last_error};
+    }
+    if (return_value != nullptr) {
+        if (lua_isnil(impl_->state, -1)) {
+            return_value->clear();
+        } else if (lua_isstring(impl_->state, -1) ||
+                   lua_isnumber(impl_->state, -1)) {
+            *return_value = lua_tostring(impl_->state, -1);
+        } else if (lua_isboolean(impl_->state, -1)) {
+            *return_value =
+                lua_toboolean(impl_->state, -1) != 0 ? "true" : "false";
+        } else {
+            lua_pushvalue(impl_->state, -1);
+            luaL_tolstring(impl_->state, -1, nullptr);
+            *return_value = lua_tostring(impl_->state, -1);
+            lua_pop(impl_->state, 2);
+        }
+        lua_pop(impl_->state, 1);
+    }
+    impl_->last_error.clear();
+    return LuaResult{true, {}};
+#else
+    (void)function_name;
+    (void)arguments;
+    (void)return_value;
     impl_->last_error = "ProwseTk was built without Lua support";
     return LuaResult{false, impl_->last_error};
 #endif

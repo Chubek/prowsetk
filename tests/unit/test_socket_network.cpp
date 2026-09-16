@@ -15,6 +15,7 @@
 #if defined(__unix__) || defined(__APPLE__)
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -33,18 +34,18 @@ public:
     explicit LoopbackServer(std::function<std::string(const std::string&)> responder)
         : responder_(std::move(responder)) {
         fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
-        ASSERT_GE(fd_, 0);
+        EXPECT_GE(fd_, 0);
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         addr.sin_port = 0;
-        ASSERT_EQ(::bind(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)),
+        EXPECT_EQ(::bind(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)),
                   0);
         socklen_t length = sizeof(addr);
-        ASSERT_EQ(::getsockname(fd_, reinterpret_cast<sockaddr*>(&addr),
+        EXPECT_EQ(::getsockname(fd_, reinterpret_cast<sockaddr*>(&addr),
                                 &length), 0);
         port_ = ntohs(addr.sin_port);
-        ASSERT_EQ(::listen(fd_, 4), 0);
+        EXPECT_EQ(::listen(fd_, 4), 0);
         thread_ = std::thread([this] { serve(); });
     }
 
@@ -71,13 +72,20 @@ public:
 private:
     void serve() {
         while (running_) {
+            // Poll with a short timeout so `stop()` can join promptly even
+            // while the server is waiting for a connection.
+            pollfd listen_poll{fd_, POLLIN, 0};
+            const int poll_rc = ::poll(&listen_poll, 1, 100);
+            if (poll_rc <= 0) {
+                continue;
+            }
             sockaddr_in client{};
             socklen_t client_length = sizeof(client);
             const int client_fd =
                 ::accept(fd_, reinterpret_cast<sockaddr*>(&client),
                          &client_length);
             if (client_fd < 0) {
-                break;
+                continue;
             }
             std::string request;
             char buffer[4096];
@@ -167,6 +175,7 @@ TEST(SocketNetwork, ReadsContentLengthBodiesExactly) {
 
 TEST(SocketNetwork, SendsMethodAndBody) {
     LoopbackServer server([](const std::string& request) {
+        (void)request;
         return "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n";
     });
     auto client = prowsetk::make_socket_network_client();

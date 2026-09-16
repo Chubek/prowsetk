@@ -32,6 +32,19 @@ Maintain four execution layers with hard boundaries:
 Do not blur these layers. JavaScript is not an extension mechanism. Lua must not
 receive raw Wasmtime handles. The WASM runtime must stay behind `WasmRuntime`.
 
+### Driver scripts
+
+`drivers/` holds Lua driver scripts run by `prowsetk run <name>` (README
+"Drivers"). A driver defines a global `main(args)` entrypoint returning an
+integer exit code; `args` is a table of named arguments declared by
+`[[drivers]]` in `Prowse.toml`, coerced to their declared TOML types by the
+CLI. Secret arguments must never reach driver output or logs. Keep drivers
+self-contained and network-independent where possible: each shipped driver
+accepts an optional `html` argument that switches to `session:load_html` for
+deterministic offline runs. New drivers ship with a hermetic integration test
+in `tests/integration/test_drivers.cpp` and a `prowsetk run` CLI test in
+`tests/integration/test_cli.cpp`.
+
 ## 2. Non-Negotiable Constraints
 
 - Headless only: no display server, windowing system, GPU, or desktop

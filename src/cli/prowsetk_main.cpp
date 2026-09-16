@@ -4,19 +4,25 @@
 //   prowsetk version                          print the ProwseTk version
 //   prowsetk serve [--host H] [--port P] ...  run the web interface
 //   prowsetk endpoints --url URL ...          extract endpoints to OpenAPI YAML
+//   prowsetk run <driver> [--arg value ...]   run a Prowse.toml Lua driver
 //
 // The CLI is a thin host application over the C++ core: it creates a Browser,
 // drives sessions, and (for `serve`) exposes the embedded web interface. All
 // network access remains host-mediated through the engine's NetworkClient.
 
+#include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
 
 #include <prowsetk/browser.hpp>
 #include <prowsetk/endpoint_extraction.hpp>
 #include <prowsetk/error.hpp>
+#include <prowsetk/lua_runtime.hpp>
+#include <prowsetk/project_config.hpp>
 #include <prowsetk/version.hpp>
 #include <prowsetk/web_interface.hpp>
 
@@ -30,6 +36,9 @@ struct Arguments {
     std::string url;
     std::string output;
     bool javascript = true;
+    std::string driver;
+    std::string config_path = "Prowse.toml";
+    std::vector<std::pair<std::string, std::string>> run_args;
 };
 
 std::string default_web_root() {
@@ -46,6 +55,26 @@ bool parse_arguments(int argc, char** argv, Arguments& args) {
     }
     args.command = argv[1];
     args.web_root = default_web_root();
+
+    if (args.command == "run") {
+        if (argc < 3) {
+            return false;
+        }
+        args.driver = argv[2];
+        for (int i = 3; i < argc; ++i) {
+            const std::string arg = argv[i];
+            if (arg == "--config" && i + 1 < argc) {
+                args.config_path = argv[++i];
+            } else if (arg.rfind("--", 0) == 0 && i + 1 < argc) {
+                args.run_args.emplace_back(arg.substr(2), argv[++i]);
+            } else {
+                std::cerr << "prowsetk run: unexpected argument: " << arg
+                          << '\n';
+                return false;
+            }
+        }
+        return true;
+    }
 
     for (int i = 2; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -77,7 +106,8 @@ void print_usage(std::ostream& out) {
         << "  prowsetk version\n"
         << "  prowsetk serve [--host 127.0.0.1] [--port 8080] [--web-root DIR] "
            "[--no-javascript]\n"
-        << "  prowsetk endpoints --url URL [--output FILE] [--javascript]\n";
+        << "  prowsetk endpoints --url URL [--output FILE] [--javascript]\n"
+        << "  prowsetk run <driver> [--arg VALUE ...] [--config Prowse.toml]\n";
 }
 
 int run_serve(const Arguments& args) {
@@ -135,6 +165,114 @@ int run_endpoints(const Arguments& args) {
     return 0;
 }
 
+int run_driver(const Arguments& args) {
+    prowsetk::ProjectConfig config;
+    try {
+        config = prowsetk::load_project_config(args.config_path);
+    } catch (const prowsetk::Error& error) {
+        std::cerr << "prowsetk run: " << error.what() << '\n';
+        return 2;
+    }
+
+    const auto it = std::find_if(
+        config.drivers.begin(), config.drivers.end(),
+        [&](const prowsetk::DriverConfig& driver) {
+            return driver.name == args.driver;
+        });
+    if (it == config.drivers.end()) {
+        std::cerr << "prowsetk run: unknown driver: " << args.driver << '\n';
+        return 2;
+    }
+    const prowsetk::DriverConfig& driver = *it;
+    if (!driver.enabled) {
+        std::cerr << "prowsetk run: driver is disabled: " << args.driver
+                  << '\n';
+        return 2;
+    }
+    if (driver.script.empty()) {
+        std::cerr << "prowsetk run: driver has no script: " << args.driver
+                  << '\n';
+        return 2;
+    }
+
+    // Resolve the script relative to the Prowse.toml's project root.
+    std::filesystem::path config_dir =
+        std::filesystem::path(args.config_path).parent_path();
+    if (config_dir.empty()) {
+        config_dir = ".";
+    }
+    const std::filesystem::path project_root =
+        std::filesystem::path(config.root).is_absolute()
+            ? std::filesystem::path(config.root)
+            : config_dir / config.root;
+    const std::filesystem::path script_path = project_root / driver.script;
+
+    // Map command-line `--name value` pairs onto the driver's declared
+    // arguments, applying defaults and rejecting unknown or missing ones.
+    std::map<std::string, std::string> provided;
+    for (const auto& [name, value] : args.run_args) {
+        provided[name] = value;
+    }
+    std::vector<prowsetk::LuaArgument> lua_args;
+    for (const auto& declared : driver.arguments) {
+        std::string type = declared.type.empty() ? "string" : declared.type;
+        const auto found = provided.find(declared.name);
+        if (found != provided.end()) {
+            lua_args.push_back(
+                prowsetk::LuaArgument{declared.name, type, found->second});
+            provided.erase(found);
+        } else if (!declared.default_value.empty()) {
+            lua_args.push_back(prowsetk::LuaArgument{
+                declared.name, type, declared.default_value});
+        } else if (declared.required) {
+            std::cerr << "prowsetk run: missing required argument: --"
+                      << declared.name << '\n';
+            return 2;
+        }
+    }
+    for (const auto& [name, value] : provided) {
+        (void)value;
+        std::cerr << "prowsetk run: unknown argument: --" << name << '\n';
+        return 2;
+    }
+
+    prowsetk::BrowserConfig browser_config;
+    browser_config.javascript = config.javascript;
+    browser_config.user_agent =
+        config.user_agent.empty() ? "ProwseTk/run" : config.user_agent;
+    browser_config.follow_redirects = config.follow_redirects;
+    browser_config.max_redirects = config.max_redirects;
+    browser_config.timeout_ms = config.timeout_ms;
+    browser_config.observe_network = config.observe_network;
+    browser_config.unsupported_api_behavior = config.unsupported_api_behavior;
+
+    prowsetk::Browser browser(std::move(browser_config));
+    prowsetk::LuaRuntime lua;
+    lua.bind_browser(&browser);
+
+    const prowsetk::LuaResult loaded = lua.run_file(script_path.string());
+    if (!loaded.ok) {
+        std::cerr << "prowsetk run: " << lua.last_error() << '\n';
+        return 1;
+    }
+    std::string exit_value;
+    const prowsetk::LuaResult called =
+        lua.call_function(driver.entrypoint, lua_args, &exit_value);
+    if (!called.ok) {
+        std::cerr << "prowsetk run: " << lua.last_error() << '\n';
+        return 1;
+    }
+    int code = 0;
+    if (!exit_value.empty()) {
+        try {
+            code = std::stoi(exit_value);
+        } catch (const std::exception&) {
+            code = 0;
+        }
+    }
+    return code;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -154,6 +292,9 @@ int main(int argc, char** argv) {
         }
         if (args.command == "endpoints") {
             return run_endpoints(args);
+        }
+        if (args.command == "run") {
+            return run_driver(args);
         }
         std::cerr << "prowsetk: unknown command: " << args.command << '\n';
         print_usage(std::cerr);
