@@ -42,3 +42,17 @@ target_include_directories(prowsetk_scrape2oapi_static PUBLIC "${CMAKE_CURRENT_S
 target_link_libraries(prowsetk_scrape2oapi_static PUBLIC ProwseTk::core)
 set_target_properties(prowsetk_scrape2oapi_static PROPERTIES OUTPUT_NAME "prowsetk_scrape2oapi_static")
 prowsetk_set_warnings(prowsetk_scrape2oapi_static)
+
+if(PROWSETK_BUILD_TESTS AND TARGET GTest::gtest_main)
+    include(GoogleTest)
+    add_executable(prowsetk_plugin_scrape2oapi
+        tests/test_scrape2oapi.cpp)
+    target_link_libraries(prowsetk_plugin_scrape2oapi
+        PRIVATE prowsetk_scrape2oapi_static ProwseTk::core GTest::gtest_main)
+    prowsetk_set_warnings(prowsetk_plugin_scrape2oapi)
+    gtest_discover_tests(prowsetk_plugin_scrape2oapi
+        TEST_PREFIX "prowsetk.plugin.scrape2oapi."
+        PROPERTIES LABELS "unit;plugin;endpoint-extraction" TIMEOUT 60
+        DISCOVERY_MODE PRE_TEST
+        DISCOVERY_TIMEOUT 30)
+endif()

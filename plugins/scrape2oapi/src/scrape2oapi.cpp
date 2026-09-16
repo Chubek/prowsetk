@@ -424,8 +424,10 @@ std::string render_scrape_yaml(const std::vector<ResolvedEndpoint>& resolved,
                 out << "                x-inferred: true\n";
             } else {
                 out << "      responses:\n";
-                out << "        '200':\n";
-                out << "          description: Inferred response\n";
+                out << "        '" << (re->status ? std::to_string(re->status) : "200") << "':\n";
+                out << "          description: "
+                    << (re->status ? "Observed response" : "Inferred response")
+                    << "\n";
             }
             if (options.infer_schemas) {
                 out << "      x-inferred: true\n";
