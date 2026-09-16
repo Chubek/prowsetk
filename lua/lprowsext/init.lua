@@ -83,6 +83,8 @@ end
 
 -- `extractor.new()` creates an extractor object. `extractor:on_document(fn)`
 -- registers the per-document callback; `extractor:run(document)` invokes it.
+-- Installing the extractor on a browser runs the callback for documents loaded
+-- by that browser. Extractors operate on managed document userdata only.
 function lprowsext.extractor.new()
     local callback = nil
     return {

@@ -529,6 +529,23 @@ int session_set_header(lua_State* L) {
     });
 }
 
+int session_clear_headers(lua_State* L) {
+    auto* userdata = check_session(L, 1);
+    (*userdata->session)->clear_headers();
+    return 0;
+}
+
+int session_headers(lua_State* L) {
+    auto* userdata = check_session(L, 1);
+    const auto headers = (*userdata->session)->headers();
+    lua_createtable(L, 0, static_cast<int>(headers.size()));
+    for (const auto& [name, value] : headers) {
+        lua_pushlstring(L, value.c_str(), value.size());
+        lua_setfield(L, -2, name.c_str());
+    }
+    return 1;
+}
+
 int session_close(lua_State* L) {
     auto* userdata = check_session(L, 1);
     (*userdata->session)->close();
@@ -766,6 +783,64 @@ int document_links(lua_State* L) {
     return 1;
 }
 
+int document_root(lua_State* L) {
+    auto* userdata = check_document(L, 1);
+    push_element(L, (*userdata->document)->root());
+    return 1;
+}
+
+int document_get_elements_by_tag_name(lua_State* L) {
+    auto* userdata = check_document(L, 1);
+    const char* tag = luaL_checkstring(L, 2);
+    const auto elements = (*userdata->document)->get_elements_by_tag_name(tag);
+    lua_createtable(L, static_cast<int>(elements.size()), 0);
+    for (std::size_t i = 0; i < elements.size(); ++i) {
+        push_element(L, elements[i]);
+        lua_rawseti(L, -2, static_cast<int>(i) + 1);
+    }
+    return 1;
+}
+
+int document_forms(lua_State* L) {
+    auto* userdata = check_document(L, 1);
+    const auto forms = (*userdata->document)->forms();
+    lua_createtable(L, static_cast<int>(forms.size()), 0);
+    for (std::size_t i = 0; i < forms.size(); ++i) {
+        push_element(L, forms[i]);
+        lua_rawseti(L, -2, static_cast<int>(i) + 1);
+    }
+    return 1;
+}
+
+int document_scripts(lua_State* L) {
+    auto* userdata = check_document(L, 1);
+    const auto scripts = (*userdata->document)->scripts();
+    lua_createtable(L, static_cast<int>(scripts.size()), 0);
+    for (std::size_t i = 0; i < scripts.size(); ++i) {
+        push_element(L, scripts[i]);
+        lua_rawseti(L, -2, static_cast<int>(i) + 1);
+    }
+    return 1;
+}
+
+int document_resource_urls(lua_State* L) {
+    auto* userdata = check_document(L, 1);
+    const auto urls = (*userdata->document)->resource_urls();
+    lua_createtable(L, static_cast<int>(urls.size()), 0);
+    for (std::size_t i = 0; i < urls.size(); ++i) {
+        lua_pushlstring(L, urls[i].c_str(), urls[i].size());
+        lua_rawseti(L, -2, static_cast<int>(i) + 1);
+    }
+    return 1;
+}
+
+int document_create_element(lua_State* L) {
+    auto* userdata = check_document(L, 1);
+    const char* tag = luaL_checkstring(L, 2);
+    push_element(L, (*userdata->document)->create_element(tag));
+    return 1;
+}
+
 int element_gc(lua_State* L) {
     auto* userdata = check_element(L, 1);
     delete userdata->element;
@@ -815,6 +890,24 @@ int element_set_attribute(lua_State* L) {
     const char* value = luaL_checkstring(L, 3);
     (*userdata->element)->set_attribute(name, value);
     lua_pushboolean(L, 1);
+    return 1;
+}
+
+int element_remove_attribute(lua_State* L) {
+    auto* userdata = check_element(L, 1);
+    const char* name = luaL_checkstring(L, 2);
+    lua_pushboolean(L, (*userdata->element)->remove_attribute(name) ? 1 : 0);
+    return 1;
+}
+
+int element_attributes(lua_State* L) {
+    auto* userdata = check_element(L, 1);
+    const auto attributes = (*userdata->element)->attributes();
+    lua_createtable(L, 0, static_cast<int>(attributes.size()));
+    for (const auto& attribute : attributes) {
+        lua_pushlstring(L, attribute.value.c_str(), attribute.value.size());
+        lua_setfield(L, -2, attribute.name.c_str());
+    }
     return 1;
 }
 
@@ -893,6 +986,52 @@ int element_children(lua_State* L) {
 int element_parent(lua_State* L) {
     auto* userdata = check_element(L, 1);
     push_element(L, (*userdata->element)->parent());
+    return 1;
+}
+
+int element_first_child(lua_State* L) {
+    auto* userdata = check_element(L, 1);
+    push_element(L, (*userdata->element)->first_child());
+    return 1;
+}
+
+int element_next_sibling(lua_State* L) {
+    auto* userdata = check_element(L, 1);
+    push_element(L, (*userdata->element)->next_sibling());
+    return 1;
+}
+
+int element_previous_sibling(lua_State* L) {
+    auto* userdata = check_element(L, 1);
+    push_element(L, (*userdata->element)->previous_sibling());
+    return 1;
+}
+
+int element_append_child(lua_State* L) {
+    return protect(L, [&]() -> int {
+        auto* parent = check_element(L, 1);
+        auto* child = check_element(L, 2);
+        (*parent->element)->append_child(*child->element);
+        lua_pushboolean(L, 1);
+        return 1;
+    });
+}
+
+int element_remove_child(lua_State* L) {
+    return protect(L, [&]() -> int {
+        auto* parent = check_element(L, 1);
+        auto* child = check_element(L, 2);
+        lua_pushboolean(L,
+                        (*parent->element)->remove_child(*child->element) ? 1 : 0);
+        return 1;
+    });
+}
+
+int element_set_text(lua_State* L) {
+    auto* userdata = check_element(L, 1);
+    const char* value = luaL_checkstring(L, 2);
+    (*userdata->element)->set_text(value);
+    lua_pushboolean(L, 1);
     return 1;
 }
 
@@ -1225,6 +1364,8 @@ const luaL_Reg session_methods[] = {
     {"evaluate_js", session_evaluate_js},
     {"current_url", session_current_url},
     {"set_header", session_set_header},
+    {"clear_headers", session_clear_headers},
+    {"headers", session_headers},
     {"request", session_request},
     {"on", session_on},
     {"off", session_off},
@@ -1240,6 +1381,8 @@ const luaL_Reg element_methods[] = {
     {"attribute", element_attribute},
     {"has_attribute", element_has_attribute},
     {"set_attribute", element_set_attribute},
+    {"remove_attribute", element_remove_attribute},
+    {"attributes", element_attributes},
     {"text", element_text},
     {"inner_html", element_inner_html},
     {"html", element_outer_html},
@@ -1249,6 +1392,12 @@ const luaL_Reg element_methods[] = {
     {"query_selector_all", element_query_selector_all},
     {"children", element_children},
     {"parent", element_parent},
+    {"first_child", element_first_child},
+    {"next_sibling", element_next_sibling},
+    {"previous_sibling", element_previous_sibling},
+    {"append_child", element_append_child},
+    {"remove_child", element_remove_child},
+    {"set_text", element_set_text},
     {"matches", element_matches},
     {"xpath", lprowsext_dom_xpath_on_element},
     {nullptr, nullptr},
@@ -1262,8 +1411,14 @@ const luaL_Reg document_methods[] = {
     {"query_selector", document_query_selector},
     {"query_selector_all", document_query_selector_all},
     {"get_element_by_id", document_get_element_by_id},
+    {"get_elements_by_tag_name", document_get_elements_by_tag_name},
     {"metadata", document_metadata},
     {"links", document_links},
+    {"forms", document_forms},
+    {"scripts", document_scripts},
+    {"resource_urls", document_resource_urls},
+    {"root", document_root},
+    {"create_element", document_create_element},
     {"xpath", lprowsext_dom_xpath},
     {"xpath_strings", lprowsext_dom_xpath_strings},
     {nullptr, nullptr},

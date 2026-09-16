@@ -368,6 +368,14 @@ end
 - Capability queries
 - Plugin management
 
+Session headers can be inspected or reset with `session:headers()` and
+`session:clear_headers()`. Documents additionally expose forms, scripts,
+resource URLs, tag-name queries, the root element, and detached-element
+creation. Elements expose attribute tables, sibling traversal, and managed DOM
+mutation (`append_child`, `remove_child`, and `set_text`). These APIs retain
+the normal session event and lifetime rules; Lua never owns the underlying C++
+objects.
+
 Lua scripts may be loaded from files, passed as strings, or embedded directly
 into C++ applications.
 

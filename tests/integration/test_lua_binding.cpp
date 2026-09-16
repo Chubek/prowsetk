@@ -46,6 +46,55 @@ TEST(LuaBinding, DrivesBrowserAndDocument) {
     EXPECT_TRUE(result.ok) << lua.last_error();
 }
 
+TEST(LuaBinding, InspectsAndMutatesDocuments) {
+    if (!LuaRuntime::available()) {
+        GTEST_SKIP() << "ProwseTk was built without Lua support";
+    }
+    LuaRuntime lua;
+    const auto result = lua.run(R"LUA(
+        local prowse = require("lprowse")
+        local browser = prowse.browser.new()
+        local session = browser:create_session()
+        session:load_html([[
+            <html><head><script src="/app.js"></script></head><body>
+              <form action="/login"><input name="user"></form>
+              <ul><li id="first">One</li><li id="second">Two</li></ul>
+            </body></html>]], "https://example.com/base/")
+
+        session:set_header("X-Trace", "lua")
+        assert(session:headers()["X-Trace"] == "lua")
+        session:clear_headers()
+        assert(next(session:headers()) == nil)
+
+        local document = session:document()
+        assert(document:root() ~= nil, "document root missing")
+        assert(#document:get_elements_by_tag_name("li") == 2)
+        assert(#document:forms() == 1)
+        assert(#document:scripts() == 1)
+        assert(#document:resource_urls() >= 1)
+
+        local first = document:get_element_by_id("first")
+        local second = document:get_element_by_id("second")
+        assert(first:next_sibling():id() == "second")
+        assert(second:previous_sibling():id() == "first")
+        assert(first:parent():tag_name() == "ul")
+        assert(first:parent():first_child():id() == "first")
+
+        local body = document:query_selector("body")
+        local notice = document:create_element("p")
+        assert(notice:set_attribute("class", "notice"))
+        assert(notice:attributes().class == "notice")
+        assert(notice:remove_attribute("class"))
+        assert(not notice:has_attribute("class"))
+        assert(notice:set_text("Added from Lua"))
+        assert(body:append_child(notice))
+        assert(document:query_selector("p"):text() == "Added from Lua")
+        assert(body:remove_child(notice))
+        assert(document:query_selector("p") == nil)
+    )LUA", "lua_document_mutation");
+    EXPECT_TRUE(result.ok) << lua.last_error();
+}
+
 TEST(LuaBinding, ReportsScriptErrors) {
     if (!LuaRuntime::available()) {
         GTEST_SKIP() << "ProwseTk was built without Lua support";
