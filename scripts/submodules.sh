@@ -26,3 +26,5 @@ git submodule add https://github.com/WebAssembly/wasi-sdk.git	    third_party/wa
 git submodule add https://github.com/bytecodealliance/wasmtime-cpp.git third_party/wasmtime-cpp
 git submodule add https://github.com/jbeder/yaml-cpp.git	    third_party/yaml-cpp
 git submodule add https://github.com/facebook/zstd.git		    third_party/zstd
+git submodule add https://github.com/jarro2783/cxxopts	    	    third_party/cxxopts
+git submodule add https://github.com/libfuse/libfuse		    third_party/libfuse
