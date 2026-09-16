@@ -21,6 +21,14 @@ TEST(Lprowsext, RequiresModule) {
             assert(ext.endpoints ~= nil, "lprowsext.endpoints missing")
             assert(ext.extractor ~= nil, "lprowsext.extractor missing")
             assert(ext.wasm ~= nil, "lprowsext.wasm missing")
+            assert(require("lprowsext.dom") == ext.dom,
+                   "lprowsext.dom require mismatch")
+            assert(require("lprowsext.endpoints") == ext.endpoints,
+                   "lprowsext.endpoints require mismatch")
+            assert(require("lprowsext.extractor") == ext.extractor,
+                   "lprowsext.extractor require mismatch")
+            assert(require("lprowsext.wasm") == ext.wasm,
+                   "lprowsext.wasm require mismatch")
         )LUA", "lprowsext_requires");
     EXPECT_TRUE(result.ok) << lua.last_error();
 }

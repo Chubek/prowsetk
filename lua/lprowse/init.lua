@@ -10,11 +10,13 @@ local lprowse = {
     _description = "ProwseTk browser automation API"
 }
 
+local function native_unavailable()
+    error("lprowse native module is not registered; run inside ProwseTk's LuaRuntime", 2)
+end
+
 -- `prowse.browser.new([config])` creates a Browser.
 lprowse.browser = {
-    new = function(config)
-        return require("lprowse").browser.new(config)
-    end
+    new = native_unavailable
 }
 
 return lprowse

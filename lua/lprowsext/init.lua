@@ -11,6 +11,10 @@ local lprowsext = {
     _description = "ProwseTk Lua extension layer"
 }
 
+local function native_unavailable(feature)
+    error(feature .. " requires ProwseTk's native lprowsext module", 3)
+end
+
 -- ---------------------------------------------------------------------------
 -- DOM helpers
 -- ---------------------------------------------------------------------------
@@ -19,10 +23,16 @@ local lprowsext = {
 -- a node-set, or a scalar (string/number/boolean) otherwise.
 lprowsext.dom = {
     xpath = function(document, expression)
-        return document:xpath(expression)
+        if document ~= nil and type(document.xpath) == "function" then
+            return document:xpath(expression)
+        end
+        native_unavailable("lprowsext.dom.xpath")
     end,
     xpath_strings = function(document, expression)
-        return document:xpath_strings(expression)
+        if document ~= nil and type(document.xpath_strings) == "function" then
+            return document:xpath_strings(expression)
+        end
+        native_unavailable("lprowsext.dom.xpath_strings")
     end
 }
 
@@ -35,8 +45,7 @@ lprowsext.dom = {
 -- `warnings()`, and `write_openapi_yaml(path)`.
 lprowsext.endpoints = {
     extract = function(document_or_session, options)
-        return require("lprowsext").endpoints.extract(document_or_session,
-                                                      options)
+        native_unavailable("lprowsext.endpoints.extract")
     end
 }
 
@@ -75,7 +84,20 @@ end
 -- `extractor.new()` creates an extractor object. `extractor:on_document(fn)`
 -- registers the per-document callback; `extractor:run(document)` invokes it.
 function lprowsext.extractor.new()
-    return require("lprowsext").extractor.new()
+    local callback = nil
+    return {
+        on_document = function(_, processor)
+            assert(type(processor) == "function", "processor must be a function")
+            callback = processor
+            return true
+        end,
+        run = function(_, document)
+            if callback == nil then
+                error("extractor has no on_document callback", 2)
+            end
+            return callback(document)
+        end
+    }
 end
 
 -- ---------------------------------------------------------------------------
@@ -86,11 +108,16 @@ end
 -- runtime linked, `available()` is false and `load()` reports the boundary.
 lprowsext.wasm = {
     available = function()
-        return require("lprowsext").wasm.available()
+        return false
     end,
     load = function(path, options)
-        return require("lprowsext").wasm.load(path, options)
+        return nil, "ProwseTk was built without a native WASM runtime"
     end
 }
+
+package.loaded["lprowsext.dom"] = lprowsext.dom
+package.loaded["lprowsext.endpoints"] = lprowsext.endpoints
+package.loaded["lprowsext.extractor"] = lprowsext.extractor
+package.loaded["lprowsext.wasm"] = lprowsext.wasm
 
 return lprowsext

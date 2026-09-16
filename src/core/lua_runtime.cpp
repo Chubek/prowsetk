@@ -76,6 +76,24 @@ LuaRuntime* runtime_from_state(lua_State* L) {
     return runtime;
 }
 
+void set_loaded_module(lua_State* L, const char* name, int table_index) {
+    const int absolute_index =
+        table_index > 0 || table_index <= LUA_REGISTRYINDEX
+            ? table_index
+            : lua_gettop(L) + table_index + 1;
+    lua_getglobal(L, "package");
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1);
+        return;
+    }
+    lua_getfield(L, -1, "loaded");
+    if (lua_istable(L, -1)) {
+        lua_pushvalue(L, absolute_index);
+        lua_setfield(L, -2, name);
+    }
+    lua_pop(L, 2);
+}
+
 void push_event_table(lua_State* L, const Event& event) {
     lua_createtable(L, 0, 6);
     lua_pushstring(L, to_string(event.type));
@@ -1315,19 +1333,8 @@ LuaRuntime::LuaRuntime() : impl_(std::make_unique<Impl>()) {
         lua_pushcfunction(impl_->state, browser_new);
         lua_setfield(impl_->state, -2, "new");
         lua_setfield(impl_->state, -2, "browser");
+        set_loaded_module(impl_->state, "lprowse", -1);
         lua_setglobal(impl_->state, "lprowse");
-
-        // Make `require("lprowse")` resolve to the same module table.
-        lua_getglobal(impl_->state, "package");
-        if (lua_istable(impl_->state, -1)) {
-            lua_getfield(impl_->state, -1, "loaded");
-            if (lua_istable(impl_->state, -1)) {
-                lua_getglobal(impl_->state, "lprowse");
-                lua_setfield(impl_->state, -2, "lprowse");
-            }
-            lua_pop(impl_->state, 1);
-        }
-        lua_pop(impl_->state, 1);
 
         // ------------------------------------------------------------------
         // lprowsext: the Lua extension layer. Submodules expose XPath DOM
@@ -1370,19 +1377,20 @@ LuaRuntime::LuaRuntime() : impl_(std::make_unique<Impl>()) {
         lua_pushliteral(impl_->state, "0.1.0");
         lua_setfield(impl_->state, -2, "_version");
 
-        lua_setglobal(impl_->state, "lprowsext");
-
-        // Make `require("lprowsext")` and its submodules resolve.
-        lua_getglobal(impl_->state, "package");
-        if (lua_istable(impl_->state, -1)) {
-            lua_getfield(impl_->state, -1, "loaded");
-            if (lua_istable(impl_->state, -1)) {
-                lua_getglobal(impl_->state, "lprowsext");
-                lua_setfield(impl_->state, -2, "lprowsext");
-            }
-            lua_pop(impl_->state, 1);
-        }
+        set_loaded_module(impl_->state, "lprowsext", -1);
+        lua_getfield(impl_->state, -1, "dom");
+        set_loaded_module(impl_->state, "lprowsext.dom", -1);
         lua_pop(impl_->state, 1);
+        lua_getfield(impl_->state, -1, "endpoints");
+        set_loaded_module(impl_->state, "lprowsext.endpoints", -1);
+        lua_pop(impl_->state, 1);
+        lua_getfield(impl_->state, -1, "extractor");
+        set_loaded_module(impl_->state, "lprowsext.extractor", -1);
+        lua_pop(impl_->state, 1);
+        lua_getfield(impl_->state, -1, "wasm");
+        set_loaded_module(impl_->state, "lprowsext.wasm", -1);
+        lua_pop(impl_->state, 1);
+        lua_setglobal(impl_->state, "lprowsext");
     }
 #endif
 }

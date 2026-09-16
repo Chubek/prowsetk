@@ -8,6 +8,7 @@ include(CMakePackageConfigHelpers)
 # applies the shared warning set.
 function(prowsetk_add_library name)
     add_library(${name} STATIC ${ARGN})
+    set_target_properties(${name} PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_include_directories(${name} PUBLIC
         "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")

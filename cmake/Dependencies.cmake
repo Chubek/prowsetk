@@ -32,6 +32,7 @@ if(PROWSETK_ENABLE_JAVASCRIPT)
         add_subdirectory("${PROWSETK_QUICKJS_SOURCE_DIR}"
                          "${CMAKE_BINARY_DIR}/third_party/quickjs"
                          EXCLUDE_FROM_ALL)
+        set_target_properties(qjs PROPERTIES POSITION_INDEPENDENT_CODE ON)
         set(PROWSETK_HAVE_QUICKJS ON CACHE INTERNAL
             "QuickJS runtime available")
         add_library(ProwseTk::quickjs ALIAS qjs)
@@ -56,6 +57,8 @@ if(EXISTS "${PROWSETK_PUGIXML_SOURCE_DIR}/src/pugixml.cpp")
     if(NOT TARGET prowsetk_pugixml)
         add_library(prowsetk_pugixml STATIC
             "${PROWSETK_PUGIXML_SOURCE_DIR}/src/pugixml.cpp")
+        set_target_properties(prowsetk_pugixml PROPERTIES
+            POSITION_INDEPENDENT_CODE ON)
         target_include_directories(prowsetk_pugixml PUBLIC
             "$<BUILD_INTERFACE:${PROWSETK_PUGIXML_SOURCE_DIR}/src>"
             "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
