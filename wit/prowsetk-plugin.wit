@@ -12,6 +12,7 @@ interface types {
         status: u16,
         headers: list<tuple<string, string>>,
         body: list<u8>,
+        final-url: string,
     }
 
     variant hook-result {
@@ -19,12 +20,35 @@ interface types {
         reject(string),
         replace-request(request),
     }
+
+    record config-entry {
+        key: string,
+        value: string,
+    }
+
+    record document-snapshot {
+        url: string,
+        title: string,
+        html: string,
+        text: string,
+    }
+}
+
+interface host {
+    log: func(level: string, message: string);
+    emit-event: func(type: string, name: string, message: string);
+    redact: func(value: string) -> string;
 }
 
 interface network-hooks {
     before-request: func(req: types.request) -> result<types.hook-result, string>;
     after-response: func(req: types.request, res: types.response)
         -> result<types.hook-result, string>;
+}
+
+interface lifecycle {
+    configure: func(entries: list<types.config-entry>) -> result<_, string>;
+    on-document: func(document: types.document-snapshot) -> result<_, string>;
 }
 
 interface document-extractor {
@@ -58,6 +82,8 @@ interface endpoint-extraction {
 }
 
 world prowsetk-plugin {
+    import host;
+    export lifecycle;
     export network-hooks;
     export document-extractor;
     export endpoint-extraction;

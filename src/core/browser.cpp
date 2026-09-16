@@ -375,7 +375,6 @@ HttpResponse Session::request(HttpRequest request) {
     std::vector<std::string> chain;
 
     while (true) {
-        const Url parsed = parse_url(request.url);
         if (header_value(request.headers, "User-Agent").empty()) {
             request.headers.emplace_back("User-Agent",
                                          browser_->config().user_agent);
@@ -383,12 +382,6 @@ HttpResponse Session::request(HttpRequest request) {
         if (header_value(request.headers, "Accept").empty()) {
             request.headers.emplace_back(
                 "Accept", "text/html,application/xhtml+xml,*/*;q=0.8");
-        }
-        const std::string cookie =
-            browser_->storage().cookies().cookie_header(parsed);
-        if (!cookie.empty() &&
-            header_value(request.headers, "Cookie").empty()) {
-            request.headers.emplace_back("Cookie", cookie);
         }
 
         Event before;
@@ -399,6 +392,16 @@ HttpResponse Session::request(HttpRequest request) {
         if (before.cancelled) {
             throw Error(ErrorCode::SecurityViolation,
                         "request cancelled by handler: " + request.url);
+        }
+
+        browser_->plugins().dispatch_before_request(request);
+
+        const Url parsed = parse_url(request.url);
+        const std::string cookie =
+            browser_->storage().cookies().cookie_header(parsed);
+        if (!cookie.empty() &&
+            header_value(request.headers, "Cookie").empty()) {
+            request.headers.emplace_back("Cookie", cookie);
         }
 
         HttpResponse response = browser_->network_client().send(request);
@@ -414,6 +417,7 @@ HttpResponse Session::request(HttpRequest request) {
             after.attributes["content-type"] = content_type;
         }
         emit_event(after);
+        browser_->plugins().dispatch_after_response(request, response);
 
         const bool redirect = response.status == 301 || response.status == 302 ||
                               response.status == 303 ||
@@ -510,6 +514,7 @@ void Session::install_document(std::string_view html, std::string url,
     created.name = document_->title();
     created.payload = document_;
     emit_event(created);
+    browser_->plugins().dispatch_document(*document_);
 
     if (javascript_ == nullptr) {
         return;

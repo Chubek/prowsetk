@@ -3,12 +3,15 @@
 
 #include <filesystem>
 #include <memory>
+#include <utility>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "prowsetk/ProwseTk-Plugin.h"
+#include "prowsetk/document.hpp"
 #include "prowsetk/event.hpp"
+#include "prowsetk/network_client.hpp"
 #include "prowsetk/wasm_runtime.hpp"
 
 namespace prowsetk {
@@ -19,6 +22,8 @@ struct PluginDescriptor {
     std::string abi_version;
     std::string description;
     std::string path;
+    std::string lua_module;
+    std::string wasm_world;
     ProwseTkPluginType type = PROWSETK_PLUGIN_NATIVE;
     std::vector<std::string> capabilities;
     bool initialized = false;
@@ -73,6 +78,21 @@ public:
     // ABI: plugin initialize() returns an int; C++ exceptions are caught and
     // translated to a nonzero code at the boundary.
     std::size_t initialize_all();
+
+    // Passes declarative configuration entries to initialized native plugins
+    // that expose configure(). Non-native descriptors are ignored.
+    std::size_t configure_all(
+        const std::vector<std::pair<std::string, std::string>>& entries = {});
+
+    // Dispatches host-mediated request/response/document hooks to initialized
+    // native plugins. before_request may replace the request in-place or reject
+    // it with Error(SecurityViolation). after_response may reject the response.
+    // Document hooks receive snapshots only; plugins never receive C++ DOM
+    // objects across the C ABI.
+    void dispatch_before_request(HttpRequest& request);
+    void dispatch_after_response(const HttpRequest& request,
+                                 const HttpResponse& response);
+    void dispatch_document(const Document& document);
 
     void shutdown_all();
 

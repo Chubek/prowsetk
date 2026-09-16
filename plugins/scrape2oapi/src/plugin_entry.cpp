@@ -15,9 +15,11 @@ const char* const kCapabilities[] = {
 const ProwseTkPluginInfo kInfo = {
     "scrape2oapi",
     "0.1.0",
-    "1",
+    "2",
     "Scrape internal API endpoints from a webpage and dump OpenAPI YAML, optionally resolving redirect/API chains",
     PROWSETK_PLUGIN_NATIVE,
+    "scrape2oapi",
+    "prowsetk-plugin",
     kCapabilities,
     4,
 };
@@ -41,7 +43,8 @@ void plugin_shutdown(ProwseTkHost* host) {
 
 const ProwseTkPluginInfo* plugin_info() { return &kInfo; }
 
-const ProwseTkPlugin kPlugin = {plugin_initialize, plugin_shutdown, plugin_info};
+const ProwseTkPlugin kPlugin = {plugin_initialize, plugin_shutdown, plugin_info,
+                                nullptr, nullptr, nullptr, nullptr};
 
 }  // namespace
 
