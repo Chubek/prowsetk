@@ -42,8 +42,10 @@ TEST(Capability, ToStringIsStable) {
 
 TEST(WebPlatform, DocumentsApiSurface) {
     const auto platform = default_web_platform();
-    EXPECT_TRUE(platform.supports("document"));
-    EXPECT_TRUE(platform.supports("fetch"));
+    // The C++ DOM engine is a real capability; the JavaScript fetch host
+    // binding is not installed and must not be advertised.
+    EXPECT_TRUE(platform.supports("dom"));
+    EXPECT_FALSE(platform.supports("fetch"));
     EXPECT_FALSE(platform.supports("WebGL"));
     EXPECT_EQ(platform.classification("canvas"),
               ImplementationClass::DummyImplementation);

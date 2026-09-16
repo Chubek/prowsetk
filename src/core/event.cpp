@@ -1,6 +1,7 @@
 #include "prowsetk/event.hpp"
 
 #include <algorithm>
+#include <optional>
 
 namespace prowsetk {
 
@@ -27,6 +28,36 @@ const char* to_string(EventType type) noexcept {
         case EventType::EndpointDiscovered: return "endpoint_discovered";
     }
     return "unknown";
+}
+
+std::optional<EventType> parse_event_type(std::string_view name) noexcept {
+    static const std::vector<std::pair<std::string_view, EventType>> names = {
+        {"session_created", EventType::SessionCreated},
+        {"session_destroyed", EventType::SessionDestroyed},
+        {"before_navigation", EventType::BeforeNavigation},
+        {"after_navigation", EventType::AfterNavigation},
+        {"before_request", EventType::BeforeRequest},
+        {"after_response", EventType::AfterResponse},
+        {"before_redirect", EventType::BeforeRedirect},
+        {"document_created", EventType::DocumentCreated},
+        {"before_script", EventType::BeforeScript},
+        {"after_script", EventType::AfterScript},
+        {"script_exception", EventType::ScriptException},
+        {"console", EventType::Console},
+        {"dom_mutation", EventType::DomMutation},
+        {"cookie_change", EventType::CookieChange},
+        {"storage_access", EventType::StorageAccess},
+        {"unsupported_api", EventType::UnsupportedApi},
+        {"plugin_init", EventType::PluginInit},
+        {"plugin_shutdown", EventType::PluginShutdown},
+        {"endpoint_discovered", EventType::EndpointDiscovered},
+    };
+    for (const auto& [candidate, type] : names) {
+        if (candidate == name) {
+            return type;
+        }
+    }
+    return std::nullopt;
 }
 
 SubscriptionId EventDispatcher::subscribe(EventType type, Handler handler) {

@@ -13,12 +13,22 @@ public:
 
     CapabilitySet capabilities() const override {
         CapabilitySet capabilities;
+#if defined(PROWSETK_ENABLE_WASM)
+        capabilities.set("wasm", ImplementationClass::Unsupported,
+                         "PROWSETK_ENABLE_WASM=ON but no WASM engine is linked");
+#else
         capabilities.set("wasm", ImplementationClass::Unsupported,
                          "no WASM runtime is linked into this build");
+#endif
         capabilities.set("wasm.component-model",
                          ImplementationClass::Unsupported);
+#if defined(PROWSETK_ENABLE_WASI)
+        capabilities.set("wasi", ImplementationClass::Unsupported,
+                         "WASI is configured but no WASM engine is linked");
+#else
         capabilities.set("wasi", ImplementationClass::Unsupported,
                          "WASI is off by default");
+#endif
         return capabilities;
     }
 

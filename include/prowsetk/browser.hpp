@@ -71,6 +71,13 @@ public:
     CapabilitySet capabilities() const;
     WebPlatform web_platform() const;
 
+    // Reports an attempted use of an unsupported API according to
+    // `config_.unsupported_api_behavior` ("warn" emits an UnsupportedApi
+    // event; "exception"/"abort" throw Error(Unsupported); "default"/"dummy"
+    // silently continue).
+    void handle_unsupported_api(std::string_view name,
+                                std::string_view message) const;
+
     const BrowserConfig& config() const noexcept { return config_; }
 
 private:
@@ -115,6 +122,12 @@ public:
     std::string evaluate_js(std::string_view script,
                             const ScriptOptions& options = {});
 
+    // Sends an HTTP request through the browser's NetworkClient, applying the
+    // session's default headers and cookies, and follows redirects according to
+    // the browser configuration. 301/302/303 convert POST to GET; 307/308
+    // preserve the method and body. The response body is not parsed.
+    HttpResponse request(HttpRequest request);
+
     CookieJar& cookies() noexcept;
     KeyValueStore& local_storage() noexcept;
     KeyValueStore& session_storage() noexcept;
@@ -128,9 +141,16 @@ private:
     friend class Browser;
     Session(Browser* browser, SessionConfig config, std::string id);
 
-    HttpResponse fetch(std::string_view url);
+    // Builds a default GET request for `url` carrying the session headers,
+    // cookie header, and configured timeouts/limits.
+    HttpRequest build_request(std::string_view url);
+
     void install_document(std::string_view html, std::string url,
                           std::string base_url);
+
+    // Emits `event` through the browser dispatcher, stamped with this
+    // session's id so Lua `session:on` subscriptions stay scoped.
+    void emit_event(Event event);
 
     Browser* browser_;
     SessionConfig config_;

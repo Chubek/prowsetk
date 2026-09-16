@@ -225,14 +225,37 @@ void Element::set_value(std::string_view value) {
         return;
     }
     if (node_->name == "textarea") {
-        node_->children.clear();
-        auto text = fw::make_node(fw::NodeType::Text);
-        text->text = std::string(value);
-        text->parent = node_;
-        node_->children.push_back(text);
+        set_text(value);
         return;
     }
     node_->set_attribute("value", value);
+}
+
+void Element::append_child(const std::shared_ptr<Element>& child) {
+    if (node_ == nullptr || child == nullptr || child->node_ == nullptr) {
+        return;
+    }
+    node_->append_child(child->node_);
+}
+
+bool Element::remove_child(const std::shared_ptr<Element>& child) {
+    if (node_ == nullptr || child == nullptr || child->node_ == nullptr) {
+        return false;
+    }
+    return node_->remove_child(child->node_);
+}
+
+void Element::set_text(std::string_view value) {
+    if (node_ == nullptr) {
+        return;
+    }
+    node_->children.clear();
+    auto text = fw::make_node(fw::NodeType::Text);
+    text->text = std::string(value);
+    text->parent = node_;
+    node_->children.push_back(text);
+    node_->report_mutation(
+        fw::MutationInfo{"text-set", node_->name, {}, std::string(value)});
 }
 
 Document::Document(std::shared_ptr<flatworm::Node> root)
@@ -381,6 +404,25 @@ std::map<std::string, std::string> Document::metadata() const {
         metadata["lang"] = html->attribute("lang");
     }
     return metadata;
+}
+
+std::shared_ptr<Element> Document::create_element(std::string tag) {
+    auto node = fw::make_node(fw::NodeType::Element);
+    node->name = std::move(tag);
+    return wrap(node);
+}
+
+void Document::set_mutation_listener(
+    std::function<void(const flatworm::MutationInfo&)> listener) {
+    if (root_ == nullptr) {
+        return;
+    }
+    if (listener) {
+        root_->mutation_sink =
+            std::make_shared<fw::MutationSink>(std::move(listener));
+    } else {
+        root_->mutation_sink.reset();
+    }
 }
 
 std::shared_ptr<Document> parse_html(std::string_view html, std::string url,

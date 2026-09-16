@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "prowsetk/ProwseTk-Plugin.h"
+#include "prowsetk/event.hpp"
 #include "prowsetk/wasm_runtime.hpp"
 
 namespace prowsetk {
@@ -54,6 +55,10 @@ public:
 
     std::vector<PluginDescriptor> plugins() const;
     const PluginDescriptor* find(std::string_view name) const;
+
+    // Opt-in event channel. When set, initialize_all and shutdown_all emit
+    // PluginInit and PluginShutdown events for every plugin.
+    void set_event_dispatcher(EventDispatcher* dispatcher);
 
     void set_log_sink(void (*sink)(void* user_data, int level, const char* message),
                       void* user_data);

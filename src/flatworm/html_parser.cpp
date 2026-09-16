@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <memory>
+#include <stdexcept>
 #include <unordered_map>
 
 namespace prowsetk::flatworm {
@@ -237,10 +239,17 @@ void Node::set_attribute(std::string_view attribute_name,
     for (auto& attr : attributes) {
         if (attr.name == attribute_name) {
             attr.value = std::string(value);
+            report_mutation(MutationInfo{"attribute-set", name,
+                                         std::string(attribute_name),
+                                         std::string(value)});
             return;
         }
     }
-    attributes.push_back(Attribute{std::string(attribute_name), std::string(value)});
+    attributes.push_back(
+        Attribute{std::string(attribute_name), std::string(value)});
+    report_mutation(MutationInfo{"attribute-set", name,
+                                 std::string(attribute_name),
+                                 std::string(value)});
 }
 
 bool Node::remove_attribute(std::string_view attribute_name) {
@@ -252,7 +261,59 @@ bool Node::remove_attribute(std::string_view attribute_name) {
         return false;
     }
     attributes.erase(it, attributes.end());
+    report_mutation(MutationInfo{"attribute-removed", name,
+                                 std::string(attribute_name), {}});
     return true;
+}
+
+void Node::append_child(const std::shared_ptr<Node>& child) {
+    if (child == nullptr || child.get() == this) {
+        return;
+    }
+    if (child->parent.lock().get() == this) {
+        return;
+    }
+    child->parent = shared_from_this();
+    children.push_back(child);
+    report_mutation(MutationInfo{"child-added", child->name, {}, {}});
+}
+
+bool Node::remove_child(const std::shared_ptr<Node>& child) {
+    if (child == nullptr) {
+        return false;
+    }
+    const auto it = std::find(children.begin(), children.end(), child);
+    if (it == children.end()) {
+        return false;
+    }
+    const std::string removed_name = (*it)->name;
+    children.erase(it);
+    report_mutation(MutationInfo{"child-removed", removed_name, {}, {}});
+    return true;
+}
+
+std::shared_ptr<Node> Node::document_root() const {
+    std::shared_ptr<Node> node =
+        std::const_pointer_cast<Node>(shared_from_this());
+    while (true) {
+        std::shared_ptr<Node> ancestor = node->parent.lock();
+        if (ancestor == nullptr) {
+            return node;
+        }
+        node = ancestor;
+    }
+}
+
+void Node::report_mutation(const MutationInfo& info) const {
+    std::shared_ptr<Node> root;
+    try {
+        root = document_root();
+    } catch (const std::bad_weak_ptr&) {
+        return;
+    }
+    if (root != nullptr && root->mutation_sink != nullptr) {
+        (*root->mutation_sink)(info);
+    }
 }
 
 std::string serialize(const Node& node) {

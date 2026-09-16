@@ -148,8 +148,13 @@ private:
 
 class InMemoryKeyValueStore : public KeyValueStore {
 public:
+    void set_access_listener(StorageAccessListener listener) override {
+        listener_ = std::move(listener);
+    }
+
     std::optional<std::string> get(std::string_view key) const override {
         std::lock_guard<std::mutex> lock(mutex_);
+        report("get", key);
         const auto it = values_.find(std::string(key));
         if (it == values_.end()) {
             return std::nullopt;
@@ -159,16 +164,19 @@ public:
 
     void set(std::string key, std::string value) override {
         std::lock_guard<std::mutex> lock(mutex_);
+        report("set", key);
         values_[std::move(key)] = std::move(value);
     }
 
     bool remove(std::string_view key) override {
         std::lock_guard<std::mutex> lock(mutex_);
+        report("remove", key);
         return values_.erase(std::string(key)) > 0;
     }
 
     void clear() override {
         std::lock_guard<std::mutex> lock(mutex_);
+        report("clear", {});
         values_.clear();
     }
 
@@ -183,14 +191,29 @@ public:
         return result;
     }
 
+    void set_name(std::string name) { name_ = std::move(name); }
+
 private:
+    void report(std::string_view operation, std::string_view key) const {
+        if (listener_) {
+            try {
+                listener_(name_, key, operation);
+            } catch (...) {
+                // Instrumentation must never break storage operations.
+            }
+        }
+    }
+
     mutable std::mutex mutex_;
     std::map<std::string, std::string> values_;
+    std::string name_;
+    StorageAccessListener listener_;
 };
 
 struct MemoryStorage::Impl {
     InMemoryCookieJar cookies;
     std::mutex mutex;
+    StorageAccessListener access_listener;
     std::unordered_map<std::string, std::unique_ptr<InMemoryKeyValueStore>> local;
     std::unordered_map<std::string, std::unique_ptr<InMemoryKeyValueStore>>
         session;
@@ -198,13 +221,15 @@ struct MemoryStorage::Impl {
     InMemoryKeyValueStore& get(
         std::unordered_map<std::string, std::unique_ptr<InMemoryKeyValueStore>>&
             map,
-        std::string_view session_id) {
+        std::string_view session_id, const std::string& store_name) {
         std::lock_guard<std::mutex> lock(mutex);
         const std::string key(session_id);
         auto it = map.find(key);
         if (it == map.end()) {
             auto store = std::make_unique<InMemoryKeyValueStore>();
             auto* raw = store.get();
+            raw->set_name(store_name);
+            raw->set_access_listener(access_listener);
             map.emplace(key, std::move(store));
             return *raw;
         }
@@ -218,17 +243,22 @@ MemoryStorage::~MemoryStorage() = default;
 CookieJar& MemoryStorage::cookies() { return impl_->cookies; }
 
 KeyValueStore& MemoryStorage::local_storage(std::string_view session_id) {
-    return impl_->get(impl_->local, session_id);
+    return impl_->get(impl_->local, session_id, "local");
 }
 
 KeyValueStore& MemoryStorage::session_storage(std::string_view session_id) {
-    return impl_->get(impl_->session, session_id);
+    return impl_->get(impl_->session, session_id, "session");
 }
 
 void MemoryStorage::release_session(std::string_view session_id) {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     impl_->session.erase(std::string(session_id));
     impl_->local.erase(std::string(session_id));
+}
+
+void MemoryStorage::set_access_listener(StorageAccessListener listener) {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    impl_->access_listener = std::move(listener);
 }
 
 }  // namespace prowsetk

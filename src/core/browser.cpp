@@ -13,6 +13,8 @@
 #include "prowsetk/lua_runtime.hpp"
 #include "prowsetk/url.hpp"
 
+#include "flatworm/dom_internal.hpp"
+
 namespace prowsetk {
 namespace {
 
@@ -223,7 +225,18 @@ Browser::Browser(BrowserConfig config) : config_(std::move(config)) {
         network_ = std::make_unique<MemoryNetworkClient>();
     }
     storage_ = std::make_unique<MemoryStorage>();
+    storage_->set_access_listener([this](std::string_view store,
+                                         std::string_view key,
+                                         std::string_view operation) {
+        Event event;
+        event.type = EventType::StorageAccess;
+        event.name = std::string(operation);
+        event.attributes["store"] = std::string(store);
+        event.attributes["key"] = std::string(key);
+        events_.emit(event);
+    });
     plugins_ = std::make_unique<PluginRegistry>();
+    plugins_->set_event_dispatcher(&events_);
     wasm_ = make_wasm_runtime();
     lua_ = std::make_unique<LuaRuntime>();
     if (lua_->available()) {
@@ -294,10 +307,34 @@ CapabilitySet Browser::capabilities() const {
 
 WebPlatform Browser::web_platform() const { return default_web_platform(); }
 
+void Browser::handle_unsupported_api(std::string_view name,
+                                     std::string_view message) const {
+    const std::string behavior = config_.unsupported_api_behavior;
+    if (behavior == "exception" || behavior == "abort") {
+        throw Error(ErrorCode::Unsupported, std::string(message));
+    }
+    if (behavior == "default" || behavior == "dummy") {
+        return;
+    }
+    Event event;
+    event.type = EventType::UnsupportedApi;
+    event.name = std::string(name);
+    event.message = std::string(message);
+    events_.emit(event);
+}
+
 Session::Session(Browser* browser, SessionConfig config, std::string id)
     : browser_(browser), config_(std::move(config)), id_(std::move(id)) {
     if (browser_->config().javascript) {
         javascript_ = browser_->create_javascript_runtime();
+        javascript_->set_console_handler([this](const ConsoleMessage& message) {
+            Event event;
+            event.type = EventType::Console;
+            event.url = current_url_;
+            event.name = message.level;
+            event.message = message.text;
+            emit_event(event);
+        });
     }
 }
 
@@ -307,19 +344,38 @@ Session::~Session() {
     }
 }
 
-HttpResponse Session::fetch(std::string_view url) {
-    std::string current(url);
+void Session::emit_event(Event event) {
+    event.session_id = id_;
+    browser_->events().emit(event);
+}
+
+HttpRequest Session::build_request(std::string_view url) {
+    HttpRequest request;
+    request.method = "GET";
+    request.url = std::string(url);
+    request.timeout_ms = browser_->config().timeout_ms;
+    request.max_response_bytes = browser_->config().max_response_bytes;
+    request.headers = headers_;
+    if (header_value(request.headers, "User-Agent").empty()) {
+        request.headers.emplace_back("User-Agent",
+                                     browser_->config().user_agent);
+    }
+    if (header_value(request.headers, "Accept").empty()) {
+        request.headers.emplace_back(
+            "Accept", "text/html,application/xhtml+xml,*/*;q=0.8");
+    }
+    return request;
+}
+
+HttpResponse Session::request(HttpRequest request) {
+    if (closed_) {
+        throw Error(ErrorCode::InvalidArgument, "session is closed");
+    }
     int redirects = 0;
     std::vector<std::string> chain;
 
     while (true) {
-        const Url parsed = parse_url(current);
-        HttpRequest request;
-        request.method = "GET";
-        request.url = current;
-        request.timeout_ms = browser_->config().timeout_ms;
-        request.max_response_bytes = browser_->config().max_response_bytes;
-        request.headers = headers_;
+        const Url parsed = parse_url(request.url);
         if (header_value(request.headers, "User-Agent").empty()) {
             request.headers.emplace_back("User-Agent",
                                          browser_->config().user_agent);
@@ -337,12 +393,12 @@ HttpResponse Session::fetch(std::string_view url) {
 
         Event before;
         before.type = EventType::BeforeRequest;
-        before.url = current;
+        before.url = request.url;
         before.attributes["method"] = request.method;
-        browser_->events().emit(before);
+        emit_event(before);
         if (before.cancelled) {
             throw Error(ErrorCode::SecurityViolation,
-                        "request cancelled by handler: " + current);
+                        "request cancelled by handler: " + request.url);
         }
 
         HttpResponse response = browser_->network_client().send(request);
@@ -350,14 +406,14 @@ HttpResponse Session::fetch(std::string_view url) {
 
         Event after;
         after.type = EventType::AfterResponse;
-        after.url = current;
+        after.url = request.url;
         after.attributes["method"] = request.method;
         after.attributes["status"] = std::to_string(response.status);
         const std::string content_type = response.header("Content-Type");
         if (!content_type.empty()) {
             after.attributes["content-type"] = content_type;
         }
-        browser_->events().emit(after);
+        emit_event(after);
 
         const bool redirect = response.status == 301 || response.status == 302 ||
                               response.status == 303 ||
@@ -366,7 +422,7 @@ HttpResponse Session::fetch(std::string_view url) {
         const std::string location = response.header("Location");
         if (!redirect || location.empty() ||
             !browser_->config().follow_redirects) {
-            response.final_url = current;
+            response.final_url = request.url;
             response.redirect_chain = chain;
             return response;
         }
@@ -378,16 +434,25 @@ HttpResponse Session::fetch(std::string_view url) {
         }
         Event redirect_event;
         redirect_event.type = EventType::BeforeRedirect;
-        redirect_event.url = current;
+        redirect_event.url = request.url;
         redirect_event.attributes["location"] = location;
-        browser_->events().emit(redirect_event);
+        emit_event(redirect_event);
         if (redirect_event.cancelled) {
-            response.final_url = current;
+            response.final_url = request.url;
             response.redirect_chain = chain;
             return response;
         }
-        chain.push_back(current);
-        current = resolve_url(current, location);
+        chain.push_back(request.url);
+        request.url = resolve_url(request.url, location);
+        // 303 always reissues as GET; 301/302 also convert non-idempotent
+        // methods to GET, matching common browser behavior. 307/308 preserve
+        // the method and body.
+        if (response.status == 303 ||
+            (response.status != 307 && response.status != 308 &&
+             request.method != "GET" && request.method != "HEAD")) {
+            request.method = "GET";
+            request.body.clear();
+        }
         ++redirects;
     }
 }
@@ -399,12 +464,12 @@ void Session::navigate(std::string_view url) {
     Event before;
     before.type = EventType::BeforeNavigation;
     before.url = std::string(url);
-    browser_->events().emit(before);
+    emit_event(before);
     if (before.cancelled) {
         return;
     }
 
-    const HttpResponse response = fetch(url);
+    const HttpResponse response = request(build_request(url));
     if (response.status >= 400) {
         throw Error(ErrorCode::NetworkError,
                     "navigation failed with status " +
@@ -418,42 +483,68 @@ void Session::navigate(std::string_view url) {
     after.type = EventType::AfterNavigation;
     after.url = response.final_url;
     after.attributes["status"] = std::to_string(response.status);
-    browser_->events().emit(after);
+    emit_event(after);
 }
 
 void Session::install_document(std::string_view html, std::string url,
                                std::string base_url) {
     document_ = parse_html(html, std::move(url), std::move(base_url));
     current_url_ = document_->url();
+    document_->set_mutation_listener([this](const flatworm::MutationInfo& info) {
+        Event event;
+        event.type = EventType::DomMutation;
+        event.url = current_url_;
+        event.name = info.kind;
+        event.attributes["node"] = info.node_name;
+        if (!info.attribute_name.empty()) {
+            event.attributes["attribute"] = info.attribute_name;
+        }
+        // Mutated values are deliberately not forwarded: private form values
+        // must stay redacted (README "Security and Resource Limits").
+        emit_event(event);
+    });
 
     Event created;
     created.type = EventType::DocumentCreated;
     created.url = current_url_;
     created.name = document_->title();
-    browser_->events().emit(created);
+    created.payload = document_;
+    emit_event(created);
 
     if (javascript_ == nullptr) {
         return;
     }
     if (javascript_->name() == "null") {
-        Event unsupported;
-        unsupported.type = EventType::UnsupportedApi;
-        unsupported.name = "javascript";
-        unsupported.message =
-            "page scripts were not executed: no JavaScript engine";
-        browser_->events().emit(unsupported);
+        browser_->handle_unsupported_api(
+            "javascript", "page scripts were not executed: no JavaScript engine");
         return;
     }
     for (const auto& script : document_->scripts()) {
-        if (script->has_attribute("src")) {
+        const std::string script_text = [&]() -> std::string {
+            if (!script->has_attribute("src")) {
+                return script->text();
+            }
+            // External scripts are fetched host-mediated and executed so that
+            // pages behave like real browsers and endpoint discovery can see
+            // their network calls (README "Parsing HTML and CSS").
+            try {
+                const std::string script_url =
+                    resolve_url(base_url.empty() ? current_url_ : base_url,
+                                script->attribute("src"));
+                return request(build_request(script_url)).body;
+            } catch (const std::exception&) {
+                return {};
+            }
+        }();
+        if (script_text.empty()) {
             continue;
         }
         Event begin;
         begin.type = EventType::BeforeScript;
         begin.url = current_url_;
-        browser_->events().emit(begin);
+        emit_event(begin);
 
-        const ScriptResult result = javascript_->evaluate(script->text());
+        const ScriptResult result = javascript_->evaluate(script_text);
         Event end;
         end.type = EventType::AfterScript;
         end.url = current_url_;
@@ -461,7 +552,7 @@ void Session::install_document(std::string_view html, std::string url,
             end.type = EventType::ScriptException;
             end.message = result.error;
         }
-        browser_->events().emit(end);
+        emit_event(end);
     }
 }
 
@@ -502,7 +593,7 @@ std::string Session::evaluate_js(std::string_view script,
         event.type = EventType::ScriptException;
         event.url = current_url_;
         event.message = result.error;
-        browser_->events().emit(event);
+        emit_event(event);
         throw Error(ErrorCode::JavaScriptError, result.error);
     }
     return result.value;
@@ -535,7 +626,7 @@ void Session::close() {
     Event event;
     event.type = EventType::SessionDestroyed;
     event.name = id_;
-    browser_->events().emit(event);
+    emit_event(event);
 }
 
 }  // namespace prowsetk

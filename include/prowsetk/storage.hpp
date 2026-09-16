@@ -2,6 +2,7 @@
 #define PROWSETK_STORAGE_HPP
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -11,6 +12,13 @@
 #include "prowsetk/url.hpp"
 
 namespace prowsetk {
+
+// Reports a storage access (operation is one of "get", "set", "remove",
+// "clear"; `store` is "local" or "session"). Values are never reported: storage
+// contents may be sensitive (README "Security and Resource Limits").
+using StorageAccessListener = std::function<void(std::string_view store,
+                                                 std::string_view key,
+                                                 std::string_view operation)>;
 
 struct Cookie {
     std::string name;
@@ -47,6 +55,11 @@ public:
     virtual bool remove(std::string_view key) = 0;
     virtual void clear() = 0;
     virtual std::vector<std::string> keys() const = 0;
+
+    // Optional instrumentation hook. Default is a no-op.
+    virtual void set_access_listener(StorageAccessListener listener) {
+        (void)listener;
+    }
 };
 
 // Aggregates the storage backends available to a session. `session_id` selects
@@ -59,6 +72,10 @@ public:
     virtual KeyValueStore& local_storage(std::string_view session_id) = 0;
     virtual KeyValueStore& session_storage(std::string_view session_id) = 0;
     virtual void release_session(std::string_view session_id) = 0;
+
+    // Forwards a storage-access listener to every key/value backend, including
+    // ones created later (a session may create its store lazily).
+    virtual void set_access_listener(StorageAccessListener listener) = 0;
 };
 
 // In-memory implementation. This is the default backend and is also the
@@ -72,6 +89,7 @@ public:
     KeyValueStore& local_storage(std::string_view session_id) override;
     KeyValueStore& session_storage(std::string_view session_id) override;
     void release_session(std::string_view session_id) override;
+    void set_access_listener(StorageAccessListener listener) override;
 
 private:
     struct Impl;

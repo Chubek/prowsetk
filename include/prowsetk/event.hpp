@@ -6,6 +6,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -38,6 +39,9 @@ enum class EventType {
 
 const char* to_string(EventType type) noexcept;
 
+// Reverse lookup for `to_string`. Returns nullopt for unknown names.
+std::optional<EventType> parse_event_type(std::string_view name) noexcept;
+
 struct Event {
     EventType type = EventType::Console;
     std::string url;
@@ -46,6 +50,9 @@ struct Event {
     std::map<std::string, std::string> attributes;
     std::any payload;
     bool cancelled = false;
+    // The session that produced the event, when the event originates in one.
+    // Empty for browser-global events. Used by Lua `session:on` scoping.
+    std::string session_id;
 };
 
 using SubscriptionId = std::uint64_t;

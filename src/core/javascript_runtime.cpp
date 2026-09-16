@@ -20,6 +20,10 @@ public:
         (void)value;
     }
 
+    void set_console_handler(ConsoleHandler handler) override {
+        (void)handler;
+    }
+
     std::string name() const override { return "null"; }
 
     CapabilitySet capabilities() const override {

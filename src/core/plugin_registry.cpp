@@ -30,6 +30,19 @@ struct PluginRegistry::Impl {
     ProwseTkHost host{};
     void (*log_sink)(void*, int, const char*) = nullptr;
     void* log_user_data = nullptr;
+    EventDispatcher* event_dispatcher = nullptr;
+
+    void emit_plugin_event(EventType type, const PluginDescriptor& descriptor) {
+        if (event_dispatcher == nullptr) {
+            return;
+        }
+        Event event;
+        event.type = type;
+        event.name = descriptor.name;
+        event.url = descriptor.path;
+        event.attributes["version"] = descriptor.version;
+        event_dispatcher->emit(event);
+    }
 
     static void log_bridge(void* user_data, int level, const char* message) {
         auto* impl = static_cast<Impl*>(user_data);
@@ -160,6 +173,7 @@ std::size_t PluginRegistry::initialize_all() {
                             loaded.descriptor.name);
         }
         loaded.descriptor.initialized = true;
+        impl_->emit_plugin_event(EventType::PluginInit, loaded.descriptor);
         ++count;
     }
     return count;
@@ -168,6 +182,7 @@ std::size_t PluginRegistry::initialize_all() {
 void PluginRegistry::shutdown_all() {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     for (auto& loaded : impl_->plugins) {
+        impl_->emit_plugin_event(EventType::PluginShutdown, loaded.descriptor);
         if (loaded.plugin != nullptr && loaded.plugin->shutdown != nullptr &&
             loaded.descriptor.initialized) {
             try {
@@ -205,6 +220,11 @@ const PluginDescriptor* PluginRegistry::find(std::string_view name) const {
         }
     }
     return nullptr;
+}
+
+void PluginRegistry::set_event_dispatcher(EventDispatcher* dispatcher) {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    impl_->event_dispatcher = dispatcher;
 }
 
 void PluginRegistry::set_log_sink(

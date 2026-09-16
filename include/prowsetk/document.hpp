@@ -1,6 +1,7 @@
 #ifndef PROWSETK_DOCUMENT_HPP
 #define PROWSETK_DOCUMENT_HPP
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -11,6 +12,7 @@ namespace prowsetk {
 
 namespace flatworm {
 struct Node;
+struct MutationInfo;
 }  // namespace flatworm
 
 struct Attribute {
@@ -57,6 +59,14 @@ public:
     std::string value() const;
     void set_value(std::string_view value);
 
+    // DOM mutation. `append_child` re-parents `child` into this element;
+    // `remove_child` detaches it; `set_text` replaces the element's children
+    // with a single text node. Each operation reports a DomMutation through
+    // the owning document's mutation listener.
+    void append_child(const std::shared_ptr<Element>& child);
+    bool remove_child(const std::shared_ptr<Element>& child);
+    void set_text(std::string_view value);
+
     const std::shared_ptr<flatworm::Node>& node() const noexcept { return node_; }
 
 private:
@@ -96,6 +106,15 @@ public:
     std::vector<std::shared_ptr<Element>> scripts() const;
     std::vector<std::string> resource_urls() const;
     std::map<std::string, std::string> metadata() const;
+
+    // Creates a detached element that is not yet part of the document tree.
+    // Attach it with Element::append_child on a live element.
+    std::shared_ptr<Element> create_element(std::string tag);
+
+    // Registers a listener invoked for every DOM mutation in this document's
+    // tree. A Session installs one to emit EventType::DomMutation events.
+    void set_mutation_listener(
+        std::function<void(const flatworm::MutationInfo&)> listener);
 
     const std::shared_ptr<flatworm::Node>& raw_root() const noexcept { return root_; }
 

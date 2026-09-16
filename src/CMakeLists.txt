@@ -55,6 +55,17 @@ if(PROWSETK_HAVE_TOMLPLUSPLUS)
     prowsetk_install_library(prowsetk_tomlplusplus)
 endif()
 
+# WASM configuration is threaded through as compile definitions so the disabled
+# runtime reports the build configuration honestly (AGENTS.md 4.1, 9).
+if(PROWSETK_ENABLE_WASM)
+    target_compile_definitions(prowsetk_core PRIVATE PROWSETK_ENABLE_WASM=1)
+endif()
+if(PROWSETK_ENABLE_WASI)
+    target_compile_definitions(prowsetk_core PRIVATE PROWSETK_ENABLE_WASI=1)
+endif()
+target_compile_definitions(prowsetk_core PRIVATE
+    PROWSETK_WASM_RUNTIME_NAME="${PROWSETK_WASM_RUNTIME}")
+
 add_library(ProwseTk::core ALIAS prowsetk_core)
 
 prowsetk_install_library(prowsetk_core)

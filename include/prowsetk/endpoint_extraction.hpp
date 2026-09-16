@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "prowsetk/document.hpp"
+#include "prowsetk/event.hpp"
 #include "prowsetk/redaction.hpp"
 
 namespace prowsetk {
@@ -59,11 +60,22 @@ public:
     void observe(std::string method, std::string url, int status,
                  std::string content_type = {});
 
+    // Feeds an external script's text into discovery so that `fetch` and
+    // `XMLHttpRequest` calls in external scripts are inspected (README
+    // "Endpoint Extraction": inline and external JavaScript).
+    void observe_script(std::string source_url, std::string_view script_text);
+
+    // Optional event channel. When set, extract() emits an EndpointDiscovered
+    // event for every endpoint that passes the confidence threshold.
+    void set_event_dispatcher(EventDispatcher* dispatcher);
+
     const EndpointExtractionOptions& options() const noexcept { return options_; }
 
 private:
     EndpointExtractionOptions options_;
     std::vector<DiscoveredEndpoint> observed_;
+    std::vector<DiscoveredEndpoint> observed_scripts_;
+    EventDispatcher* event_dispatcher_ = nullptr;
 };
 
 // Renders a deterministic OpenAPI 3.x YAML document from discovered endpoints.

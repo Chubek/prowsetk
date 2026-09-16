@@ -32,6 +32,27 @@ endif()
 prowsetk_gtest(prowsetk_unit_network "prowsetk.unit.network."
     "unit;network" test_network.cpp)
 
+find_package(Threads REQUIRED)
+prowsetk_gtest(prowsetk_unit_socket_network "prowsetk.unit.network.socket."
+    "unit;network" test_socket_network.cpp)
+target_link_libraries(prowsetk_unit_socket_network PRIVATE Threads::Threads)
+
+prowsetk_gtest(prowsetk_unit_dom_mutation "prowsetk.unit.document.mutation."
+    "unit;document" test_dom_mutation.cpp)
+
+prowsetk_gtest(prowsetk_unit_engine_events "prowsetk.unit.events."
+    "unit;core" test_engine_events.cpp)
+
+prowsetk_gtest(prowsetk_unit_project_config "prowsetk.unit.project-config."
+    "unit;core" test_project_config.cpp)
+if(PROWSETK_HAVE_TOMLPLUSPLUS)
+    target_compile_definitions(prowsetk_unit_project_config PRIVATE
+        PROWSETK_HAVE_TOMLPLUSPLUS=1)
+endif()
+
+prowsetk_gtest(prowsetk_unit_wasm "prowsetk.unit.wasm."
+    "unit;wasm" test_wasm.cpp)
+
 prowsetk_gtest(prowsetk_unit_endpoints "prowsetk.unit.endpoint-extraction."
     "unit;endpoint-extraction" test_endpoint_extraction.cpp)
 

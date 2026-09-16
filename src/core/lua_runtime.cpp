@@ -1,5 +1,9 @@
 #include "prowsetk/lua_runtime.hpp"
 
+#include <algorithm>
+#include <any>
+#include <atomic>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 
@@ -32,6 +36,7 @@ struct LuaBrowser {
 
 struct LuaSession {
     std::shared_ptr<Session>* session = nullptr;
+    std::shared_ptr<std::atomic<bool>> alive;
 };
 
 struct LuaDocument {
@@ -44,11 +49,55 @@ struct LuaElement {
 
 struct LuaExtractor {
     int on_document_ref = LUA_NOREF;
+    std::shared_ptr<std::atomic<bool>> alive;
 };
 
 struct LuaEndpointResult {
     EndpointExtractionResult* result = nullptr;
 };
+
+// A Lua-registered event subscription. The registry reference is owned by the
+// runtime (unreferenced when the subscription is removed or the runtime is
+// destroyed); `alive` lets the owning userdata invalidate it early.
+struct LuaSubscription {
+    EventDispatcher* dispatcher = nullptr;
+    SubscriptionId id = 0;
+    int ref = LUA_NOREF;
+    std::shared_ptr<std::atomic<bool>> alive;
+};
+
+LuaRuntime* runtime_from_state(lua_State* L) {
+    lua_getfield(L, LUA_REGISTRYINDEX, "prowsetk.lua_runtime");
+    auto* runtime = static_cast<LuaRuntime*>(lua_touserdata(L, -1));
+    lua_pop(L, 1);
+    return runtime;
+}
+
+void push_event_table(lua_State* L, const Event& event) {
+    lua_createtable(L, 0, 6);
+    lua_pushstring(L, to_string(event.type));
+    lua_setfield(L, -2, "type");
+    if (!event.url.empty()) {
+        lua_pushlstring(L, event.url.c_str(), event.url.size());
+        lua_setfield(L, -2, "url");
+    }
+    if (!event.name.empty()) {
+        lua_pushlstring(L, event.name.c_str(), event.name.size());
+        lua_setfield(L, -2, "name");
+    }
+    if (!event.message.empty()) {
+        lua_pushlstring(L, event.message.c_str(), event.message.size());
+        lua_setfield(L, -2, "message");
+    }
+    lua_newtable(L);
+    for (const auto& [key, value] : event.attributes) {
+        lua_pushlstring(L, value.c_str(), value.size());
+        lua_setfield(L, -2, key.c_str());
+    }
+    lua_setfield(L, -2, "attributes");
+    lua_pushboolean(L, event.cancelled ? 1 : 0);
+    lua_setfield(L, -2, "cancelled");
+}
 
 LuaBrowser* check_browser(lua_State* L, int index) {
     return static_cast<LuaBrowser*>(luaL_checkudata(L, index, kBrowserMeta));
@@ -222,6 +271,7 @@ void push_session(lua_State* L, const std::shared_ptr<Session>& session) {
     auto* userdata =
         static_cast<LuaSession*>(lua_newuserdatauv(L, sizeof(LuaSession), 0));
     userdata->session = new std::shared_ptr<Session>(session);
+    userdata->alive = std::make_shared<std::atomic<bool>>(true);
     luaL_setmetatable(L, kSessionMeta);
 }
 
@@ -262,7 +312,10 @@ int protect(lua_State* L, F&& function) {
 
 int browser_gc(lua_State* L) {
     auto* userdata = check_browser(L, 1);
-    if (userdata->owned) {
+    if (userdata->owned && userdata->browser != nullptr) {
+        if (LuaRuntime* runtime = runtime_from_state(L)) {
+            runtime->release_subscriptions(&userdata->browser->events());
+        }
         delete userdata->browser;
     }
     userdata->browser = nullptr;
@@ -286,14 +339,98 @@ int browser_create_session(lua_State* L) {
 }
 
 int browser_install_extension(lua_State* L) {
-    (void)L;
-    lua_pushboolean(L, 1);
-    return 1;
+    return protect(L, [&]() -> int {
+        auto* userdata = check_browser(L, 1);
+        luaL_checktype(L, 2, LUA_TUSERDATA);
+        if (luaL_testudata(L, 2, kExtractorMeta) == nullptr) {
+            luaL_error(L, "install_extension expects an lprowsext.extractor");
+            return 0;
+        }
+        auto* extractor = check_extractor(L, 2);
+        if (extractor->on_document_ref == LUA_NOREF) {
+            luaL_error(L, "extractor has no on_document callback");
+            return 0;
+        }
+        if (extractor->alive == nullptr) {
+            extractor->alive = std::make_shared<std::atomic<bool>>(true);
+        }
+        const int callback_ref = extractor->on_document_ref;
+        const std::shared_ptr<std::atomic<bool>> alive = extractor->alive;
+        EventDispatcher* dispatcher = &userdata->browser->events();
+        auto handler = [L, callback_ref, alive](Event& event) {
+            if (!alive->load()) {
+                return;
+            }
+            std::shared_ptr<Document> document;
+            try {
+                if (event.payload.type() ==
+                    typeid(std::shared_ptr<Document>)) {
+                    document =
+                        std::any_cast<std::shared_ptr<Document>>(event.payload);
+                }
+            } catch (const std::bad_any_cast&) {
+            }
+            if (document == nullptr) {
+                return;
+            }
+            lua_rawgeti(L, LUA_REGISTRYINDEX, callback_ref);
+            if (!lua_isfunction(L, -1)) {
+                lua_pop(L, 1);
+                return;
+            }
+            push_document(L, document);
+            if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
+                lua_pop(L, 1);
+            }
+        };
+        const SubscriptionId id =
+            dispatcher->subscribe(EventType::DocumentCreated,
+                                  std::move(handler));
+        LuaRuntime* runtime = runtime_from_state(L);
+        if (runtime != nullptr) {
+            runtime->add_subscription(dispatcher, id, LUA_NOREF, alive);
+        }
+        lua_pushboolean(L, 1);
+        return 1;
+    });
 }
 
 int browser_new(lua_State* L) {
     return protect(L, [&]() -> int {
-        auto* browser = new Browser();
+        BrowserConfig config;
+        if (lua_istable(L, 1)) {
+            const auto read_bool = [&](const char* key, bool& target) {
+                lua_getfield(L, 1, key);
+                if (lua_isboolean(L, -1)) {
+                    target = lua_toboolean(L, -1) != 0;
+                }
+                lua_pop(L, 1);
+            };
+            const auto read_int = [&](const char* key, int& target) {
+                lua_getfield(L, 1, key);
+                if (lua_isnumber(L, -1)) {
+                    target = static_cast<int>(lua_tointeger(L, -1));
+                }
+                lua_pop(L, 1);
+            };
+            const auto read_string = [&](const char* key, std::string& target) {
+                lua_getfield(L, 1, key);
+                if (lua_isstring(L, -1)) {
+                    target = lua_tostring(L, -1);
+                }
+                lua_pop(L, 1);
+            };
+            read_bool("javascript", config.javascript);
+            read_bool("follow_redirects", config.follow_redirects);
+            read_int("max_redirects", config.max_redirects);
+            read_int("timeout", config.timeout_ms);
+            read_int("timeout_ms", config.timeout_ms);
+            read_string("user_agent", config.user_agent);
+            read_bool("observe_network", config.observe_network);
+            read_string("unsupported_api_behavior",
+                        config.unsupported_api_behavior);
+        }
+        auto* browser = new Browser(std::move(config));
         push_browser(L, browser, true);
         return 1;
     });
@@ -301,6 +438,9 @@ int browser_new(lua_State* L) {
 
 int session_gc(lua_State* L) {
     auto* userdata = check_session(L, 1);
+    if (userdata->alive != nullptr) {
+        userdata->alive->store(false);
+    }
     delete userdata->session;
     userdata->session = nullptr;
     return 0;
@@ -367,6 +507,147 @@ int session_close(lua_State* L) {
     auto* userdata = check_session(L, 1);
     (*userdata->session)->close();
     return 0;
+}
+
+int session_on(lua_State* L) {
+    return protect(L, [&]() -> int {
+        auto* userdata = check_session(L, 1);
+        const char* name = luaL_checkstring(L, 2);
+        luaL_checktype(L, 3, LUA_TFUNCTION);
+        const std::optional<EventType> type = parse_event_type(name);
+        const bool all = std::string_view(name) == "all";
+        if (!type.has_value() && !all) {
+            luaL_error(L, "unknown event type: %s", name);
+            return 0;
+        }
+        LuaRuntime* runtime = runtime_from_state(L);
+        if (runtime == nullptr) {
+            luaL_error(L, "Lua runtime is not bound to a host state");
+            return 0;
+        }
+        const std::shared_ptr<std::atomic<bool>> alive =
+            userdata->alive != nullptr ? userdata->alive
+                                       : std::make_shared<std::atomic<bool>>(true);
+        lua_pushvalue(L, 3);
+        const int ref = luaL_ref(L, LUA_REGISTRYINDEX);
+        const std::string session_id = (*userdata->session)->id();
+        EventDispatcher* dispatcher = &(*userdata->session)->events();
+        auto handler = [L, ref, alive, session_id](Event& event) {
+            if (!alive->load()) {
+                return;
+            }
+            if (!event.session_id.empty() &&
+                event.session_id != session_id) {
+                return;
+            }
+            lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
+            if (!lua_isfunction(L, -1)) {
+                lua_pop(L, 1);
+                return;
+            }
+            push_event_table(L, event);
+            if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
+                lua_pop(L, 1);
+            }
+        };
+        const SubscriptionId id =
+            type.has_value()
+                ? dispatcher->subscribe(*type, std::move(handler))
+                : dispatcher->subscribe_all(std::move(handler));
+        runtime->add_subscription(dispatcher, id, ref, alive);
+        lua_pushinteger(L, static_cast<lua_Integer>(id));
+        return 1;
+    });
+}
+
+int session_off(lua_State* L) {
+    return protect(L, [&]() -> int {
+        const lua_Integer id = luaL_checkinteger(L, 2);
+        LuaRuntime* runtime = runtime_from_state(L);
+        const bool removed =
+            runtime != nullptr &&
+            runtime->unsubscribe_subscription(
+                static_cast<SubscriptionId>(id));
+        lua_pushboolean(L, removed ? 1 : 0);
+        return 1;
+    });
+}
+
+int capabilities_has(lua_State* L) {
+    const char* name = luaL_checkstring(L, 2);
+    lua_getfield(L, 1, name);
+    if (lua_isnil(L, -1)) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    const char* classification = lua_tostring(L, -1);
+    const bool supported =
+        classification != nullptr &&
+        std::string_view(classification) != "unsupported";
+    lua_pushboolean(L, supported ? 1 : 0);
+    return 1;
+}
+
+int session_capabilities(lua_State* L) {
+    return protect(L, [&]() -> int {
+        auto* userdata = check_session(L, 1);
+        const CapabilitySet capabilities = (*userdata->session)->capabilities();
+        lua_newtable(L);
+        for (const auto& capability : capabilities.all()) {
+            lua_pushstring(L, to_string(capability.classification));
+            lua_setfield(L, -2, capability.name.c_str());
+        }
+        lua_pushcfunction(L, capabilities_has);
+        lua_setfield(L, -2, "has");
+        return 1;
+    });
+}
+
+int session_request(lua_State* L) {
+    return protect(L, [&]() -> int {
+        auto* userdata = check_session(L, 1);
+        const char* method = luaL_checkstring(L, 2);
+        const char* url = luaL_checkstring(L, 3);
+        HttpRequest request;
+        request.method = method;
+        request.url = url;
+        if (lua_istable(L, 4)) {
+            lua_getfield(L, 4, "headers");
+            if (lua_istable(L, -1)) {
+                lua_pushnil(L);
+                while (lua_next(L, -2) != 0) {
+                    if (lua_isstring(L, -2) && lua_isstring(L, -1)) {
+                        request.headers.emplace_back(lua_tostring(L, -2),
+                                                     lua_tostring(L, -1));
+                    }
+                    lua_pop(L, 1);
+                }
+            }
+            lua_pop(L, 1);
+            lua_getfield(L, 4, "body");
+            if (lua_isstring(L, -1)) {
+                request.body = lua_tostring(L, -1);
+            }
+            lua_pop(L, 1);
+        }
+        const HttpResponse response =
+            (*userdata->session)->request(std::move(request));
+        lua_newtable(L);
+        lua_pushinteger(L, response.status);
+        lua_setfield(L, -2, "status");
+        lua_pushlstring(L, response.body.c_str(), response.body.size());
+        lua_setfield(L, -2, "body");
+        lua_pushlstring(L, response.final_url.c_str(),
+                        response.final_url.size());
+        lua_setfield(L, -2, "final_url");
+        lua_newtable(L);
+        for (const auto& [header, value] : response.headers) {
+            lua_pushlstring(L, value.c_str(), value.size());
+            lua_setfield(L, -2, header.c_str());
+        }
+        lua_setfield(L, -2, "headers");
+        return 1;
+    });
 }
 
 int document_gc(lua_State* L) {
@@ -710,12 +991,16 @@ int lprowsext_extractor_new(lua_State* L) {
     auto* userdata =
         static_cast<LuaExtractor*>(lua_newuserdatauv(L, sizeof(LuaExtractor), 0));
     userdata->on_document_ref = LUA_NOREF;
+    userdata->alive = std::make_shared<std::atomic<bool>>(true);
     luaL_setmetatable(L, kExtractorMeta);
     return 1;
 }
 
 int extractor_gc(lua_State* L) {
     auto* userdata = check_extractor(L, 1);
+    if (userdata->alive != nullptr) {
+        userdata->alive->store(false);
+    }
     if (userdata->on_document_ref != LUA_NOREF) {
         luaL_unref(L, LUA_REGISTRYINDEX, userdata->on_document_ref);
         userdata->on_document_ref = LUA_NOREF;
@@ -762,17 +1047,79 @@ int extractor_run(lua_State* L) {
     });
 }
 
+int lprowsext_wasm_module_close(lua_State* L);
+
+// Returns the WasmRuntime that Lua scripts should observe: the bound browser's
+// runtime when one is bound, otherwise a fresh disabled runtime.
+WasmRuntime& effective_wasm_runtime(lua_State* L) {
+    static std::unique_ptr<WasmRuntime> fallback;
+    if (LuaRuntime* runtime = runtime_from_state(L)) {
+        Browser* browser = runtime->bound_browser();
+        if (browser != nullptr) {
+            return browser->wasm();
+        }
+    }
+    if (fallback == nullptr) {
+        fallback = make_wasm_runtime();
+    }
+    return *fallback;
+}
+
 int lprowsext_wasm_available(lua_State* L) {
-    lua_pushboolean(L, 0);
+    lua_pushboolean(L, effective_wasm_runtime(L).enabled() ? 1 : 0);
     return 1;
 }
 
 int lprowsext_wasm_load(lua_State* L) {
-    (void)L;
-    lua_pushnil(L);
-    lua_pushliteral(
-        L, "WASM plugins are unavailable; this build has no WASM runtime");
-    return 2;
+    return protect(L, [&]() -> int {
+        const char* path = luaL_checkstring(L, 1);
+        WasmRuntime& runtime = effective_wasm_runtime(L);
+        if (!runtime.enabled()) {
+            lua_pushnil(L);
+            lua_pushliteral(
+                L, "WASM plugins are unavailable; this build has no WASM runtime");
+            return 2;
+        }
+        std::shared_ptr<WasmModule> module;
+        try {
+            module = runtime.load_module(path);
+        } catch (const std::exception& error) {
+            lua_pushnil(L);
+            lua_pushlstring(L, error.what(), std::strlen(error.what()));
+            return 2;
+        }
+        WasmSandboxConfig config;
+        if (lua_istable(L, 2)) {
+            lua_getfield(L, 2, "memory_limit_mb");
+            if (lua_isnumber(L, -1)) {
+                config.max_memory_bytes =
+                    static_cast<std::size_t>(lua_tointeger(L, -1)) * 1024u * 1024u;
+            }
+            lua_pop(L, 1);
+            lua_getfield(L, 2, "execution_timeout_ms");
+            if (lua_isnumber(L, -1)) {
+                config.execution_timeout_ms =
+                    static_cast<std::uint32_t>(lua_tointeger(L, -1));
+            }
+            lua_pop(L, 1);
+        }
+        // Managed handle only; Lua never receives raw Wasmtime objects.
+        lua_createtable(L, 0, 4);
+        lua_pushlstring(L, module->name().c_str(), module->name().size());
+        lua_setfield(L, -2, "name");
+        lua_pushstring(L, path);
+        lua_setfield(L, -2, "path");
+        lua_pushboolean(L, 1);
+        lua_setfield(L, -2, "loaded");
+        lua_pushcfunction(L, lprowsext_wasm_module_close);
+        lua_setfield(L, -2, "close");
+        return 1;
+    });
+}
+
+int lprowsext_wasm_module_close(lua_State* L) {
+    lua_pushboolean(L, 1);
+    return 1;
 }
 
 // Document processors, keyed by name. They live in the module table's registry
@@ -810,25 +1157,30 @@ int lprowsext_get_document_processor(lua_State* L) {
 
 int lprowsext_process_document(lua_State* L) {
     return protect(L, [&]() -> int {
-        lua_getglobal(L, "lprowsext");
-        lua_getfield(L, -1, "_processors");
-        lua_createtable(L, 0, 4);
-        if (lua_istable(L, -2)) {
-            lua_pushnil(L);
-            while (lua_next(L, -3) != 0) {
-                if (lua_isfunction(L, -1)) {
-                    lua_pushvalue(L, -3);  // key
-                    lua_pushvalue(L, 1);   // document
+        lua_getglobal(L, "lprowsext");        // 1
+        lua_getfield(L, 1, "_processors");    // 2
+        lua_createtable(L, 0, 4);             // 3 (result)
+        if (lua_istable(L, 2)) {
+            lua_pushnil(L);                   // 4 (key)
+            while (lua_next(L, 2) != 0) {     // key=4, value=5
+                if (lua_isfunction(L, 5)) {
+                    lua_pushvalue(L, 1);      // document argument
                     if (lua_pcall(L, 1, 1, 0) == LUA_OK) {
-                        lua_setfield(L, -4, lua_tostring(L, -1));
+                        // key=4, retval=5
+                        lua_pushvalue(L, 4);  // key
+                        lua_pushvalue(L, 5);  // retval
+                        lua_settable(L, 3);   // result[key] = retval
+                        lua_pop(L, 1);        // pop retval
                     } else {
-                        lua_pop(L, 1);
+                        lua_pop(L, 2);        // pop error and value
                     }
                 } else {
-                    lua_pop(L, 1);
+                    lua_pop(L, 1);            // pop non-function value
                 }
+                // key remains at index 4 for lua_next to continue
             }
         }
+        lua_pushvalue(L, 3);
         return 1;
     });
 }
@@ -846,6 +1198,10 @@ const luaL_Reg session_methods[] = {
     {"evaluate_js", session_evaluate_js},
     {"current_url", session_current_url},
     {"set_header", session_set_header},
+    {"request", session_request},
+    {"on", session_on},
+    {"off", session_off},
+    {"capabilities", session_capabilities},
     {"close", session_close},
     {nullptr, nullptr},
 };
@@ -920,6 +1276,7 @@ struct LuaRuntime::Impl {
     std::string last_error;
 #ifdef PROWSETK_HAVE_LUA
     lua_State* state = nullptr;
+    std::vector<LuaSubscription> subscriptions;
 #endif
 };
 
@@ -928,6 +1285,9 @@ LuaRuntime::LuaRuntime() : impl_(std::make_unique<Impl>()) {
     impl_->state = luaL_newstate();
     if (impl_->state != nullptr) {
         luaL_openlibs(impl_->state);
+        // The registry slot lets C functions find the owning runtime.
+        lua_pushlightuserdata(impl_->state, this);
+        lua_setfield(impl_->state, LUA_REGISTRYINDEX, "prowsetk.lua_runtime");
         register_metatable(impl_->state, kBrowserMeta, browser_methods,
                            browser_gc);
         register_metatable(impl_->state, kSessionMeta, session_methods,
@@ -1021,6 +1381,18 @@ LuaRuntime::LuaRuntime() : impl_(std::make_unique<Impl>()) {
 LuaRuntime::~LuaRuntime() {
 #ifdef PROWSETK_HAVE_LUA
     if (impl_->state != nullptr) {
+        for (const auto& subscription : impl_->subscriptions) {
+            if (subscription.dispatcher != nullptr) {
+                subscription.dispatcher->unsubscribe(subscription.id);
+            }
+            if (subscription.alive != nullptr) {
+                subscription.alive->store(false);
+            }
+            if (subscription.ref != LUA_NOREF) {
+                luaL_unref(impl_->state, LUA_REGISTRYINDEX, subscription.ref);
+            }
+        }
+        impl_->subscriptions.clear();
         lua_close(impl_->state);
         impl_->state = nullptr;
     }
@@ -1036,6 +1408,70 @@ bool LuaRuntime::available() noexcept {
 }
 
 void LuaRuntime::bind_browser(Browser* browser) { impl_->bound_browser = browser; }
+
+Browser* LuaRuntime::bound_browser() noexcept { return impl_->bound_browser; }
+
+void LuaRuntime::add_subscription(EventDispatcher* dispatcher,
+                                  std::uint64_t subscription_id,
+                                  int registry_ref,
+                                  std::shared_ptr<std::atomic<bool>> alive) {
+#ifdef PROWSETK_HAVE_LUA
+    impl_->subscriptions.push_back(
+        LuaSubscription{dispatcher, static_cast<SubscriptionId>(subscription_id),
+                        registry_ref, std::move(alive)});
+#endif
+}
+
+void LuaRuntime::release_subscriptions(EventDispatcher* dispatcher) {
+#ifdef PROWSETK_HAVE_LUA
+    if (dispatcher == nullptr) {
+        return;
+    }
+    for (auto it = impl_->subscriptions.begin();
+         it != impl_->subscriptions.end();) {
+        if (it->dispatcher == dispatcher) {
+            dispatcher->unsubscribe(it->id);
+            if (it->alive != nullptr) {
+                it->alive->store(false);
+            }
+            if (impl_->state != nullptr && it->ref != LUA_NOREF) {
+                luaL_unref(impl_->state, LUA_REGISTRYINDEX, it->ref);
+            }
+            it = impl_->subscriptions.erase(it);
+        } else {
+            ++it;
+        }
+    }
+#endif
+}
+
+bool LuaRuntime::unsubscribe_subscription(std::uint64_t subscription_id) {
+#ifdef PROWSETK_HAVE_LUA
+    const auto it = std::find_if(
+        impl_->subscriptions.begin(), impl_->subscriptions.end(),
+        [subscription_id](const LuaSubscription& subscription) {
+            return static_cast<std::uint64_t>(subscription.id) ==
+                   subscription_id;
+        });
+    if (it == impl_->subscriptions.end()) {
+        return false;
+    }
+    if (it->dispatcher != nullptr) {
+        it->dispatcher->unsubscribe(it->id);
+    }
+    if (it->alive != nullptr) {
+        it->alive->store(false);
+    }
+    if (impl_->state != nullptr && it->ref != LUA_NOREF) {
+        luaL_unref(impl_->state, LUA_REGISTRYINDEX, it->ref);
+    }
+    impl_->subscriptions.erase(it);
+    return true;
+#else
+    (void)subscription_id;
+    return false;
+#endif
+}
 
 LuaResult LuaRuntime::run(std::string_view code, std::string_view chunk_name) {
 #ifdef PROWSETK_HAVE_LUA

@@ -290,6 +290,35 @@ void EndpointExtractor::observe(std::string method, std::string url, int status,
     observed_.push_back(std::move(endpoint));
 }
 
+void EndpointExtractor::observe_script(std::string source_url,
+                                       std::string_view script_text) {
+    for (auto& [method, reference] : script_endpoints(script_text)) {
+        if (reference.empty()) {
+            continue;
+        }
+        DiscoveredEndpoint endpoint;
+        endpoint.url = std::move(reference);
+        endpoint.method = normalize_method(std::move(method));
+        endpoint.discovery_method = "external-script";
+        endpoint.confidence = 0.65;
+        endpoint.source = std::move(source_url);
+        try {
+            const Url parsed = parse_url(endpoint.url);
+            endpoint.path = parsed.path.empty() ? "/" : parsed.path;
+            endpoint.parameters = query_parameters(parsed.query);
+        } catch (...) {
+            endpoint.path = "/";
+        }
+        endpoint.notes.push_back(
+            "inferred from a fetch/XMLHttpRequest call in an external script");
+        observed_scripts_.push_back(std::move(endpoint));
+    }
+}
+
+void EndpointExtractor::set_event_dispatcher(EventDispatcher* dispatcher) {
+    event_dispatcher_ = dispatcher;
+}
+
 EndpointExtractionResult EndpointExtractor::extract(
     const Document& document) const {
     EndpointExtractionResult result;
@@ -323,6 +352,12 @@ EndpointExtractionResult EndpointExtractor::extract(
 
     if (options_.observe_network) {
         for (const auto& endpoint : observed_) {
+            add(endpoint);
+        }
+    }
+
+    if (options_.inspect_scripts) {
+        for (const auto& endpoint : observed_scripts_) {
             add(endpoint);
         }
     }
@@ -436,6 +471,18 @@ EndpointExtractionResult EndpointExtractor::extract(
             continue;
         }
         std::sort(endpoint.parameters.begin(), endpoint.parameters.end());
+        if (event_dispatcher_ != nullptr) {
+            Event event;
+            event.type = EventType::EndpointDiscovered;
+            event.url = endpoint.url;
+            event.name = endpoint.method + " " + endpoint.path;
+            event.attributes["method"] = endpoint.method;
+            event.attributes["path"] = endpoint.path;
+            event.attributes["discovery-method"] = endpoint.discovery_method;
+            event.attributes["confidence"] =
+                format_confidence(endpoint.confidence);
+            event_dispatcher_->emit(event);
+        }
         result.endpoints.push_back(std::move(endpoint));
     }
 

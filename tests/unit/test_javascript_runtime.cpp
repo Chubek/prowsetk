@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <string>
+#include <vector>
 
 #include "prowsetk/javascript_runtime.hpp"
 
@@ -64,8 +65,27 @@ TEST(JavaScriptRuntime, AdvertisesOnlyInstalledHostBindings) {
         return;
     }
     EXPECT_TRUE(capabilities.has("javascript"));
-    EXPECT_FALSE(capabilities.has("console"));
+    // console is installed and forwarded as events; fetch is not installed.
+    EXPECT_TRUE(capabilities.has("console"));
     EXPECT_FALSE(capabilities.has("fetch"));
+}
+
+TEST(JavaScriptRuntime, ForwardsConsoleCallsToHandler) {
+    auto runtime = prowsetk::make_javascript_runtime();
+    if (runtime->name() == "null") GTEST_SKIP();
+    std::vector<prowsetk::ConsoleMessage> messages;
+    runtime->set_console_handler(
+        [&messages](const prowsetk::ConsoleMessage& message) {
+            messages.push_back(message);
+        });
+    const auto result = runtime->evaluate(
+        "console.log('hello', 42); console.warn('careful');");
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_EQ(messages.size(), 2u);
+    EXPECT_EQ(messages[0].level, "log");
+    EXPECT_EQ(messages[0].text, "hello 42");
+    EXPECT_EQ(messages[1].level, "warn");
+    EXPECT_EQ(messages[1].text, "careful");
 }
 
 }  // namespace

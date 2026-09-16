@@ -2,6 +2,7 @@
 #define PROWSETK_JAVASCRIPT_RUNTIME_HPP
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -21,6 +22,15 @@ struct ScriptResult {
     std::string error;
 };
 
+// A console message forwarded from page JavaScript (README "Events and Hooks":
+// console message). `level` is one of "log", "info", "warn", "error", "debug".
+struct ConsoleMessage {
+    std::string level;
+    std::string text;
+};
+
+using ConsoleHandler = std::function<void(const ConsoleMessage&)>;
+
 // Executes page JavaScript. JavaScript is the page-scripting runtime only; it
 // is never an extension mechanism (README "JavaScript Execution").
 class JavaScriptRuntime {
@@ -30,6 +40,11 @@ public:
     virtual ScriptResult evaluate(std::string_view script,
                                   const ScriptOptions& options = {}) = 0;
     virtual void set_global(std::string_view name, std::string_view value) = 0;
+
+    // Installs the handler invoked for every console.* call made by page
+    // scripts. A session wires it to emit EventType::Console events.
+    virtual void set_console_handler(ConsoleHandler handler) = 0;
+
     virtual std::string name() const = 0;
     virtual CapabilitySet capabilities() const = 0;
 };

@@ -68,3 +68,26 @@ TEST(PluginRegistry, MissingFileThrows) {
     PluginRegistry registry;
     EXPECT_THROW(registry.load_native("/nonexistent/plugin.so"), Error);
 }
+
+TEST(PluginRegistry, EmitsLifecycleEvents) {
+    PluginRegistry registry;
+    registry.load_native(TEST_PLUGIN_PATH);
+    prowsetk::EventDispatcher dispatcher;
+    registry.set_event_dispatcher(&dispatcher);
+
+    std::vector<prowsetk::EventType> types;
+    std::vector<std::string> names;
+    dispatcher.subscribe_all([&](prowsetk::Event& event) {
+        types.push_back(event.type);
+        names.push_back(event.name);
+    });
+
+    EXPECT_EQ(registry.initialize_all(), 1u);
+    registry.shutdown_all();
+
+    ASSERT_EQ(types.size(), 2u);
+    EXPECT_EQ(types[0], prowsetk::EventType::PluginInit);
+    EXPECT_EQ(types[1], prowsetk::EventType::PluginShutdown);
+    EXPECT_EQ(names[0], "test-plugin");
+    EXPECT_EQ(names[1], "test-plugin");
+}
