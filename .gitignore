@@ -39,6 +39,7 @@ Makefile
 .prowse/
 *.prowse-cache
 .cache
+.absyncache
 
 # ---------------------------------------------------------------------------
 # Test and coverage output
