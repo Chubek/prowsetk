@@ -70,6 +70,10 @@ add_library(ProwseTk::core ALIAS prowsetk_core)
 
 prowsetk_install_library(prowsetk_core)
 
+if(EXISTS "${PROJECT_SOURCE_DIR}/plugins/scrape2oapi/CMakeLists.txt")
+    add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/scrape2oapi" "${CMAKE_BINARY_DIR}/plugins/scrape2oapi")
+endif()
+
 if(PROWSETK_BUILD_CLI)
     add_subdirectory(cli)
 endif()

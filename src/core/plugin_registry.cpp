@@ -5,6 +5,9 @@
 
 #include "prowsetk/error.hpp"
 
+#include <algorithm>
+#include <cctype>
+
 #if defined(__unix__) || defined(__APPLE__)
 #include <dlfcn.h>
 #endif
@@ -220,6 +223,57 @@ const PluginDescriptor* PluginRegistry::find(std::string_view name) const {
         }
     }
     return nullptr;
+}
+
+std::size_t PluginRegistry::discover(const std::filesystem::path& directory) {
+    std::vector<std::string> warnings;
+    return discover(directory, warnings);
+}
+
+std::size_t PluginRegistry::discover(const std::filesystem::path& directory,
+                                     std::vector<std::string>& warnings) {
+    warnings.clear();
+    if (!std::filesystem::exists(directory) ||
+        !std::filesystem::is_directory(directory)) {
+        warnings.push_back("plugin directory does not exist: " + directory.string());
+        return 0;
+    }
+    std::size_t loaded = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+        if (!entry.is_regular_file()) continue;
+        const auto path = entry.path();
+        const auto ext = path.extension().string();
+        std::string lower = ext;
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
+        try {
+            if (lower == ".so" || lower == ".dylib" || lower == ".dll") {
+                load_native(path);
+                ++loaded;
+            } else if (lower == ".lua") {
+                load_lua(path);
+                ++loaded;
+            } else if (lower == ".wasm") {
+                load_wasm(path, WasmSandboxConfig{});
+                ++loaded;
+            }
+        } catch (const std::exception& ex) {
+            warnings.push_back(path.string() + ": " + ex.what());
+        } catch (...) {
+            warnings.push_back(path.string() + ": unknown error during discovery");
+        }
+    }
+    return loaded;
+}
+
+bool PluginRegistry::has_capability(std::string_view capability) const {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    for (const auto& loaded : impl_->plugins) {
+        for (const auto& cap : loaded.descriptor.capabilities) {
+            if (cap == capability) return true;
+        }
+    }
+    return false;
 }
 
 void PluginRegistry::set_event_dispatcher(EventDispatcher* dispatcher) {
