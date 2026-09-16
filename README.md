@@ -21,6 +21,7 @@ complete browser compatibility or pixel-perfect rendering.
 - [Plugin System](#plugin-system)
 - [WASM Runtime](#wasm-runtime)
 - [Endpoint Extraction](#endpoint-extraction)
+- [Web Interface](#web-interface)
 - [JavaScript Execution](#javascript-execution)
 - [Asynchronous Operation](#asynchronous-operation)
 - [Events and Hooks](#events-and-hooks)
@@ -923,6 +924,85 @@ Configurable behavior:
 - OpenAPI version
 - Confidence thresholds
 
+## Web Interface
+
+ProwseTk ships an embeddable **web interface**: a headless JSON REST API and a
+static web UI layered over the C++ core. It mirrors the workflow of a
+ClaudeFlair-style headless browser tool — navigate, inspect, scrape, evaluate,
+and extract endpoints from a browser tab or any HTTP client — without a display
+server, a windowing system, or a third-party browser engine.
+
+The interface lives in two C++ components:
+
+- **`WebInterface`** (`include/prowsetk/web_interface.hpp`) routes an HTTP
+  request to a response. `WebInterface::handle(WebRequest)` is pure and
+  deterministic: it never opens a socket and never throws, returning an error
+  response instead. All browsing is host-mediated through the owned `Browser`'s
+  `NetworkClient`.
+- **`HttpServer`** adapts a `WebInterface` to a POSIX listening socket with a
+  minimal, dependency-free HTTP/1.1 implementation. It is single-threaded and
+  blocking, so requests are served one at a time in a deterministic order.
+
+The web interface reuses the existing engine: `Session::navigate`,
+`Document::query_selector_all`, `evaluate_xpath`, `Session::evaluate_js`, and
+`EndpointExtractor`. Secrets are redacted by the engine's `RedactionPolicy`, and
+endpoint provenance/confidence are preserved exactly as in the library API.
+
+### REST API
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/health` | Version, engine, and active session count |
+| `GET` | `/api/capabilities` | Runtime capability/classification report |
+| `GET` | `/api/sessions` | List active sessions |
+| `POST` | `/api/sessions` | Create a session |
+| `GET` | `/api/sessions/{id}` | Session summary |
+| `DELETE` | `/api/sessions/{id}` | Close a session |
+| `POST` | `/api/sessions/{id}/navigate` | Navigate (`{ "url": ... }`) and return title/text |
+| `POST` | `/api/sessions/{id}/content` | Full rendered HTML |
+| `POST` | `/api/sessions/{id}/text` | Extracted text |
+| `POST` | `/api/sessions/{id}/scrape` | Per-CSS-selector element extraction |
+| `POST` | `/api/sessions/{id}/xpath` | XPath 1.0 evaluation |
+| `POST` | `/api/sessions/{id}/links` | Link discovery |
+| `POST` | `/api/sessions/{id}/evaluate` | JavaScript evaluation |
+| `POST` | `/api/sessions/{id}/endpoints` | Endpoint discovery → OpenAPI 3.x YAML |
+| `GET` | `/`, `/app.js`, `/style.css` | Static web UI from `resources/web/` |
+
+Request bodies are JSON; errors return a JSON body with `error` (an
+`ErrorCode` name) and `message`. The `/endpoints` action honors
+`follow_links`, `observe_network`, `infer_schemas`, `include_provenance`,
+`redact_secrets`, `max_depth`, `max_pages`, `minimum_confidence`, and
+`openapi_version`. With `observe_network` set, responses observed during
+navigation are reported as high-confidence, `observed-network` endpoints
+alongside the document's own discoveries.
+
+### Command-line
+
+```sh
+prowsetk serve [--host 127.0.0.1] [--port 8080] [--web-root DIR] [--no-javascript]
+prowsetk endpoints --url https://example.com --output build/openapi.yaml
+prowsetk version
+```
+
+`prowsetk serve` starts the web interface and prints the listening address;
+`--web-root` overrides the default `resources/web/` asset directory. The web UI
+is a single-page application (`resources/web/index.html`, `app.js`,
+`style.css`) with no framework and no build step: it drives the same REST API
+from the browser.
+
+### Constraints
+
+- The interface is a host-application feature, not a new execution layer. It
+  does not change the C++/Lua/WASM/JavaScript boundaries.
+- Network access stays host-mediated through `NetworkClient`; `HttpServer` is
+  the only component that opens a socket, and it listens only where the host
+  tells it to.
+- The scaffold ships a minimal, self-contained JSON parser/serializer internal
+  to `src/core/web_interface.cpp`; a production build may swap in a vendored
+  JSON stack without changing the HTTP contract.
+- Static-file routes reject path traversal (`..`) and serve only from the
+  configured web root.
+
 ## JavaScript Execution
 
 Web pages may contain JavaScript, so Flatworm uses **QuickJS** as its JavaScript
@@ -1636,6 +1716,7 @@ prowsetk/
 ├── cmake/                  Build helper modules and dependency wiring
 ├── include/prowsetk/       Public C++ headers and ProwseTk-Plugin.h
 ├── src/                    Core engine, Flatworm, and plugin implementations
+│   └── cli/                The `prowsetk` command-line interface
 ├── tests/                  CTest-conformant unit and integration suites
 ├── third_party/            Vendored dependencies (git submodules)
 ├── wit/                    WIT interface definitions for WASM plugins
@@ -1644,6 +1725,7 @@ prowsetk/
 ├── drivers/                Lua driver scripts
 ├── examples/               Example C++ and Lua applications
 ├── resources/              Runtime resources and manifests
+│   └── web/                Static web interface (index.html, app.js, style.css)
 └── scripts/                Developer and scaffolding scripts
 ```
 

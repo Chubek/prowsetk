@@ -36,7 +36,7 @@ struct ExtensionConfig {
     std::string module;
     bool enabled = true;
     bool autoload = true;
-    std::vector<std::string> requires;
+    std::vector<std::string> required_modules;
     std::vector<std::string> events;
 };
 

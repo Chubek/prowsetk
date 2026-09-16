@@ -82,7 +82,10 @@ if(EXISTS "${PROWSETK_TOMLPLUSPLUS_SOURCE_DIR}/toml.hpp")
     if(NOT TARGET prowsetk_tomlplusplus)
         add_library(prowsetk_tomlplusplus INTERFACE)
         target_include_directories(prowsetk_tomlplusplus INTERFACE
-            "${PROWSETK_TOMLPLUSPLUS_SOURCE_DIR}")
+            "$<BUILD_INTERFACE:${PROWSETK_TOMLPLUSPLUS_SOURCE_DIR}>"
+            "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+        install(FILES "${PROWSETK_TOMLPLUSPLUS_SOURCE_DIR}/toml.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
         add_library(ProwseTk::tomlplusplus ALIAS prowsetk_tomlplusplus)
     endif()
     set(PROWSETK_HAVE_TOMLPLUSPLUS ON CACHE INTERNAL

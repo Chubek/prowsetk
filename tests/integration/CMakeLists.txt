@@ -12,3 +12,10 @@ if(PROWSETK_HAVE_PUGIXML)
     target_compile_definitions(prowsetk_integration_lua_extensions PRIVATE
         PROWSETK_HAVE_PUGIXML=1)
 endif()
+
+find_package(Threads REQUIRED)
+prowsetk_gtest(prowsetk_integration_web_interface
+    "prowsetk.integration.web-interface."
+    "integration;web-interface" test_web_interface.cpp)
+target_link_libraries(prowsetk_integration_web_interface PRIVATE
+    Threads::Threads)

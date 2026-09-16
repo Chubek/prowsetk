@@ -19,7 +19,7 @@ const toml::table* find_table(const toml::table& root, const char* key) {
     if (it == root.end() || !it->second.is_table()) {
         return nullptr;
     }
-    return &it->second.as_table();
+    return it->second.as_table();
 }
 
 std::string table_string(const toml::table& table, const char* key,
@@ -28,7 +28,7 @@ std::string table_string(const toml::table& table, const char* key,
     if (it == table.end() || !it->second.is_string()) {
         return fallback;
     }
-    return it->second.as_string().get();
+    return it->second.as_string()->get();
 }
 
 bool table_bool(const toml::table& table, const char* key, bool fallback) {
@@ -36,7 +36,7 @@ bool table_bool(const toml::table& table, const char* key, bool fallback) {
     if (it == table.end() || !it->second.is_boolean()) {
         return fallback;
     }
-    return it->second.as_boolean().get();
+    return it->second.as_boolean()->get();
 }
 
 std::int64_t table_int(const toml::table& table, const char* key,
@@ -45,15 +45,15 @@ std::int64_t table_int(const toml::table& table, const char* key,
     if (it == table.end() || !it->second.is_integer()) {
         return fallback;
     }
-    return it->second.as_integer().get();
+    return it->second.as_integer()->get();
 }
 
 double table_float(const toml::table& table, const char* key, double fallback) {
     const auto it = table.find(key);
-    if (it == table.end() || !it->second.is_floating()) {
+    if (it == table.end() || !it->second.is_floating_point()) {
         return fallback;
     }
-    return it->second.as_floating().get();
+    return it->second.as_floating_point()->get();
 }
 
 std::vector<std::string> table_string_array(const toml::table& table,
@@ -63,9 +63,9 @@ std::vector<std::string> table_string_array(const toml::table& table,
     if (it == table.end() || !it->second.is_array()) {
         return values;
     }
-    for (const auto& item : it->second.as_array()) {
+    for (const auto& item : *it->second.as_array()) {
         if (item.is_string()) {
-            values.push_back(item.as_string().get());
+            values.push_back(item.as_string()->get());
         }
     }
     return values;
@@ -80,13 +80,13 @@ std::vector<ConfigArgument> parse_arguments(const toml::array* array) {
         if (!item.is_table()) {
             continue;
         }
-        const auto& table = item.as_table();
+        const auto* table = item.as_table();
         ConfigArgument argument;
-        argument.name = table_string(table, "name", {});
-        argument.type = table_string(table, "type", "string");
-        argument.required = table_bool(table, "required", false);
-        argument.secret = table_bool(table, "secret", false);
-        argument.default_value = table_string(table, "default", {});
+        argument.name = table_string(*table, "name", {});
+        argument.type = table_string(*table, "type", "string");
+        argument.required = table_bool(*table, "required", false);
+        argument.secret = table_bool(*table, "secret", false);
+        argument.default_value = table_string(*table, "default", {});
         if (!argument.name.empty()) {
             arguments.push_back(std::move(argument));
         }
@@ -99,21 +99,21 @@ void parse_drivers(const toml::table& root, ProjectConfig& config) {
     if (it == root.end() || !it->second.is_array()) {
         return;
     }
-    for (const auto& item : it->second.as_array()) {
+    for (const auto& item : *it->second.as_array()) {
         if (!item.is_table()) {
             continue;
         }
-        const auto& table = item.as_table();
+        const auto* table = item.as_table();
         DriverConfig driver;
-        driver.name = table_string(table, "name", {});
-        driver.description = table_string(table, "description", {});
-        driver.script = table_string(table, "script", {});
-        driver.entrypoint = table_string(table, "entrypoint", "main");
-        driver.enabled = table_bool(table, "enabled", true);
-        const auto args = table.find("arguments");
+        driver.name = table_string(*table, "name", {});
+        driver.description = table_string(*table, "description", {});
+        driver.script = table_string(*table, "script", {});
+        driver.entrypoint = table_string(*table, "entrypoint", "main");
+        driver.enabled = table_bool(*table, "enabled", true);
+        const auto args = table->find("arguments");
         driver.arguments =
-            args != table.end() && args->second.is_array()
-                ? parse_arguments(&args->second.as_array())
+            args != table->end() && args->second.is_array()
+                ? parse_arguments(args->second.as_array())
                 : std::vector<ConfigArgument>{};
         if (!driver.name.empty()) {
             config.drivers.push_back(std::move(driver));
@@ -126,20 +126,20 @@ void parse_extensions(const toml::table& root, ProjectConfig& config) {
     if (it == root.end() || !it->second.is_array()) {
         return;
     }
-    for (const auto& item : it->second.as_array()) {
+    for (const auto& item : *it->second.as_array()) {
         if (!item.is_table()) {
             continue;
         }
-        const auto& table = item.as_table();
+        const auto* table = item.as_table();
         ExtensionConfig extension;
-        extension.name = table_string(table, "name", {});
-        extension.description = table_string(table, "description", {});
-        extension.type = table_string(table, "type", "lua");
-        extension.module = table_string(table, "module", {});
-        extension.enabled = table_bool(table, "enabled", true);
-        extension.autoload = table_bool(table, "autoload", true);
-        extension.requires = table_string_array(table, "requires");
-        extension.events = table_string_array(table, "events");
+        extension.name = table_string(*table, "name", {});
+        extension.description = table_string(*table, "description", {});
+        extension.type = table_string(*table, "type", "lua");
+        extension.module = table_string(*table, "module", {});
+        extension.enabled = table_bool(*table, "enabled", true);
+        extension.autoload = table_bool(*table, "autoload", true);
+        extension.required_modules = table_string_array(*table, "requires");
+        extension.events = table_string_array(*table, "events");
         if (!extension.name.empty()) {
             config.extensions.push_back(std::move(extension));
         }
@@ -151,20 +151,20 @@ void parse_plugins(const toml::table& root, ProjectConfig& config) {
     if (it == root.end() || !it->second.is_array()) {
         return;
     }
-    for (const auto& item : it->second.as_array()) {
+    for (const auto& item : *it->second.as_array()) {
         if (!item.is_table()) {
             continue;
         }
-        const auto& table = item.as_table();
+        const auto* table = item.as_table();
         PluginConfig plugin;
-        plugin.name = table_string(table, "name", {});
-        plugin.description = table_string(table, "description", {});
-        plugin.type = table_string(table, "type", {});
-        plugin.path = table_string(table, "path", {});
-        plugin.enabled = table_bool(table, "enabled", true);
-        plugin.autoload = table_bool(table, "autoload", false);
-        plugin.capabilities = table_string_array(table, "capabilities");
-        plugin.lua_modules = table_string_array(table, "lua_modules");
+        plugin.name = table_string(*table, "name", {});
+        plugin.description = table_string(*table, "description", {});
+        plugin.type = table_string(*table, "type", {});
+        plugin.path = table_string(*table, "path", {});
+        plugin.enabled = table_bool(*table, "enabled", true);
+        plugin.autoload = table_bool(*table, "autoload", false);
+        plugin.capabilities = table_string_array(*table, "capabilities");
+        plugin.lua_modules = table_string_array(*table, "lua_modules");
         if (!plugin.name.empty()) {
             config.plugins.push_back(std::move(plugin));
         }
@@ -176,37 +176,37 @@ void parse_plugin_config(const toml::table& root, ProjectConfig& config) {
     if (it == root.end() || !it->second.is_table()) {
         return;
     }
-    for (const auto& [key, value] : it->second.as_table()) {
+    for (const auto& [key, value] : *it->second.as_table()) {
         if (!value.is_table()) {
             continue;
         }
-        const auto& table = value.as_table();
+        const auto* table = value.as_table();
         PluginSandboxConfig sandbox;
-        const auto component = table.find("component");
-        if (component != table.end() && component->second.is_boolean()) {
-            sandbox.component = component->second.as_boolean().get();
+        const auto component = table->find("component");
+        if (component != table->end() && component->second.is_boolean()) {
+            sandbox.component = component->second.as_boolean()->get();
         }
-        const auto wasi = table.find("wasi");
-        if (wasi != table.end() && wasi->second.is_boolean()) {
-            sandbox.wasi = wasi->second.as_boolean().get();
+        const auto wasi = table->find("wasi");
+        if (wasi != table->end() && wasi->second.is_boolean()) {
+            sandbox.wasi = wasi->second.as_boolean()->get();
         }
-        const auto memory = table.find("max_memory_mb");
-        if (memory != table.end() && memory->second.is_integer()) {
+        const auto memory = table->find("max_memory_mb");
+        if (memory != table->end() && memory->second.is_integer()) {
             sandbox.max_memory_mb =
-                static_cast<std::size_t>(memory->second.as_integer().get());
+                static_cast<std::size_t>(memory->second.as_integer()->get());
         }
-        const auto timeout = table.find("execution_timeout_ms");
-        if (timeout != table.end() && timeout->second.is_integer()) {
+        const auto timeout = table->find("execution_timeout_ms");
+        if (timeout != table->end() && timeout->second.is_integer()) {
             sandbox.execution_timeout_ms = static_cast<std::uint32_t>(
-                timeout->second.as_integer().get());
+                timeout->second.as_integer()->get());
         }
-        const auto filesystem = table.find("filesystem");
-        if (filesystem != table.end() && filesystem->second.is_string()) {
-            sandbox.filesystem = filesystem->second.as_string().get();
+        const auto filesystem = table->find("filesystem");
+        if (filesystem != table->end() && filesystem->second.is_string()) {
+            sandbox.filesystem = filesystem->second.as_string()->get();
         }
-        const auto network = table.find("network");
-        if (network != table.end() && network->second.is_string()) {
-            sandbox.network = network->second.as_string().get();
+        const auto network = table->find("network");
+        if (network != table->end() && network->second.is_string()) {
+            sandbox.network = network->second.as_string()->get();
         }
         config.plugin_config[std::string(key)] = std::move(sandbox);
     }
@@ -217,21 +217,21 @@ void parse_commands(const toml::table& root, ProjectConfig& config) {
     if (it == root.end() || !it->second.is_array()) {
         return;
     }
-    for (const auto& item : it->second.as_array()) {
+    for (const auto& item : *it->second.as_array()) {
         if (!item.is_table()) {
             continue;
         }
-        const auto& table = item.as_table();
+        const auto* table = item.as_table();
         CommandConfig command;
-        command.name = table_string(table, "name", {});
-        command.description = table_string(table, "description", {});
-        command.handler = table_string(table, "handler", {});
-        command.driver = table_string(table, "driver", {});
-        command.output = table_string(table, "output", {});
-        const auto args = table.find("arguments");
+        command.name = table_string(*table, "name", {});
+        command.description = table_string(*table, "description", {});
+        command.handler = table_string(*table, "handler", {});
+        command.driver = table_string(*table, "driver", {});
+        command.output = table_string(*table, "output", {});
+        const auto args = table->find("arguments");
         command.arguments =
-            args != table.end() && args->second.is_array()
-                ? parse_arguments(&args->second.as_array())
+            args != table->end() && args->second.is_array()
+                ? parse_arguments(args->second.as_array())
                 : std::vector<ConfigArgument>{};
         if (!command.name.empty()) {
             config.commands.push_back(std::move(command));
@@ -339,7 +339,7 @@ void parse_variables(const toml::table& root, ProjectConfig& config) {
     }
     for (const auto& [key, value] : *table) {
         if (value.is_string()) {
-            config.variables[std::string(key)] = value.as_string().get();
+            config.variables[std::string(key)] = value.as_string()->get();
         }
     }
 }
@@ -430,7 +430,8 @@ ProjectConfig parse_project_config(std::string_view contents) {
         return parse_root(root);
     } catch (const toml::parse_error& error) {
         throw Error(ErrorCode::ParseError,
-                    std::string("invalid Prowse.toml: ") + error.description());
+                    std::string("invalid Prowse.toml: ") +
+                        std::string(error.description()));
     }
 #else
     (void)contents;

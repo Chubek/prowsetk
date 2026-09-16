@@ -46,3 +46,6 @@ prowsetk_gtest(prowsetk_unit_javascript "prowsetk.unit.javascript."
 
 prowsetk_gtest(prowsetk_unit_web_platform "prowsetk.unit.web-platform."
     "unit;javascript" test_web_platform.cpp)
+
+prowsetk_gtest(prowsetk_unit_web_interface "prowsetk.unit.web-interface."
+    "unit;web-interface" test_web_interface.cpp)

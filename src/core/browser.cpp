@@ -351,7 +351,12 @@ HttpResponse Session::fetch(std::string_view url) {
         Event after;
         after.type = EventType::AfterResponse;
         after.url = current;
+        after.attributes["method"] = request.method;
         after.attributes["status"] = std::to_string(response.status);
+        const std::string content_type = response.header("Content-Type");
+        if (!content_type.empty()) {
+            after.attributes["content-type"] = content_type;
+        }
         browser_->events().emit(after);
 
         const bool redirect = response.status == 301 || response.status == 302 ||

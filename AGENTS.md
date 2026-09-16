@@ -89,6 +89,7 @@ Create and maintain a CMake build at the repository root.
 - Provide these options, all defaulting safely:
   - `PROWSETK_BUILD_TESTS` (default `ON`)
   - `PROWSETK_BUILD_EXAMPLES` (default `ON`)
+  - `PROWSETK_BUILD_CLI` (default `ON`)
   - `PROWSETK_ENABLE_WASM` (default `OFF`)
   - `PROWSETK_WASM_RUNTIME` (default `wasmtime`)
   - `PROWSETK_ENABLE_WASI` (default `OFF`)
@@ -182,7 +183,7 @@ tests/
 
 - `LABELS` — one or more of `unit`, `integration`, and a component label
   (`document`, `network`, `lua`, `javascript`, `wasm`, `plugin`,
-  `endpoint-extraction`, `storage`).
+  `endpoint-extraction`, `storage`, `web-interface`).
 - `TIMEOUT` — a finite timeout on every test. No test may hang the suite.
 - `WILL_FAIL` only for tests whose purpose is to assert failure.
 

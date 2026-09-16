@@ -15,6 +15,7 @@ include(Dependencies)
 
 option(PROWSETK_BUILD_TESTS    "Build the test suite"                    ON)
 option(PROWSETK_BUILD_EXAMPLES "Build the example programs"              ON)
+option(PROWSETK_BUILD_CLI      "Build the prowsetk command-line interface" ON)
 option(PROWSETK_ENABLE_WASM    "Enable the WebAssembly plugin runtime"   OFF)
 set(PROWSETK_WASM_RUNTIME "wasmtime" CACHE STRING "WASM runtime backend")
 option(PROWSETK_ENABLE_WASI    "Enable unrestricted WASI capabilities"   OFF)

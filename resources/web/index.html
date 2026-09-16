@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ProwseTk — Headless Browser</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">ProwseTk</span>
+      <span class="engine">Flatworm</span>
+    </div>
+    <form id="nav-form" class="nav">
+      <input id="url" type="text" placeholder="https://example.com" autocomplete="off" spellcheck="false">
+      <button type="submit" id="nav-button">Navigate</button>
+    </form>
+    <div class="session">
+      <span class="label">session</span>
+      <span id="session-id" class="mono">—</span>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="document" class="tab active">Document</button>
+    <button data-tab="scrape" class="tab">Scrape</button>
+    <button data-tab="xpath" class="tab">XPath</button>
+    <button data-tab="links" class="tab">Links</button>
+    <button data-tab="javascript" class="tab">JavaScript</button>
+    <button data-tab="endpoints" class="tab">Endpoints</button>
+    <button data-tab="api" class="tab">API</button>
+  </nav>
+
+  <main>
+    <section id="document" class="panel active">
+      <div class="meta">
+        <div><span class="label">URL</span> <span id="doc-url" class="mono">—</span></div>
+        <div><span class="label">Title</span> <span id="doc-title">—</span></div>
+      </div>
+      <div class="toolbar">
+        <button id="content-button">View HTML</button>
+        <button id="text-button">Extract Text</button>
+      </div>
+      <pre id="doc-body" class="output">Navigate to a URL to begin.</pre>
+    </section>
+
+    <section id="scrape" class="panel">
+      <p class="hint">Extract elements by CSS selector. Separate multiple selectors with commas.</p>
+      <div class="row">
+        <input id="scrape-selector" type="text" placeholder="h1, a.title, .price" spellcheck="false">
+        <button id="scrape-button">Scrape</button>
+      </div>
+      <pre id="scrape-output" class="output"></pre>
+    </section>
+
+    <section id="xpath" class="panel">
+      <p class="hint">Run an XPath 1.0 expression against the current document.</p>
+      <div class="row">
+        <input id="xpath-expr" type="text" placeholder="//a/@href" spellcheck="false">
+        <button id="xpath-button">Evaluate</button>
+      </div>
+      <pre id="xpath-output" class="output"></pre>
+    </section>
+
+    <section id="links" class="panel">
+      <div class="toolbar"><button id="links-button">Discover Links</button></div>
+      <div id="links-output" class="output table-output"></div>
+    </section>
+
+    <section id="javascript" class="panel">
+      <p class="hint">Evaluate JavaScript in the page context (requires a QuickJS-enabled build).</p>
+      <textarea id="js-script" rows="6" spellcheck="false">document.title</textarea>
+      <div class="toolbar"><button id="js-button">Evaluate</button></div>
+      <pre id="js-output" class="output"></pre>
+    </section>
+
+    <section id="endpoints" class="panel">
+      <p class="hint">Heuristically discover API endpoints and generate an OpenAPI 3.x specification.</p>
+      <div class="row options">
+        <label><input type="checkbox" id="opt-follow" checked> follow links</label>
+        <label><input type="checkbox" id="opt-observe" checked> observe network</label>
+        <label><input type="checkbox" id="opt-redact" checked> redact secrets</label>
+      </div>
+      <div class="toolbar">
+        <button id="endpoints-button">Extract Endpoints</button>
+        <button id="yaml-button">Show OpenAPI YAML</button>
+      </div>
+      <pre id="endpoints-output" class="output"></pre>
+    </section>
+
+    <section id="api" class="panel">
+      <p class="hint">Runtime capabilities of this build, reported through the compatibility policy.</p>
+      <div class="toolbar"><button id="capabilities-button">Refresh Capabilities</button></div>
+      <div id="api-output" class="output table-output"></div>
+    </section>
+  </main>
+
+  <footer class="statusbar">
+    <span id="status">ready</span>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
