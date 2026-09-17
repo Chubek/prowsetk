@@ -1,0 +1,379 @@
+openapi: 3.1.0
+info:
+  title: ProwseTk Web Service
+  version: 0.3.0
+  description: |
+    Gateway API for offering ProwseTk as a managed web service.
+    The service fronts an upstream `prowsetk serve` instance and adds
+    asynchronous runs, lifecycle controls, and artifact download endpoints.
+servers:
+  - url: http://127.0.0.1:8090
+tags:
+  - name: system
+  - name: sessions
+  - name: runs
+paths:
+  /api/v1/health:
+    get:
+      tags: [system]
+      summary: Health status for gateway and upstream
+      operationId: getHealth
+      responses:
+        "200":
+          description: Health payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/v1/sessions:
+    get:
+      tags: [sessions]
+      summary: List cached sessions
+      operationId: listSessions
+      responses:
+        "200":
+          description: Session list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SessionSummary"
+    post:
+      tags: [sessions]
+      summary: Create session
+      operationId: createSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionCreateRequest"
+      responses:
+        "200":
+          description: Created session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionSummary"
+
+  /api/v1/sessions/{session_id}:
+    get:
+      tags: [sessions]
+      summary: Get session
+      operationId: getSession
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Session payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionSummary"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [sessions]
+      summary: Delete session locally and upstream
+      operationId: deleteSession
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Deletion status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: boolean
+                required: [deleted]
+
+  /api/v1/sessions/{session_id}/navigate:
+    post:
+      tags: [sessions]
+      summary: Navigate a session
+      operationId: navigateSession
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionNavigateRequest"
+      responses:
+        "200":
+          description: Navigation summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionNavigateResponse"
+        "502":
+          $ref: "#/components/responses/UpstreamFailure"
+
+  /api/v1/runs:
+    get:
+      tags: [runs]
+      summary: List discovery runs
+      operationId: listRuns
+      responses:
+        "200":
+          description: Run list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RunSummary"
+    post:
+      tags: [runs]
+      summary: Queue discovery run
+      operationId: createRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunCreateRequest"
+      responses:
+        "200":
+          description: Queued run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunSummary"
+
+  /api/v1/runs/{run_id}:
+    get:
+      tags: [runs]
+      summary: Get run state
+      operationId: getRun
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Run summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunSummary"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/runs/{run_id}/cancel:
+    post:
+      tags: [runs]
+      summary: Cancel run
+      operationId: cancelRun
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Updated run state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunSummary"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/runs/{run_id}/result:
+    get:
+      tags: [runs]
+      summary: Get terminal run payload
+      operationId: getRunResult
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Run result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/runs/{run_id}/openapi.yaml:
+    get:
+      tags: [runs]
+      summary: Download OpenAPI artifact
+      operationId: downloadOpenApiArtifact
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: OpenAPI YAML
+          content:
+            application/yaml:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+components:
+  parameters:
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      schema:
+        type: string
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: Invalid state transition
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UpstreamFailure:
+      description: Upstream ProwseTk request failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
+
+    HealthResponse:
+      type: object
+      required: [service, environment, status, upstream_status, active_sessions, active_runs, time]
+      properties:
+        service:
+          type: string
+        environment:
+          type: string
+        status:
+          type: string
+          enum: [ok, degraded]
+        upstream_status:
+          type: string
+          enum: [ok, unreachable]
+        active_sessions:
+          type: integer
+        active_runs:
+          type: integer
+        time:
+          type: string
+          format: date-time
+
+    SessionSummary:
+      type: object
+      required: [id, title, url, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SessionCreateRequest:
+      type: object
+      properties:
+        preferred_id:
+          type: string
+
+    SessionNavigateRequest:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+
+    SessionNavigateResponse:
+      type: object
+      required: [id, title, url, excerpt]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+        excerpt:
+          type: string
+
+    RunCreateRequest:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+        session_id:
+          type: string
+        discover_options:
+          type: object
+          additionalProperties: true
+
+    RunSummary:
+      type: object
+      required: [id, status, session_id, created_at, updated_at, url]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed, cancelled]
+        session_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        url:
+          type: string
+          format: uri
+        error:
+          type: string
+          nullable: true
+
+    RunResult:
+      type: object
+      required: [run, metadata]
+      properties:
+        run:
+          $ref: "#/components/schemas/RunSummary"
+        openapi_yaml:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true

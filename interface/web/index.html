@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ProwseTk Cloud Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/css/main.css">
+  <script type="module" src="/assets/js/main.js"></script>
+</head>
+<body>
+  <div class="atmosphere" aria-hidden="true"></div>
+  <header class="topbar">
+    <div class="brand">
+      <span class="glyph">P</span>
+      <div>
+        <strong>ProwseTk Service</strong>
+        <small>Headless browser automation as a web service</small>
+      </div>
+    </div>
+    <div>
+      <span class="pill" id="system-state">Connecting</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel launch-panel">
+      <h1>Create Discovery Run</h1>
+      <p>Queue endpoint extraction jobs from URLs and export OpenAPI artifacts.</p>
+
+      <form id="run-form" class="run-form">
+        <label for="run-url">Target URL</label>
+        <div class="input-row">
+          <input id="run-url" type="url" placeholder="https://example.com" required autocomplete="url" spellcheck="false">
+          <button id="run-submit" type="submit">Start Run</button>
+        </div>
+      </form>
+
+      <div class="switches">
+        <label><input id="follow-links" type="checkbox"> Follow links</label>
+        <label><input id="observe-network" type="checkbox" checked> Observe network</label>
+        <label><input id="infer-schemas" type="checkbox" checked> Infer schemas</label>
+      </div>
+
+      <p id="flash" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="panel runs-panel">
+      <div class="panel-head">
+        <h2>Run Queue</h2>
+        <button class="ghost" id="refresh-runs" type="button">Refresh</button>
+      </div>
+      <div id="runs" class="run-list"><div class="empty">No runs yet.</div></div>
+    </section>
+
+    <section class="panel artifact-panel">
+      <div class="panel-head">
+        <h2>Artifact</h2>
+        <a id="artifact-link" class="ghost disabled" href="#">Download OpenAPI</a>
+      </div>
+      <pre id="artifact-preview">Select a completed run to preview artifact output.</pre>
+    </section>
+  </main>
+</body>
+</html>
