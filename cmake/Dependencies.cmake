@@ -1,5 +1,29 @@
 include_guard(GLOBAL)
 
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+add_library(ProwseTk::crypto ALIAS OpenSSL::Crypto)
+
+# Tokyo Cabinet is used by the optional persistent session backend.
+set(PROWSETK_TCB_SOURCE_DIR "${PROJECT_SOURCE_DIR}/third_party/Tokyo-Cabinet")
+if(EXISTS "${PROWSETK_TCB_SOURCE_DIR}/tcbdb.c")
+    add_library(prowsetk_tokyocabinet STATIC
+        "${PROWSETK_TCB_SOURCE_DIR}/tcutil.c"
+        "${PROWSETK_TCB_SOURCE_DIR}/tchdb.c"
+        "${PROWSETK_TCB_SOURCE_DIR}/tcbdb.c"
+        "${PROWSETK_TCB_SOURCE_DIR}/tcfdb.c"
+        "${PROWSETK_TCB_SOURCE_DIR}/tctdb.c"
+        "${PROWSETK_TCB_SOURCE_DIR}/tcadb.c"
+        "${PROWSETK_TCB_SOURCE_DIR}/myconf.c"
+        "${PROWSETK_TCB_SOURCE_DIR}/md5.c")
+    set_target_properties(prowsetk_tokyocabinet PROPERTIES
+        EXPORT_NAME tokyocabinet POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(prowsetk_tokyocabinet PRIVATE
+        "${PROWSETK_TCB_SOURCE_DIR}")
+    target_link_libraries(prowsetk_tokyocabinet PUBLIC m pthread z bz2)
+    add_library(ProwseTk::tokyocabinet ALIAS prowsetk_tokyocabinet)
+    prowsetk_install_library(prowsetk_tokyocabinet)
+endif()
+
 # Declarative dependency wiring. This is the single place that names third-party
 # packages. Locate each dependency with find_package(... CONFIG) and, when it is
 # not found, fall back to vendored sources under third_party/. Every dependency

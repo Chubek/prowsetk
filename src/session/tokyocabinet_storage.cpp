@@ -1,6 +1,7 @@
 #include "prowsetk/storage.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
@@ -18,6 +19,17 @@ extern "C" {
 
 namespace prowsetk {
 namespace {
+
+std::filesystem::path local_path(const std::filesystem::path& base,
+                                 std::string_view session_id) {
+    constexpr char digits[] = "0123456789abcdef";
+    std::string name = "local_";
+    for (unsigned char byte : session_id) {
+        name.push_back(digits[byte >> 4]);
+        name.push_back(digits[byte & 15]);
+    }
+    return base / (name + ".tcb");
+}
 
 std::string to_lower(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](char c) {
@@ -69,43 +81,69 @@ bool expired(const Cookie& cookie) {
 
 std::string serialize_cookie(const Cookie& cookie) {
     std::string result;
-    result += cookie.name + "\0";
-    result += cookie.value + "\0";
-    result += cookie.domain + "\0";
-    result += cookie.path + "\0";
-    result += std::string(cookie.secure ? "1" : "0") + "\0";
-    result += std::string(cookie.http_only ? "1" : "0") + "\0";
-    result += std::string(cookie.host_only ? "1" : "0") + "\0";
-    result += (cookie.expires_unix ? std::to_string(cookie.expires_unix.value()) : "") + "\0";
-    result += cookie.same_site + "\0";
+    const auto field = [&](std::string_view value) {
+        const auto length = static_cast<std::uint32_t>(value.size());
+        for (int shift = 24; shift >= 0; shift -= 8) {
+            result.push_back(static_cast<char>(length >> shift));
+        }
+        result.append(value);
+    };
+    result = "PTK1";
+    field(cookie.name);
+    field(cookie.value);
+    field(cookie.domain);
+    field(cookie.path);
+    field(cookie.secure ? "1" : "0");
+    field(cookie.http_only ? "1" : "0");
+    field(cookie.host_only ? "1" : "0");
+    field(cookie.expires_unix ? std::to_string(*cookie.expires_unix) : "");
+    field(cookie.same_site);
     return result;
 }
 
 Cookie deserialize_cookie(const char* data, int size) {
     Cookie cookie;
-    const char* p = data;
-    const char* end = data + size;
-    
-    cookie.name = p; p += cookie.name.size() + 1;
-    if (p >= end) return cookie;
-    cookie.value = p; p += cookie.value.size() + 1;
-    if (p >= end) return cookie;
-    cookie.domain = p; p += cookie.domain.size() + 1;
-    if (p >= end) return cookie;
-    cookie.path = p; p += cookie.path.size() + 1;
-    if (p >= end) return cookie;
-    cookie.secure = (*p == '1'); p += 2;
-    if (p >= end) return cookie;
-    cookie.http_only = (*p == '1'); p += 2;
-    if (p >= end) return cookie;
-    cookie.host_only = (*p == '1'); p += 2;
-    if (p >= end) return cookie;
-    if (*p) {
-        cookie.expires_unix = std::stoll(p);
+    if (size < 4 || std::string_view(data, 4) != "PTK1") return cookie;
+    const auto bytes = reinterpret_cast<const unsigned char*>(data);
+    std::size_t offset = 4;
+    const auto field = [&]() -> std::optional<std::string> {
+        if (size < 0 || offset > static_cast<std::size_t>(size) ||
+            static_cast<std::size_t>(size) - offset < 4) return std::nullopt;
+        std::uint32_t length = 0;
+        for (int i = 0; i < 4; ++i) {
+            length = (length << 8) | bytes[offset++];
+        }
+        if (length > static_cast<std::size_t>(size) - offset) return std::nullopt;
+        std::string value(data + offset, length);
+        offset += length;
+        return value;
+    };
+    const auto name = field();
+    const auto value = field();
+    const auto domain = field();
+    const auto path = field();
+    const auto secure = field();
+    const auto http_only = field();
+    const auto host_only = field();
+    const auto expiration = field();
+    const auto same_site = field();
+    if (!name || !value || !domain || !path || !secure || !http_only ||
+        !host_only || !expiration || !same_site || offset != static_cast<std::size_t>(size)) {
+        return cookie;
     }
-    p += std::strlen(p) + 1;
-    if (p >= end) return cookie;
-    cookie.same_site = p;
+    cookie.name = *name;
+    cookie.value = *value;
+    cookie.domain = *domain;
+    cookie.path = *path;
+    cookie.secure = *secure == "1";
+    cookie.http_only = *http_only == "1";
+    cookie.host_only = *host_only == "1";
+    try {
+        if (!expiration->empty()) cookie.expires_unix = std::stoll(*expiration);
+    } catch (...) {
+        return {};
+    }
+    cookie.same_site = *same_site;
     return cookie;
 }
 
@@ -164,7 +202,7 @@ public:
             cookie.path = "/";
         }
 
-        const std::string key = cookie.domain + "\0" + cookie.path + "\0" + cookie.name;
+        const std::string key = cookie.domain + '\0' + cookie.path + '\0' + cookie.name;
         std::string value = serialize_cookie(cookie);
         
         if (expired(cookie)) {
@@ -201,6 +239,10 @@ public:
             }
             
             Cookie cookie = deserialize_cookie(vbuf, vsiz);
+            if (cookie.name.empty()) {
+                tcbdbcurnext(cur);
+                continue;
+            }
             if (expired(cookie)) {
                 tcbdbcurnext(cur);
                 continue;
@@ -411,7 +453,7 @@ struct TCBStorage::Impl {
     StorageAccessListener access_listener;
     std::unique_ptr<TCBCookieJar> cookies;
     std::unordered_map<std::string, std::unique_ptr<TCBKeyValueStore>> local_stores;
-    std::unordered_map<std::string, std::unique_ptr<TCBKeyValueStore>> session_stores;
+    MemoryStorage sessions;
 };
 
 TCBStorage::TCBStorage(const std::filesystem::path& base_path)
@@ -443,7 +485,7 @@ KeyValueStore& TCBStorage::local_storage(std::string_view session_id) {
     auto it = impl_->local_stores.find(key);
     if (it == impl_->local_stores.end()) {
         auto store = std::make_unique<TCBKeyValueStore>(
-            impl_->base_path / ("local_" + key + ".tcb"), "local");
+            local_path(impl_->base_path, key), "local");
         store->set_access_listener(impl_->access_listener);
         auto* raw = store.get();
         impl_->local_stores.emplace(key, std::move(store));
@@ -453,24 +495,13 @@ KeyValueStore& TCBStorage::local_storage(std::string_view session_id) {
 }
 
 KeyValueStore& TCBStorage::session_storage(std::string_view session_id) {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    std::string key(session_id);
-    auto it = impl_->session_stores.find(key);
-    if (it == impl_->session_stores.end()) {
-        auto store = std::make_unique<TCBKeyValueStore>(
-            impl_->base_path / ("session_" + key + ".tcb"), "session");
-        store->set_access_listener(impl_->access_listener);
-        auto* raw = store.get();
-        impl_->session_stores.emplace(key, std::move(store));
-        return *raw;
-    }
-    return *it->second;
+    return impl_->sessions.session_storage(session_id);
 }
 
 void TCBStorage::release_session(std::string_view session_id) {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     std::string key(session_id);
-    impl_->session_stores.erase(key);
+    impl_->sessions.release_session(key);
     impl_->local_stores.erase(key);
 }
 
@@ -483,9 +514,7 @@ void TCBStorage::set_access_listener(StorageAccessListener listener) {
     for (auto& [_, store] : impl_->local_stores) {
         store->set_access_listener(impl_->access_listener);
     }
-    for (auto& [_, store] : impl_->session_stores) {
-        store->set_access_listener(impl_->access_listener);
-    }
+    impl_->sessions.set_access_listener(impl_->access_listener);
 }
 
 }  // namespace prowsetk

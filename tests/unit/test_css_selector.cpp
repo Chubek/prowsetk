@@ -75,7 +75,7 @@ TEST(CssSelector, UniversalSelectorAndEmptySubstring) {
         parse_html("<a href=\"a.html\">A</a><b>B</b><div id=\"empty-sub\"></div>");
     EXPECT_EQ(document->query_selector_all("*").size(), 3u);
     EXPECT_EQ(document->query_selector_all("*.item").size(), 0u);
-    EXPECT_EQ(document->query_selector_all("a[href*='']").size(), 1u);
+    EXPECT_EQ(document->query_selector_all("a[href*='']").size(), 0u);
     EXPECT_EQ(document->query_selector_all("*[id]").size(), 1u);
 }
 

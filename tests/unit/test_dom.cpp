@@ -164,6 +164,25 @@ TEST(Document, GetElementByIdDoesNotInterpretCssCharacters) {
     EXPECT_EQ(document->get_element_by_id("missing"), nullptr);
 }
 
+TEST(Document, GetElementsByTagNameIsCaseInsensitiveLiteral) {
+    const auto document = parse_html("<DIV><SPAN></SPAN><span></span></DIV>");
+    EXPECT_EQ(document->get_elements_by_tag_name("span").size(), 2u);
+    EXPECT_EQ(document->get_elements_by_tag_name("SPAN").size(), 2u);
+    EXPECT_EQ(document->get_elements_by_tag_name("div").size(), 1u);
+    EXPECT_EQ(document->get_elements_by_tag_name("div ").size(), 0u);
+}
+
+TEST(Document, MissingLiteralIdDoesNotFallBackToSelectorSyntax) {
+    const auto document = parse_html("<div id='a' class='b'></div><span id='a.b'></span>");
+    ASSERT_NE(document->get_element_by_id("a"), nullptr);
+    EXPECT_EQ(document->get_element_by_id("a")->tag_name(), "div");
+    ASSERT_NE(document->get_element_by_id("a.b"), nullptr);
+    EXPECT_EQ(document->get_element_by_id("a.b")->tag_name(), "span");
+    EXPECT_EQ(document->get_element_by_id("a.b.missing"), nullptr);
+    EXPECT_EQ(document->get_element_by_id("missing:unsupported"), nullptr);
+    EXPECT_EQ(document->get_element_by_id("a, span"), nullptr);
+}
+
 TEST(Document, HandlesMalformedMarkup) {
     const auto document = parse_html("<div><p>unclosed<span>x");
     EXPECT_NE(document->query_selector("div"), nullptr);

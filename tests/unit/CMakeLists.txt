@@ -78,3 +78,5 @@ prowsetk_gtest(prowsetk_unit_web_platform "prowsetk.unit.web-platform."
 
 prowsetk_gtest(prowsetk_unit_web_interface "prowsetk.unit.web-interface."
     "unit;web-interface" test_web_interface.cpp)
+target_compile_definitions(prowsetk_unit_web_interface PRIVATE
+    PROWSETK_TEST_WEB_ROOT="${PROJECT_SOURCE_DIR}/resources/web")

@@ -37,6 +37,13 @@ namespace {
 struct Json {
     enum class Kind { Null, Bool, Number, String, Array, Object };
 
+    Json();
+    Json(const Json&);
+    Json(Json&&) noexcept;
+    Json& operator=(const Json&);
+    Json& operator=(Json&&) noexcept;
+    ~Json();
+
     Kind kind = Kind::Null;
     bool boolean = false;
     double number = 0.0;
@@ -50,17 +57,7 @@ struct Json {
     bool is_bool() const { return kind == Kind::Bool; }
     bool is_number() const { return kind == Kind::Number; }
 
-    const Json* find(std::string_view key) const {
-        if (kind != Kind::Object) {
-            return nullptr;
-        }
-        for (const auto& [name, value] : object) {
-            if (name == key) {
-                return &value;
-            }
-        }
-        return nullptr;
-    }
+    const Json* find(std::string_view key) const;
 
     std::string as_string(std::string fallback = {}) const {
         return is_string() ? string : std::move(fallback);
@@ -74,6 +71,25 @@ struct Json {
         return is_bool() ? boolean : fallback;
     }
 };
+
+Json::Json() = default;
+Json::Json(const Json&) = default;
+Json::Json(Json&&) noexcept = default;
+Json& Json::operator=(const Json&) = default;
+Json& Json::operator=(Json&&) noexcept = default;
+Json::~Json() = default;
+
+const Json* Json::find(std::string_view key) const {
+    if (kind != Kind::Object) {
+        return nullptr;
+    }
+    for (const auto& [name, value] : object) {
+        if (name == key) {
+            return &value;
+        }
+    }
+    return nullptr;
+}
 
 std::string json_escape(std::string_view input) {
     std::string out;

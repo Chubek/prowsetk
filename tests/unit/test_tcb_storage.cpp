@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -495,7 +496,7 @@ TEST(TCBStorage, CookieWithNullBytesInValue) {
     
     Cookie cookie;
     cookie.name = "test";
-    cookie.value = "val\0ue", 6;
+    cookie.value = std::string("val\0ue", 6);
     storage->cookies().set(parse_url("https://example.com/"), cookie);
     
     auto cookies = storage->cookies().get(parse_url("https://example.com/"));

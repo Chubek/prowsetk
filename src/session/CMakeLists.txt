@@ -13,6 +13,7 @@ target_include_directories(prowsetk_session PRIVATE
 )
 
 target_link_libraries(prowsetk_session PUBLIC ProwseTk::core)
+target_link_libraries(prowsetk_session PRIVATE ProwseTk::tokyocabinet ProwseTk::crypto)
 
 add_library(ProwseTk::session ALIAS prowsetk_session)
 

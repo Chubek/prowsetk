@@ -44,6 +44,11 @@ public:
     virtual std::string cookie_header(const Url& origin) const = 0;
     virtual void clear() = 0;
     virtual std::vector<Cookie> all() const = 0;
+
+    // Optional instrumentation hook for replaceable cookie backends.
+    virtual void set_access_listener(StorageAccessListener listener) {
+        (void)listener;
+    }
 };
 
 // Simple string key/value storage used for local and session storage.

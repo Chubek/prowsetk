@@ -1,8 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include "prowsetk/storage.hpp"
 #include "prowsetk/url.hpp"
@@ -63,12 +66,13 @@ TEST(EncryptedStorage, WrongPasswordFailsToDecrypt) {
     auto storage = make_encrypted_storage(std::move(backend), "correct_password");
     
     storage->local_storage("s1").set("key", "secret");
+    storage.reset();
     
     auto backend2 = make_tcb_storage(temp_dir);
     auto storage2 = make_encrypted_storage(std::move(backend2), "wrong_password");
     
     auto result = storage2->local_storage("s1").get("key");
-    EXPECT_FALSE(result.has_value() || result.value() == "secret");
+    EXPECT_FALSE(result.has_value());
     
     std::filesystem::remove_all(temp_dir);
 }

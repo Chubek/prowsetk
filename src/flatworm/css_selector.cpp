@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
+#include <cstdint>
 #include <optional>
 
 #include "prowsetk/error.hpp"
@@ -45,7 +47,7 @@ struct PseudoClass {
 struct Compound {
     bool universal = false;
     std::string tag;
-    std::string id;
+    std::vector<std::string> ids;
     std::vector<std::string> classes;
     std::vector<AttrSelector> attributes;
     std::vector<PseudoClass> pseudos;
@@ -76,7 +78,11 @@ std::string to_lower(std::string value) {
 std::string read_ident(std::string_view text, std::size_t& i) {
     std::string result;
     while (i < text.size() && is_ident_char(text[i])) {
-        if (text[i] == '\\' && i + 1 < text.size()) {
+        if (text[i] == '\\') {
+            if (i + 1 == text.size() || text[i + 1] == '\n' ||
+                text[i + 1] == '\r' || text[i + 1] == '\f') {
+                throw Error(ErrorCode::ParseError, "invalid selector escape");
+            }
             result.push_back(text[i + 1]);
             i += 2;
             continue;
@@ -174,14 +180,14 @@ bool match_pseudo(const Node& node, const PseudoClass& pseudo) {
             const bool reverse = pseudo.kind == PseudoKind::NthLastChild ||
                                  pseudo.kind == PseudoKind::NthLastOfType;
             const auto position = element_index(node, of_type);
-            const auto index = static_cast<long>(reverse
+             const auto index = static_cast<std::int64_t>(reverse
                 ? element_count(node, of_type) - position + 1 : position);
-            const long a = pseudo.nth_a;
-            const long b = pseudo.nth_b;
+            const std::int64_t a = pseudo.nth_a;
+            const std::int64_t b = pseudo.nth_b;
             if (a == 0) {
                 return index == b;
             }
-            const long delta = index - b;
+            const std::int64_t delta = index - b;
             return delta % a == 0 && delta / a >= 0;
         }
         case PseudoKind::Not: {
@@ -219,13 +225,13 @@ bool match_attr(const Node& node, const AttrSelector& attr) {
                     value->compare(0, attr.value.size(), attr.value) == 0 &&
                     (*value)[attr.value.size()] == '-');
         case AttrOp::Prefix:
-            return value->rfind(attr.value, 0) == 0;
+            return !attr.value.empty() && value->rfind(attr.value, 0) == 0;
         case AttrOp::Suffix:
-            return value->size() >= attr.value.size() &&
+            return !attr.value.empty() && value->size() >= attr.value.size() &&
                    value->compare(value->size() - attr.value.size(),
                                   attr.value.size(), attr.value) == 0;
         case AttrOp::Substring:
-            return attr.value.empty() ||
+            return !attr.value.empty() &&
                    value->find(attr.value) != std::string::npos;
     }
     return false;
@@ -239,9 +245,9 @@ bool match_compound(const Node& node, const Compound& compound) {
         node.name != compound.tag) {
         return false;
     }
-    if (!compound.id.empty()) {
+    for (const auto& wanted : compound.ids) {
         const std::string* id = node.attribute("id");
-        if (id == nullptr || *id != compound.id) {
+        if (id == nullptr || *id != wanted) {
             return false;
         }
     }
@@ -376,6 +382,7 @@ private:
         while (i_ < text_.size() && text_[i_] != ',' &&
                text_[i_] != ')') {
             Combinator combinator = Combinator::Descendant;
+            bool explicit_combinator = false;
             const std::size_t before = i_;
             skip_space();
             const bool had_space = i_ != before;
@@ -391,8 +398,12 @@ private:
             } else if (!had_space) {
                 break;
             }
+            explicit_combinator = combinator != Combinator::Descendant;
             skip_space();
             if (i_ >= text_.size() || text_[i_] == ',' || text_[i_] == ')') {
+                if (explicit_combinator) {
+                    throw Error(ErrorCode::ParseError, "missing selector after combinator");
+                }
                 break;
             }
             selector.combinators.push_back(combinator);
@@ -422,10 +433,16 @@ private:
             if (c == '.') {
                 ++i_;
                 compound.classes.push_back(read_ident(text_, i_));
+                if (compound.classes.back().empty()) {
+                    throw Error(ErrorCode::ParseError, "empty class selector");
+                }
                 consumed = true;
             } else if (c == '#') {
                 ++i_;
-                compound.id = read_ident(text_, i_);
+                compound.ids.push_back(read_ident(text_, i_));
+                if (compound.ids.back().empty()) {
+                    throw Error(ErrorCode::ParseError, "empty id selector");
+                }
                 consumed = true;
             } else if (c == '[') {
                 compound.attributes.push_back(parse_attribute());
@@ -449,6 +466,9 @@ private:
         skip_space();
         AttrSelector selector;
         selector.name = to_lower(read_ident(text_, i_));
+        if (selector.name.empty()) {
+            throw Error(ErrorCode::ParseError, "empty attribute name");
+        }
         skip_space();
         if (i_ < text_.size() && text_[i_] != ']') {
             if (text_[i_] == '=') {
@@ -475,13 +495,23 @@ private:
                 (text_[i_] == '"' || text_[i_] == '\'')) {
                 const char quote = text_[i_++];
                 while (i_ < text_.size() && text_[i_] != quote) {
+                    if (text_[i_] == '\\') {
+                        ++i_;
+                        if (i_ == text_.size()) {
+                            throw Error(ErrorCode::ParseError, "invalid attribute escape");
+                        }
+                    }
                     selector.value.push_back(text_[i_++]);
                 }
-                if (i_ < text_.size()) {
-                    ++i_;
+                if (i_ == text_.size()) {
+                    throw Error(ErrorCode::ParseError, "unterminated attribute value");
                 }
+                ++i_;
             } else {
                 selector.value = read_ident(text_, i_);
+                if (selector.value.empty()) {
+                    throw Error(ErrorCode::ParseError, "missing attribute value");
+                }
             }
         }
         skip_space();
@@ -530,7 +560,9 @@ private:
                 throw Error(ErrorCode::ParseError, ":not() requires an argument");
             }
             ++i_;
+            skip_space();
             pseudo.not_list.push_back(parse_compound());
+            skip_space();
             if (i_ >= text_.size() || text_[i_] != ')') {
                 throw Error(ErrorCode::ParseError, "unterminated :not()");
             }
@@ -551,13 +583,25 @@ private:
         if (close == std::string_view::npos) {
             throw Error(ErrorCode::ParseError, "unterminated :nth-child()");
         }
-        std::string argument(text_.substr(i_, close - i_));
-        argument.erase(
-            std::remove_if(argument.begin(), argument.end(),
-                           [](char c) { return is_space(c); }),
-            argument.end());
+        std::string argument = to_lower(std::string(text_.substr(i_, close - i_)));
+        while (!argument.empty() && is_space(argument.back())) {
+            argument.pop_back();
+        }
         i_ = close + 1;
-        argument = to_lower(argument);
+        const auto integer = [](std::string_view value) {
+            if (!value.empty() && value.front() == '+') {
+                value.remove_prefix(1);
+                if (value.empty() || value.front() == '-') {
+                    throw Error(ErrorCode::ParseError, "invalid nth expression");
+                }
+            }
+            int result = 0;
+            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), result);
+            if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size()) {
+                throw Error(ErrorCode::ParseError, "invalid nth expression");
+            }
+            return result;
+        };
         if (argument == "odd") {
             pseudo.nth_a = 2;
             pseudo.nth_b = 1;
@@ -571,7 +615,7 @@ private:
         const auto n = argument.find('n');
         if (n == std::string::npos) {
             pseudo.nth_a = 0;
-            pseudo.nth_b = std::stoi(argument);
+            pseudo.nth_b = integer(argument);
             return;
         }
         std::string a = argument.substr(0, n);
@@ -581,13 +625,25 @@ private:
         } else if (a == "-") {
             pseudo.nth_a = -1;
         } else {
-            pseudo.nth_a = std::stoi(a);
+            pseudo.nth_a = integer(a);
         }
-        if (b.empty() || b == "+") {
+        const auto first = b.find_first_not_of(" \t\n\r\f");
+        if (first == std::string::npos) {
             pseudo.nth_b = 0;
-        } else {
-            pseudo.nth_b = std::stoi(b);
+            return;
         }
+        b.erase(0, first);
+        if (b.front() != '+' && b.front() != '-') {
+            throw Error(ErrorCode::ParseError, "missing nth offset sign");
+        }
+        const char sign = b.front();
+        b.erase(0, 1);
+        const auto digits = b.find_first_not_of(" \t\n\r\f");
+        if (digits == std::string::npos || b[digits] < '0' || b[digits] > '9') {
+            throw Error(ErrorCode::ParseError, "missing nth offset");
+        }
+        b.erase(0, digits);
+        pseudo.nth_b = integer(std::string(1, sign) + b);
     }
 
     std::string_view text_;

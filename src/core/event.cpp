@@ -63,43 +63,63 @@ std::optional<EventType> parse_event_type(std::string_view name) noexcept {
 SubscriptionId EventDispatcher::subscribe(EventType type, Handler handler) {
     std::lock_guard<std::mutex> lock(mutex_);
     const SubscriptionId id = next_id_++;
-    handlers_.push_back(Entry{id, type, false, std::move(handler)});
+    handlers_.push_back(
+        Entry{id, type, false, std::make_shared<Handler>(std::move(handler))});
     return id;
 }
 
 SubscriptionId EventDispatcher::subscribe_all(Handler handler) {
     std::lock_guard<std::mutex> lock(mutex_);
     const SubscriptionId id = next_id_++;
-    handlers_.push_back(Entry{id, EventType::Console, true, std::move(handler)});
+    handlers_.push_back(Entry{
+        id, EventType::Console, true,
+        std::make_shared<Handler>(std::move(handler))});
     return id;
 }
 
 bool EventDispatcher::unsubscribe(SubscriptionId id) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    const auto it = std::remove_if(
-        handlers_.begin(), handlers_.end(),
-        [id](const Entry& entry) { return entry.id == id; });
-    if (it == handlers_.end()) {
-        return false;
+    std::shared_ptr<Handler> removed;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto it = std::find_if(
+            handlers_.begin(), handlers_.end(),
+            [id](const Entry& entry) { return entry.id == id; });
+        if (it == handlers_.end()) {
+            return false;
+        }
+        removed = std::move(it->handler);
+        handlers_.erase(it);
     }
-    handlers_.erase(it, handlers_.end());
     return true;
 }
 
 void EventDispatcher::clear() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    handlers_.clear();
+    std::vector<Entry> removed;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        removed.swap(handlers_);
+    }
 }
 
 void EventDispatcher::emit(Event& event) const {
     std::vector<Entry> snapshot;
+    const EventType type = event.type;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        snapshot = handlers_;
+        for (const auto& entry : handlers_) {
+            if (entry.global || entry.type == type) {
+                snapshot.push_back(entry);
+            }
+        }
     }
     for (const auto& entry : snapshot) {
-        if (entry.global || entry.type == event.type) {
-            entry.handler(event);
+        if (!entry.global) {
+            (*entry.handler)(event);
+        }
+    }
+    for (const auto& entry : snapshot) {
+        if (entry.global) {
+            (*entry.handler)(event);
         }
     }
 }

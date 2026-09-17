@@ -4,6 +4,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <tuple>
 
 #include "prowsetk/network_client.hpp"
 #include "prowsetk/web_interface.hpp"
@@ -212,6 +213,26 @@ TEST(WebInterface, EmptyWebRootServesJsonOnly) {
 
     const WebResponse response = interface.handle(request("GET", "/"));
     EXPECT_EQ(response.status, 404);
+}
+
+TEST(WebInterface, ShippedWebAssetsAreServed) {
+    WebInterfaceConfig config;
+    config.browser.javascript = false;
+    config.web_root = PROWSETK_TEST_WEB_ROOT;
+    WebInterface interface(std::move(config));
+
+    for (const auto& [path, expected_type, marker] : {
+             std::tuple{"/", "text/html", "id=\"navigate-form\""},
+             std::tuple{"/app.js", "application/javascript", "/api/sessions"},
+             std::tuple{"/style.css", "text/css", ".workspace"},
+         }) {
+        const WebResponse response = interface.handle(request("GET", path));
+        EXPECT_EQ(response.status, 200) << path;
+        EXPECT_NE(response.body.find(marker), std::string::npos) << path;
+        ASSERT_FALSE(response.headers.empty()) << path;
+        EXPECT_NE(response.headers[0].second.find(expected_type),
+                  std::string::npos) << path;
+    }
 }
 
 TEST(WebInterface, StaticFileIsServedFromWebRoot) {

@@ -270,11 +270,25 @@ void Node::append_child(const std::shared_ptr<Node>& child) {
     if (child == nullptr || child.get() == this) {
         return;
     }
-    if (child->parent.lock().get() == this) {
-        return;
+    const auto self = shared_from_this();
+    for (auto ancestor = self; ancestor != nullptr; ancestor = ancestor->shared_parent()) {
+        if (ancestor == child) {
+            return;
+        }
     }
-    child->parent = shared_from_this();
+    const auto old_parent = child->shared_parent();
     children.push_back(child);
+    if (old_parent != nullptr) {
+        const auto it = std::find(old_parent->children.begin(),
+                                  old_parent->children.end(), child);
+        if (it != old_parent->children.end()) {
+            old_parent->children.erase(it);
+        }
+    }
+    child->parent = self;
+    if (old_parent != nullptr) {
+        old_parent->report_mutation(MutationInfo{"child-removed", child->name, {}, {}});
+    }
     report_mutation(MutationInfo{"child-added", child->name, {}, {}});
 }
 
@@ -287,6 +301,7 @@ bool Node::remove_child(const std::shared_ptr<Node>& child) {
         return false;
     }
     const std::string removed_name = (*it)->name;
+    (*it)->parent.reset();
     children.erase(it);
     report_mutation(MutationInfo{"child-removed", removed_name, {}, {}});
     return true;
@@ -317,7 +332,8 @@ void Node::report_mutation(const MutationInfo& info) const {
 }
 
 std::string serialize(const Node& node) {
-    return serialize_impl(node, {});
+    const auto parent = node.shared_parent();
+    return serialize_impl(node, parent != nullptr ? parent->name : std::string_view{});
 }
 
 std::string text_content(const Node& node) {

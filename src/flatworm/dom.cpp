@@ -172,8 +172,20 @@ std::shared_ptr<Element> Element::query_selector(
     if (node_ == nullptr) {
         return nullptr;
     }
-    auto result = fw::query_selector(node_, selector);
-    return wrap(result);
+    const auto parsed = fw::Selector::parse(selector);
+    const std::function<std::shared_ptr<fw::Node>(const std::shared_ptr<fw::Node>&)> scan =
+        [&](const std::shared_ptr<fw::Node>& node) -> std::shared_ptr<fw::Node> {
+        for (const auto& child : node->children) {
+            if (parsed.matches(*child)) {
+                return child;
+            }
+            if (auto match = scan(child)) {
+                return match;
+            }
+        }
+        return nullptr;
+    };
+    return wrap(scan(node_));
 }
 
 std::vector<std::shared_ptr<Element>> Element::query_selector_all(
@@ -183,7 +195,9 @@ std::vector<std::shared_ptr<Element>> Element::query_selector_all(
         return result;
     }
     for (const auto& node : fw::query_selector_all(node_, selector)) {
-        result.push_back(wrap(node));
+        if (node != node_) {
+            result.push_back(wrap(node));
+        }
     }
     return result;
 }
@@ -248,6 +262,9 @@ bool Element::remove_child(const std::shared_ptr<Element>& child) {
 void Element::set_text(std::string_view value) {
     if (node_ == nullptr) {
         return;
+    }
+    for (const auto& child : node_->children) {
+        child->parent.reset();
     }
     node_->children.clear();
     auto text = fw::make_node(fw::NodeType::Text);
@@ -352,12 +369,22 @@ std::shared_ptr<Element> Document::get_element_by_id(std::string_view id) const 
     if (scan(root_)) {
         return result;
     }
-    return query_selector("#" + std::string(id));
+    return nullptr;
 }
 
 std::vector<std::shared_ptr<Element>> Document::get_elements_by_tag_name(
     std::string_view tag) const {
-    return query_selector_all(std::string(tag));
+    std::string name(tag);
+    std::transform(name.begin(), name.end(), name.begin(), [](char c) {
+        return c >= 'A' && c <= 'Z' ? static_cast<char>(c + ('a' - 'A')) : c;
+    });
+    auto elements = query_selector_all("*");
+    if (name != "*") {
+        std::erase_if(elements, [&](const auto& element) {
+            return element->tag_name() != name;
+        });
+    }
+    return elements;
 }
 
 std::vector<std::shared_ptr<Element>> Document::links() const {
@@ -431,6 +458,9 @@ std::map<std::string, std::string> Document::metadata() const {
 
 std::shared_ptr<Element> Document::create_element(std::string tag) {
     auto node = fw::make_node(fw::NodeType::Element);
+    std::transform(tag.begin(), tag.end(), tag.begin(), [](char c) {
+        return c >= 'A' && c <= 'Z' ? static_cast<char>(c + ('a' - 'A')) : c;
+    });
     node->name = std::move(tag);
     return wrap(node);
 }

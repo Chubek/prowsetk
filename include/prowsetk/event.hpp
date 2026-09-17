@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -77,7 +78,7 @@ private:
         SubscriptionId id;
         EventType type;
         bool global;
-        Handler handler;
+        std::shared_ptr<Handler> handler;
     };
 
     mutable std::mutex mutex_;

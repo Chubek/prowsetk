@@ -41,7 +41,23 @@ struct Arguments {
     std::vector<std::pair<std::string, std::string>> run_args;
 };
 
-std::string default_web_root() {
+std::string default_web_root(const char* executable) {
+    std::error_code error;
+#if defined(__linux__)
+    auto binary = std::filesystem::canonical("/proc/self/exe", error);
+    if (error) {
+        binary = std::filesystem::canonical(executable, error);
+    }
+#else
+    const auto binary = std::filesystem::canonical(executable, error);
+#endif
+    if (!error) {
+        const auto installed = binary.parent_path().parent_path() /
+            "share/prowsetk/web";
+        if (std::filesystem::is_regular_file(installed / "index.html", error)) {
+            return installed.string();
+        }
+    }
 #ifdef PROWSETK_WEB_ROOT
     return PROWSETK_WEB_ROOT;
 #else
@@ -54,7 +70,7 @@ bool parse_arguments(int argc, char** argv, Arguments& args) {
         return false;
     }
     args.command = argv[1];
-    args.web_root = default_web_root();
+    args.web_root = default_web_root(argv[0]);
 
     if (args.command == "run") {
         if (argc < 3) {

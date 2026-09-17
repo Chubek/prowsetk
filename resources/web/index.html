@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ProwseTk | Flatworm</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="mark">P</span><div><strong>ProwseTk</strong><small>Flatworm workspace</small></div></div>
+    <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection">Connecting</span></div>
+  </header>
+  <main class="workspace">
+    <aside class="sidebar">
+      <div class="sidebar-heading"><h2>Sessions</h2><button id="new-session" title="New session" aria-label="New session">+</button></div>
+      <div id="sessions" class="session-list" aria-label="Sessions"></div>
+      <div class="sidebar-footer"><span id="session-count">0 sessions</span><span>Flatworm 0.1</span></div>
+    </aside>
+    <section class="main-panel">
+      <form id="navigate-form" class="address-bar">
+        <label for="address">Address</label>
+        <input id="address" type="url" placeholder="http://example.com" required autocomplete="url" spellcheck="false">
+        <button type="submit" id="go">Go</button>
+      </form>
+      <div class="page-heading"><div><p class="eyebrow">CURRENT DOCUMENT</p><h1 id="page-title">No document loaded</h1><p id="page-url">Create a session and navigate to begin.</p></div><span id="page-state" class="state">Idle</span></div>
+      <div class="tabs" role="tablist" aria-label="Document views">
+        <button class="tab active" role="tab" aria-selected="true" data-view="text">Text</button>
+        <button class="tab" role="tab" aria-selected="false" data-view="html">HTML</button>
+        <button class="tab" role="tab" aria-selected="false" data-view="links">Links</button>
+        <button class="tab" role="tab" aria-selected="false" data-view="selector">Selectors</button>
+        <button class="tab" role="tab" aria-selected="false" data-view="script">JavaScript</button>
+        <button class="tab" role="tab" aria-selected="false" data-view="endpoints">Endpoints</button>
+      </div>
+      <div class="view-toolbar" id="view-toolbar"></div>
+      <div id="status" role="status" aria-live="polite"></div>
+      <div id="results" class="results" aria-live="polite"><div class="empty">No document loaded</div></div>
+    </section>
+  </main>
+</body>
+</html>

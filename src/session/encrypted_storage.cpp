@@ -4,10 +4,15 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
-#include <random>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/rand.h>
 
 namespace prowsetk {
 namespace {
@@ -15,27 +20,29 @@ namespace {
 constexpr size_t SALT_SIZE = 16;
 constexpr size_t KEY_SIZE = 32;
 constexpr size_t NONCE_SIZE = 12;
+constexpr size_t TAG_SIZE = 16;
+constexpr size_t ITERATIONS = 120000;
+constexpr char FORMAT_TAG = 'E';
+constexpr char FORMAT_VERSION = '2';
 
 std::string derive_key(const std::string& password, const std::string& salt) {
     std::string key(KEY_SIZE, 0);
-    std::string input = password + salt;
-    
-    std::hash<std::string> hasher;
-    size_t hash = hasher(input);
-    
-    for (size_t i = 0; i < KEY_SIZE; ++i) {
-        key[i] = static_cast<char>((hash >> (i % 8)) & 0xFF);
+    if (PKCS5_PBKDF2_HMAC(password.data(), static_cast<int>(password.size()),
+                          reinterpret_cast<const unsigned char*>(salt.data()),
+                          static_cast<int>(salt.size()), ITERATIONS, EVP_sha256(),
+                          KEY_SIZE, reinterpret_cast<unsigned char*>(key.data())) != 1) {
+        throw std::runtime_error("EncryptedStorage: key derivation failed");
     }
-    
-    for (int round = 0; round < 10000; ++round) {
-        std::string round_input = key + input;
-        hash = hasher(round_input);
-        for (size_t i = 0; i < KEY_SIZE; ++i) {
-            key[i] ^= static_cast<char>((hash >> (i % 8)) & 0xFF);
-        }
-    }
-    
     return key;
+}
+
+std::string generate_random_bytes(size_t size) {
+    std::string bytes(size, 0);
+    if (RAND_bytes(reinterpret_cast<unsigned char*>(bytes.data()),
+                   static_cast<int>(bytes.size())) != 1) {
+        throw std::runtime_error("EncryptedStorage: random generation failed");
+    }
+    return bytes;
 }
 
 void xor_encrypt(const std::string& key, const std::string& nonce,
@@ -65,32 +72,18 @@ bool xor_decrypt(const std::string& key, const std::string& nonce,
 }
 
 std::string generate_salt() {
-    std::string salt(SALT_SIZE, 0);
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(0, 255);
-    for (size_t i = 0; i < SALT_SIZE; ++i) {
-        salt[i] = static_cast<char>(dis(gen));
-    }
-    return salt;
+    return generate_random_bytes(SALT_SIZE);
 }
 
 std::string generate_nonce() {
-    std::string nonce(NONCE_SIZE, 0);
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(0, 255);
-    for (size_t i = 0; i < NONCE_SIZE; ++i) {
-        nonce[i] = static_cast<char>(dis(gen));
-    }
-    return nonce;
+    return generate_random_bytes(NONCE_SIZE);
 }
 
 class EncryptedKeyValueStore : public KeyValueStore {
 public:
-    EncryptedKeyValueStore(std::unique_ptr<KeyValueStore> backend,
+    EncryptedKeyValueStore(KeyValueStore& backend,
                            const std::string& key, std::string name)
-        : backend_(std::move(backend)), key_(key), name_(std::move(name)) {}
+        : backend_(&backend), key_(key), name_(std::move(name)) {}
 
     ~EncryptedKeyValueStore() override = default;
 
@@ -138,7 +131,7 @@ public:
         xor_encrypt(key_, nonce, value, ciphertext);
         
         std::string encrypted = nonce + ciphertext;
-        backend_->set(std::move(key), std::move(encrypted));
+        backend_->set(key, std::move(encrypted));
         
         report("set", key);
     }
@@ -160,7 +153,6 @@ public:
 
     void set_name(std::string name) {
         name_ = std::move(name);
-        backend_->set_name(name_);
     }
 
 private:
@@ -173,7 +165,7 @@ private:
         }
     }
 
-    std::unique_ptr<KeyValueStore> backend_;
+    KeyValueStore* backend_;
     std::string key_;
     std::string name_;
     StorageAccessListener listener_;
@@ -181,15 +173,15 @@ private:
 
 class EncryptedCookieJar : public CookieJar {
 public:
-    EncryptedCookieJar(std::unique_ptr<CookieJar> backend,
+    EncryptedCookieJar(CookieJar& backend,
                        const std::string& key, std::string name)
-        : backend_(std::move(backend)), key_(key), name_(std::move(name)) {}
+        : backend_(&backend), key_(key), name_(std::move(name)) {}
 
     ~EncryptedCookieJar() override = default;
 
     void set(const Url& origin, Cookie cookie) override {
-        backend_->set(origin, std::move(cookie));
         report("set", cookie.name);
+        backend_->set(origin, std::move(cookie));
     }
 
     std::vector<Cookie> get(const Url& origin) const override {
@@ -211,6 +203,10 @@ public:
         return backend_->all();
     }
 
+    void set_access_listener(StorageAccessListener listener) override {
+        listener_ = std::move(listener);
+    }
+
 private:
     void report(std::string_view operation, std::string_view key) const {
         if (listener_) {
@@ -221,7 +217,7 @@ private:
         }
     }
 
-    std::unique_ptr<CookieJar> backend_;
+    CookieJar* backend_;
     std::string key_;
     std::string name_;
     mutable StorageAccessListener listener_;
@@ -249,7 +245,7 @@ EncryptedStorage::EncryptedStorage(std::unique_ptr<Storage> backend, const std::
     impl_->key = derive_key(password, impl_->salt);
     
     impl_->cookie_jar = std::make_unique<EncryptedCookieJar>(
-        std::move(impl_->backend->cookies()), impl_->key, "cookies");
+        impl_->backend->cookies(), impl_->key, "cookies");
 }
 
 EncryptedStorage::~EncryptedStorage() = default;
@@ -262,8 +258,7 @@ KeyValueStore& EncryptedStorage::local_storage(std::string_view session_id) {
     auto it = impl_->local_stores.find(key);
     if (it == impl_->local_stores.end()) {
         auto store = std::make_unique<EncryptedKeyValueStore>(
-            std::make_unique<EncryptedKeyValueStore>(impl_->backend->local_storage(session_id), impl_->key, "local"),
-            impl_->key, "local");
+            impl_->backend->local_storage(session_id), impl_->key, "local");
         store->set_access_listener(impl_->access_listener);
         auto* raw = store.get();
         impl_->local_stores.emplace(key, std::move(store));
@@ -278,8 +273,7 @@ KeyValueStore& EncryptedStorage::session_storage(std::string_view session_id) {
     auto it = impl_->session_stores.find(key);
     if (it == impl_->session_stores.end()) {
         auto store = std::make_unique<EncryptedKeyValueStore>(
-            std::make_unique<EncryptedKeyValueStore>(impl_->backend->session_storage(session_id), impl_->key, "session"),
-            impl_->key, "session");
+            impl_->backend->session_storage(session_id), impl_->key, "session");
         store->set_access_listener(impl_->access_listener);
         auto* raw = store.get();
         impl_->session_stores.emplace(key, std::move(store));
