@@ -2,6 +2,7 @@
 #define PROWSETK_STORAGE_HPP
 
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -95,6 +96,45 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+
+class TCBStorage : public Storage {
+public:
+    explicit TCBStorage(const std::filesystem::path& base_path);
+    ~TCBStorage() override;
+
+    CookieJar& cookies() override;
+    KeyValueStore& local_storage(std::string_view session_id) override;
+    KeyValueStore& session_storage(std::string_view session_id) override;
+    void release_session(std::string_view session_id) override;
+    void set_access_listener(StorageAccessListener listener) override;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+class EncryptedStorage : public Storage {
+public:
+    EncryptedStorage(std::unique_ptr<Storage> backend, const std::string& password);
+    ~EncryptedStorage() override;
+
+    CookieJar& cookies() override;
+    KeyValueStore& local_storage(std::string_view session_id) override;
+    KeyValueStore& session_storage(std::string_view session_id) override;
+    void release_session(std::string_view session_id) override;
+    void set_access_listener(StorageAccessListener listener) override;
+
+    const std::string& get_salt() const;
+    const std::string& get_key() const;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+std::unique_ptr<Storage> make_tcb_storage(const std::filesystem::path& base_path);
+std::unique_ptr<Storage> make_encrypted_storage(std::unique_ptr<Storage> backend,
+                                                 const std::string& password);
 
 }  // namespace prowsetk
 

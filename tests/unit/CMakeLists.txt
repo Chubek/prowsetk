@@ -16,6 +16,14 @@ prowsetk_gtest(prowsetk_unit_redaction "prowsetk.unit.redaction."
 prowsetk_gtest(prowsetk_unit_storage "prowsetk.unit.storage."
     "unit;storage" test_storage.cpp)
 
+prowsetk_gtest(prowsetk_unit_tcb_storage "prowsetk.unit.tcb_storage."
+    "unit;storage" test_tcb_storage.cpp)
+target_link_libraries(prowsetk_unit_tcb_storage PRIVATE ProwseTk::session)
+
+prowsetk_gtest(prowsetk_unit_encrypted_storage "prowsetk.unit.encrypted_storage."
+    "unit;storage" test_encrypted_storage.cpp)
+target_link_libraries(prowsetk_unit_encrypted_storage PRIVATE ProwseTk::session)
+
 prowsetk_gtest(prowsetk_unit_dom "prowsetk.unit.document."
     "unit;document" test_dom.cpp)
 

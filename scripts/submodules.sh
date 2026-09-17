@@ -28,3 +28,4 @@ git submodule add https://github.com/jbeder/yaml-cpp.git	    third_party/yaml-cp
 git submodule add https://github.com/facebook/zstd.git		    third_party/zstd
 git submodule add https://github.com/jarro2783/cxxopts	    	    third_party/cxxopts
 git submodule add https://github.com/libfuse/libfuse		    third_party/libfuse
+git submodule add https://github.com/hthetiot/Tokyo-Cabinet	    third_party/Tokyo-Cabinet
