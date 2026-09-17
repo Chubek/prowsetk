@@ -15,6 +15,7 @@ set(PROWSETK_CORE_SOURCES
     core/browser.cpp
     core/lua_runtime.cpp
     core/project_config.cpp
+    core/ir.cpp
     core/web_interface.cpp
     flatworm/html_parser.cpp
     flatworm/css_selector.cpp

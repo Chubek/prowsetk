@@ -53,8 +53,8 @@ lprowsext.endpoints = {
 -- Document extractors
 -- ---------------------------------------------------------------------------
 
--- Document processors keyed by name. Registered processors run against every
--- loaded document; the host wires them into the event loop.
+-- Document processors keyed by name. process_document explicitly runs these
+-- callbacks; use an installed extractor for automatic document notifications.
 local processors = {}
 
 -- Registers a named document processor. `processor(document)` may return a
@@ -85,6 +85,8 @@ end
 -- registers the per-document callback; `extractor:run(document)` invokes it.
 -- Installing the extractor on a browser runs the callback for documents loaded
 -- by that browser. Extractors operate on managed document userdata only.
+lprowsext.extractor = {}
+
 function lprowsext.extractor.new()
     local callback = nil
     return {

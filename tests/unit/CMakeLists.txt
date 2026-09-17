@@ -80,3 +80,6 @@ prowsetk_gtest(prowsetk_unit_web_interface "prowsetk.unit.web-interface."
     "unit;web-interface" test_web_interface.cpp)
 target_compile_definitions(prowsetk_unit_web_interface PRIVATE
     PROWSETK_TEST_WEB_ROOT="${PROJECT_SOURCE_DIR}/resources/web")
+
+prowsetk_gtest(prowsetk_unit_ir_emitters "prowsetk.unit.ir."
+    "unit;document" test_ir_emitters.cpp)

@@ -1,7 +1,31 @@
 include_guard(GLOBAL)
 
-find_package(OpenSSL REQUIRED COMPONENTS Crypto)
-add_library(ProwseTk::crypto ALIAS OpenSSL::Crypto)
+set(PROWSETK_LIBTOMCRYPT_SOURCE_DIR
+    "${PROJECT_SOURCE_DIR}/third_party/libtomcrypt")
+if(EXISTS "${PROWSETK_LIBTOMCRYPT_SOURCE_DIR}/CMakeLists.txt")
+    set(WITH_LTM OFF CACHE BOOL "" FORCE)
+    set(WITH_TFM OFF CACHE BOOL "" FORCE)
+    set(WITH_GMP OFF CACHE BOOL "" FORCE)
+    set(WITH_PTHREAD OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(BUILD_USEFUL_DEMOS OFF CACHE BOOL "" FORCE)
+    set(BUILD_USABLE_DEMOS OFF CACHE BOOL "" FORCE)
+    set(BUILD_TEST_DEMOS OFF CACHE BOOL "" FORCE)
+    set(INSTALL_DEMOS OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${PROWSETK_LIBTOMCRYPT_SOURCE_DIR}"
+                     "${CMAKE_BINARY_DIR}/third_party/libtomcrypt"
+                     EXCLUDE_FROM_ALL)
+    set_target_properties(libtomcrypt PROPERTIES
+        EXPORT_NAME tomcrypt POSITION_INDEPENDENT_CODE ON)
+    target_compile_options(libtomcrypt PRIVATE
+        $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-w>)
+    add_library(ProwseTk::tomcrypt ALIAS libtomcrypt)
+    prowsetk_install_library(libtomcrypt)
+    message(STATUS "ProwseTk: using vendored LibTomCrypt")
+else()
+    message(FATAL_ERROR
+            "ProwseTk: third_party/libtomcrypt is required for encrypted storage")
+endif()
 
 # Tokyo Cabinet is used by the optional persistent session backend.
 set(PROWSETK_TCB_SOURCE_DIR "${PROJECT_SOURCE_DIR}/third_party/Tokyo-Cabinet")

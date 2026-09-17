@@ -11,6 +11,7 @@
 #include "prowsetk/url.hpp"
 
 using prowsetk::Cookie;
+using prowsetk::MemoryStorage;
 using prowsetk::parse_url;
 using prowsetk::make_tcb_storage;
 using prowsetk::make_encrypted_storage;
@@ -38,6 +39,40 @@ TEST(EncryptedStorage, BasicEncryptionDecryption) {
     EXPECT_EQ(store.get("key").value(), "secret_value");
     
     std::filesystem::remove_all(temp_dir);
+}
+
+TEST(EncryptedStorage, TamperedCiphertextFailsToDecrypt) {
+    auto backend = std::make_unique<MemoryStorage>();
+    auto* raw_backend = backend.get();
+    auto storage = make_encrypted_storage(std::move(backend), "tamper_password");
+
+    auto& store = storage->local_storage("s1");
+    store.set("key", "secret_value");
+    auto raw = raw_backend->local_storage("s1").get("key");
+    ASSERT_TRUE(raw.has_value());
+    ASSERT_EQ(raw->find("secret_value"), std::string::npos);
+
+    (*raw)[raw->size() - 1] = static_cast<char>((*raw)[raw->size() - 1] ^ 0x01);
+    raw_backend->local_storage("s1").set("key", *raw);
+    EXPECT_FALSE(store.get("key").has_value());
+}
+
+TEST(EncryptedStorage, BackendDoesNotSeePlaintextCookie) {
+    auto backend = std::make_unique<MemoryStorage>();
+    auto* raw_backend = backend.get();
+    auto storage = make_encrypted_storage(std::move(backend), "cookie_seal_pass");
+
+    Cookie cookie;
+    cookie.name = "session";
+    cookie.value = "secret_session_data";
+    storage->cookies().set(parse_url("https://example.com/"), cookie);
+
+    EXPECT_TRUE(raw_backend->cookies().all().empty());
+    const auto raw_record =
+        raw_backend->local_storage("__prowsetk_encrypted_cookie_jar")
+            .get("__prowsetk_encrypted_cookies");
+    ASSERT_TRUE(raw_record.has_value());
+    EXPECT_EQ(raw_record->find("secret_session_data"), std::string::npos);
 }
 
 TEST(EncryptedStorage, DifferentPasswordsProduceDifferentCiphertext) {

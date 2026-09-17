@@ -26,7 +26,8 @@ git submodule add https://github.com/WebAssembly/wasi-sdk.git	    third_party/wa
 git submodule add https://github.com/bytecodealliance/wasmtime-cpp.git third_party/wasmtime-cpp
 git submodule add https://github.com/jbeder/yaml-cpp.git	    third_party/yaml-cpp
 git submodule add https://github.com/facebook/zstd.git		    third_party/zstd
-git submodule add https://github.com/jarro2783/cxxopts	    	    third_party/cxxopts
-git submodule add https://github.com/libfuse/libfuse		    third_party/libfuse
-git submodule add https://github.com/hthetiot/Tokyo-Cabinet	    third_party/Tokyo-Cabinet
-git submodule add https://github.com/termbox/termbox2		    third_party/termbox2
+git submodule add https://github.com/jarro2783/cxxopts.git    	    third_party/cxxopts
+git submodule add https://github.com/libfuse/libfuse.git	    third_party/libfuse
+git submodule add https://github.com/hthetiot/Tokyo-Cabinet.git	    third_party/Tokyo-Cabinet
+git submodule add https://github.com/termbox/termbox2.git	    third_party/termbox2
+git submodule add https://github.com/libtom/libtomcrypt.git	    third_party/libtomcrypt

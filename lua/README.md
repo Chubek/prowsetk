@@ -6,6 +6,8 @@ ProwseTk exposes two Lua modules from `LuaRuntime`:
   userdata.
 - `lprowsext` provides XPath helpers, endpoint extraction, document
   processors, extractors, and managed WASM module handles.
+- `lprowseir` emits built-in IR formats (ProwseXAS/ProwseDOM/ProwseVTD/
+  ProwseIML) and provides XPath-driven walkers/listeners.
 
 The `init.lua` files are standalone surface mirrors and API documentation. In
 an embedded ProwseTk runtime, `require("lprowse")` and

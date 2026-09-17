@@ -13,7 +13,7 @@ include(GoogleTest)
 # discovered test case with CTest.
 function(prowsetk_gtest name prefix labels)
     prowsetk_add_executable(${name} ${ARGN})
-    target_link_libraries(${name} PRIVATE ProwseTk::core GTest::gtest_main)
+    target_link_libraries(${name} PRIVATE ProwseTk::core GTest::gtest GTest::gtest_main)
     gtest_discover_tests(${name}
         TEST_PREFIX "${prefix}"
         PROPERTIES LABELS "${labels}" TIMEOUT 60

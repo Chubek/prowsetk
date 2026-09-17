@@ -294,3 +294,24 @@ the work is not done.
 - Duplicating build logic instead of using `cmake/` helpers.
 - Letting `README.md`, `AGENTS.md`, `.gitmodules`, and `cmake/Dependencies.cmake`
   drift apart.
+
+# Additions & Revisions
+
+This section discusses the additions and revisions made to ProwseTk during implementation.
+
+## The IR Emitters
+
+Although ProwseTk is a headles browser and it does not render anything, however, we could opt to have the engine generate an *intermediate representation* for the page it has rendered. By default, ProwseTk support four IRs, but more can be added via the plugin interface. The Lua extensibility engine has a library called `lprowseir` which offers toolsets for handling them. For example, it offers a function-based visitor for ProwseDOM, and it offers a listener for ProwseXAS.
+
+- ProwseXAS: An event stream which can be listened to;
+- ProwseDOM: A document object model which can be walked;
+- ProwseVTD: A binary virtual token format which can be dumped;
+- ProwseIML: A S-Expression language with macros which can be expanded;
+
+Example of listening to an event stream:
+
+```lua
+lprowseir.xax:AddListener("//tag/td", function() ... end)
+```
+
+All the listeners and walkers use XPath. We use Pugixml's XPath engine.

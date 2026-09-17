@@ -14,6 +14,7 @@
 #include "prowsetk/document.hpp"
 #include "prowsetk/endpoint_extraction.hpp"
 #include "prowsetk/error.hpp"
+#include "prowsetk/ir.hpp"
 #include "prowsetk/xpath.hpp"
 
 #ifdef PROWSETK_HAVE_LUA
@@ -190,6 +191,7 @@ void push_xpath_strings(lua_State* L, const XPathValue& value) {
     }
 }
 
+
 void push_endpoint_result_table(lua_State* L,
                                 const DiscoveredEndpoint& endpoint) {
     lua_createtable(L, 0, 8);
@@ -334,6 +336,202 @@ int protect(lua_State* L, F&& function) {
         lua_pushstring(L, "unknown error");
         return lua_error(L);
     }
+}
+
+void push_ir_dom_node(lua_State* L, const ProwseDomNode& node) {
+    lua_createtable(L, 0, 5);
+    lua_pushlstring(L, node.xpath.c_str(), node.xpath.size());
+    lua_setfield(L, -2, "xpath");
+    lua_pushlstring(L, node.tag.c_str(), node.tag.size());
+    lua_setfield(L, -2, "tag");
+    lua_pushlstring(L, node.text.c_str(), node.text.size());
+    lua_setfield(L, -2, "text");
+    lua_pushinteger(L, static_cast<lua_Integer>(node.depth));
+    lua_setfield(L, -2, "depth");
+
+    lua_createtable(L, 0, static_cast<int>(node.attributes.size()));
+    for (const auto& attribute : node.attributes) {
+        lua_pushlstring(L, attribute.value.c_str(), attribute.value.size());
+        lua_setfield(L, -2, attribute.name.c_str());
+    }
+    lua_setfield(L, -2, "attributes");
+}
+
+void push_ir_xas_event(lua_State* L, const ProwseXasEvent& event) {
+    lua_createtable(L, 0, 6);
+    lua_pushlstring(L, event.kind.c_str(), event.kind.size());
+    lua_setfield(L, -2, "kind");
+    lua_pushlstring(L, event.xpath.c_str(), event.xpath.size());
+    lua_setfield(L, -2, "xpath");
+    lua_pushlstring(L, event.tag.c_str(), event.tag.size());
+    lua_setfield(L, -2, "tag");
+    lua_pushlstring(L, event.name.c_str(), event.name.size());
+    lua_setfield(L, -2, "name");
+    lua_pushlstring(L, event.value.c_str(), event.value.size());
+    lua_setfield(L, -2, "value");
+    lua_pushinteger(L, static_cast<lua_Integer>(event.depth));
+    lua_setfield(L, -2, "depth");
+}
+
+std::shared_ptr<Document> read_document_argument(lua_State* L, int* index_out) {
+    const int top = lua_gettop(L);
+    for (int i = 1; i <= top; ++i) {
+        if (luaL_testudata(L, i, kDocumentMeta) != nullptr ||
+            luaL_testudata(L, i, kSessionMeta) != nullptr) {
+            if (index_out != nullptr) {
+                *index_out = i;
+            }
+            return document_from(L, i);
+        }
+    }
+    if (index_out != nullptr) {
+        *index_out = 0;
+    }
+    return nullptr;
+}
+
+int lprowseir_emit_dom(lua_State* L) {
+    return protect(L, [&]() -> int {
+        const auto document = read_document_argument(L, nullptr);
+        lua_newtable(L);
+        if (document == nullptr) {
+            return 1;
+        }
+        const auto nodes = emit_prowse_dom(*document);
+        for (std::size_t i = 0; i < nodes.size(); ++i) {
+            push_ir_dom_node(L, nodes[i]);
+            lua_rawseti(L, -2, static_cast<int>(i) + 1);
+        }
+        return 1;
+    });
+}
+
+int lprowseir_emit_xas(lua_State* L) {
+    return protect(L, [&]() -> int {
+        const auto document = read_document_argument(L, nullptr);
+        lua_newtable(L);
+        if (document == nullptr) {
+            return 1;
+        }
+        const auto events = emit_prowse_xas(*document);
+        for (std::size_t i = 0; i < events.size(); ++i) {
+            push_ir_xas_event(L, events[i]);
+            lua_rawseti(L, -2, static_cast<int>(i) + 1);
+        }
+        return 1;
+    });
+}
+
+int lprowseir_emit_vtd(lua_State* L) {
+    return protect(L, [&]() -> int {
+        const auto document = read_document_argument(L, nullptr);
+        if (document == nullptr) {
+            lua_pushliteral(L, "");
+            return 1;
+        }
+        const auto bytes = emit_prowse_vtd(*document);
+        lua_pushlstring(L, reinterpret_cast<const char*>(bytes.data()),
+                        bytes.size());
+        return 1;
+    });
+}
+
+int lprowseir_emit_iml(lua_State* L) {
+    return protect(L, [&]() -> int {
+        const auto document = read_document_argument(L, nullptr);
+        const std::string iml =
+            document == nullptr ? std::string() : emit_prowse_iml(*document);
+        lua_pushlstring(L, iml.c_str(), iml.size());
+        return 1;
+    });
+}
+
+int lprowseir_dom_walk(lua_State* L) {
+    return protect(L, [&]() -> int {
+        int document_index = 0;
+        const auto document = read_document_argument(L, &document_index);
+        if (document == nullptr) {
+            luaL_error(L, "lprowseir.dom.walk requires a document or session");
+            return 0;
+        }
+        const int top = lua_gettop(L);
+        int expression_index = 0;
+        int callback_index = 0;
+        for (int i = 1; i <= top; ++i) {
+            if (i != document_index && expression_index == 0 && lua_isstring(L, i)) {
+                expression_index = i;
+                continue;
+            }
+            if (callback_index == 0 && lua_isfunction(L, i)) {
+                callback_index = i;
+            }
+        }
+        if (expression_index == 0 || callback_index == 0) {
+            luaL_error(L,
+                       "lprowseir.dom.walk expects (document_or_session, xpath, callback)");
+            return 0;
+        }
+        const char* expression = lua_tostring(L, expression_index);
+        const XPathValue value = evaluate_xpath(*document, expression);
+        std::size_t invoked = 0;
+        if (value.type == XPathValueType::NodeSet) {
+            for (const auto& node : value.nodes) {
+                lua_pushvalue(L, callback_index);
+                push_element(L, node);
+                if (lua_pcall(L, 1, 0, 0) == LUA_OK) {
+                    ++invoked;
+                } else {
+                    lua_pop(L, 1);
+                }
+            }
+        }
+        lua_pushinteger(L, static_cast<lua_Integer>(invoked));
+        return 1;
+    });
+}
+
+int lprowseir_xas_add_listener(lua_State* L) {
+    return protect(L, [&]() -> int {
+        int document_index = 0;
+        const auto document = read_document_argument(L, &document_index);
+        if (document == nullptr) {
+            luaL_error(L, "lprowseir.xas.AddListener requires a document or session");
+            return 0;
+        }
+        const int top = lua_gettop(L);
+        int expression_index = 0;
+        int callback_index = 0;
+        for (int i = 1; i <= top; ++i) {
+            if (i != document_index && expression_index == 0 && lua_isstring(L, i)) {
+                expression_index = i;
+                continue;
+            }
+            if (callback_index == 0 && lua_isfunction(L, i)) {
+                callback_index = i;
+            }
+        }
+        if (expression_index == 0 || callback_index == 0) {
+            luaL_error(
+                L,
+                "lprowseir.xas.AddListener expects (document_or_session, xpath, callback)");
+            return 0;
+        }
+
+        const char* expression = lua_tostring(L, expression_index);
+        const auto events = filter_prowse_xas(*document, expression);
+        std::size_t invoked = 0;
+        for (const auto& event : events) {
+            lua_pushvalue(L, callback_index);
+            push_ir_xas_event(L, event);
+            if (lua_pcall(L, 1, 0, 0) == LUA_OK) {
+                ++invoked;
+            } else {
+                lua_pop(L, 1);
+            }
+        }
+        lua_pushinteger(L, static_cast<lua_Integer>(invoked));
+        return 1;
+    });
 }
 
 int browser_gc(lua_State* L) {
@@ -1323,30 +1521,30 @@ int lprowsext_get_document_processor(lua_State* L) {
 
 int lprowsext_process_document(lua_State* L) {
     return protect(L, [&]() -> int {
-        lua_getglobal(L, "lprowsext");        // 1
-        lua_getfield(L, 1, "_processors");    // 2
-        lua_createtable(L, 0, 4);             // 3 (result)
-        if (lua_istable(L, 2)) {
-            lua_pushnil(L);                   // 4 (key)
-            while (lua_next(L, 2) != 0) {     // key=4, value=5
-                if (lua_isfunction(L, 5)) {
-                    lua_pushvalue(L, 1);      // document argument
+        luaL_checkany(L, 1);
+        lua_getglobal(L, "lprowsext");
+        lua_getfield(L, -1, "_processors");
+        const int processors = lua_absindex(L, -1);
+        lua_newtable(L);
+        const int results = lua_absindex(L, -1);
+        if (lua_istable(L, processors)) {
+            lua_pushnil(L);
+            while (lua_next(L, processors) != 0) {
+                if (lua_isfunction(L, -1)) {
+                    lua_pushvalue(L, 1);
                     if (lua_pcall(L, 1, 1, 0) == LUA_OK) {
-                        // key=4, retval=5
-                        lua_pushvalue(L, 4);  // key
-                        lua_pushvalue(L, 5);  // retval
-                        lua_settable(L, 3);   // result[key] = retval
-                        lua_pop(L, 1);        // pop retval
-                    } else {
-                        lua_pop(L, 2);        // pop error and value
+                        lua_pushvalue(L, -2);  // Preserve iteration key.
+                        lua_pushvalue(L, -2);  // Callback result.
+                        lua_settable(L, results);
                     }
+                    // Both pcall paths leave one result/error above the key.
+                    lua_pop(L, 1);
                 } else {
-                    lua_pop(L, 1);            // pop non-function value
+                    lua_pop(L, 1);
                 }
-                // key remains at index 4 for lua_next to continue
             }
         }
-        lua_pushvalue(L, 3);
+        lua_pushvalue(L, results);
         return 1;
     });
 }
@@ -1546,6 +1744,44 @@ LuaRuntime::LuaRuntime() : impl_(std::make_unique<Impl>()) {
         set_loaded_module(impl_->state, "lprowsext.wasm", -1);
         lua_pop(impl_->state, 1);
         lua_setglobal(impl_->state, "lprowsext");
+
+        lua_newtable(impl_->state);  // lprowseir
+        lua_pushcfunction(impl_->state, lprowseir_emit_dom);
+        lua_setfield(impl_->state, -2, "emit_dom");
+        lua_pushcfunction(impl_->state, lprowseir_emit_xas);
+        lua_setfield(impl_->state, -2, "emit_xas");
+        lua_pushcfunction(impl_->state, lprowseir_emit_vtd);
+        lua_setfield(impl_->state, -2, "emit_vtd");
+        lua_pushcfunction(impl_->state, lprowseir_emit_iml);
+        lua_setfield(impl_->state, -2, "emit_iml");
+
+        lua_newtable(impl_->state);  // lprowseir.dom
+        lua_pushcfunction(impl_->state, lprowseir_dom_walk);
+        lua_setfield(impl_->state, -2, "walk");
+        lua_setfield(impl_->state, -2, "dom");
+
+        lua_newtable(impl_->state);  // lprowseir.xas
+        lua_pushcfunction(impl_->state, lprowseir_xas_add_listener);
+        lua_setfield(impl_->state, -2, "AddListener");
+        lua_pushcfunction(impl_->state, lprowseir_xas_add_listener);
+        lua_setfield(impl_->state, -2, "add_listener");
+        lua_setfield(impl_->state, -2, "xas");
+        lua_getfield(impl_->state, -1, "xas");
+        lua_setfield(impl_->state, -2, "xax");
+        lua_pushliteral(impl_->state, "0.1.0");
+        lua_setfield(impl_->state, -2, "_version");
+
+        set_loaded_module(impl_->state, "lprowseir", -1);
+        lua_getfield(impl_->state, -1, "dom");
+        set_loaded_module(impl_->state, "lprowseir.dom", -1);
+        lua_pop(impl_->state, 1);
+        lua_getfield(impl_->state, -1, "xas");
+        set_loaded_module(impl_->state, "lprowseir.xas", -1);
+        lua_pop(impl_->state, 1);
+        lua_getfield(impl_->state, -1, "xax");
+        set_loaded_module(impl_->state, "lprowseir.xax", -1);
+        lua_pop(impl_->state, 1);
+        lua_setglobal(impl_->state, "lprowseir");
     }
 #endif
 }

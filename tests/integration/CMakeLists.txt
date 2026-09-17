@@ -13,6 +13,9 @@ if(PROWSETK_HAVE_PUGIXML)
         PROWSETK_HAVE_PUGIXML=1)
 endif()
 
+prowsetk_gtest(prowsetk_integration_lua_ir "prowsetk.integration.lua."
+    "integration;lua;document" test_lua_ir.cpp)
+
 find_package(Threads REQUIRED)
 prowsetk_gtest(prowsetk_integration_web_interface
     "prowsetk.integration.web-interface."

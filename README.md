@@ -63,7 +63,7 @@ ProwseTk core
     |
     +-- Native C/C++ plugins through ProwseTk-Plugin.h
     |
-    +-- Lua drivers and extensions through lprowse / lprowsext
+    +-- Lua drivers and extensions through lprowse / lprowsext / lprowseir
     |
     +-- WASM modules/components through a capability-limited host
 ```
@@ -415,6 +415,14 @@ browser:install_extension(extractor)
 local session = browser:create_session()
 session:navigate("https://example.com")
 ```
+
+`lprowsext.register_document_processor(name, callback)` registers a processor
+for explicit calls to `lprowsext.process_document(document)`. Each processor
+receives the supplied document; the returned table contains successful results
+keyed by processor name. Nil results and failed callbacks are omitted, while
+false, numeric, string, and table results are retained. An empty registry returns
+an empty table. Registration alone does not subscribe to navigation events;
+use an installed extractor for automatic document callbacks.
 
 Lua extensions expose both synchronous and asynchronous behavior. They may use
 the engine's event loop, timers, request hooks, and session lifecycle events.
@@ -1302,7 +1310,7 @@ observe_network = true
 
 [lua]
 version = "5.4"
-libraries = ["lprowse", "lprowsext"]
+libraries = ["lprowse", "lprowsext", "lprowseir"]
 preload = ["lua/bootstrap.lua"]
 allow_extensions = true
 max_memory_mb = 128
@@ -1700,9 +1708,10 @@ optional components depending on the build configuration.
 | `libev` | Event loop |
 | `libmagic` | File and content-type detection |
 | `libmill` | Concurrency and coroutine utilities |
+| `libtomcrypt` | Encrypted storage primitives (PBKDF2-HMAC-SHA256 and AES-GCM) |
 | `llhttp` | HTTP/1.1 message parsing |
 | `lua` | Automation and extension runtime |
-| `mbedtls` | TLS and cryptographic primitives |
+| `mbedtls` | TLS primitives |
 | `nexus` | Optional HTTP/3 (QUIC) transport |
 | `pugixml` | XML handling and XPath |
 | `quickjs` | Page JavaScript runtime |
@@ -1862,7 +1871,7 @@ prowsetk/
 ├── tests/                  CTest-conformant unit and integration suites
 ├── third_party/            Vendored dependencies (git submodules)
 ├── wit/                    WIT interface definitions for WASM plugins
-├── lua/                    lprowse and lprowsext Lua modules
+├── lua/                    lprowse, lprowsext, and lprowseir Lua modules
 ├── plugins/                Native and WASM plugins
 ├── drivers/                Lua driver scripts
 ├── examples/               Example C++ and Lua applications

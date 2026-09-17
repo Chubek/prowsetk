@@ -8,6 +8,66 @@
 using prowsetk::Browser;
 using prowsetk::LuaRuntime;
 
+TEST(Lprowsext, ProcessesDocumentAndCollectsResults) {
+    if (!LuaRuntime::available()) {
+        GTEST_SKIP() << "ProwseTk was built without Lua support";
+    }
+    LuaRuntime lua;
+    const auto result = lua.run(R"LUA(
+        local ext = require("lprowsext")
+        local browser = require("lprowse").browser.new()
+        local session = browser:create_session()
+        session:load_html("<title>Processor regression</title>")
+        local document = session:document()
+        ext.register_document_processor("title", function(d)
+            assert(d == document)
+            return d:title()
+        end)
+        local results = ext.process_document(document)
+        assert(results.title == "Processor regression")
+    )LUA", "processor_regression");
+    EXPECT_TRUE(result.ok) << lua.last_error();
+}
+
+TEST(Lprowsext, EmptyProcessorRegistryReturnsTable) {
+    if (!LuaRuntime::available()) {
+        GTEST_SKIP() << "ProwseTk was built without Lua support";
+    }
+    LuaRuntime lua;
+    EXPECT_TRUE(lua.run(R"LUA(
+        local ext = require("lprowsext")
+        local browser = require("lprowse").browser.new()
+        local session = browser:create_session()
+        session:load_html("<p>Empty registry</p>")
+        local result = ext.process_document(session:document())
+        assert(type(result) == "table" and next(result) == nil)
+    )LUA").ok) << lua.last_error();
+}
+
+TEST(Lprowsext, ProcessorFailuresDoNotDiscardOtherResults) {
+    if (!LuaRuntime::available()) {
+        GTEST_SKIP() << "ProwseTk was built without Lua support";
+    }
+    LuaRuntime lua;
+    EXPECT_TRUE(lua.run(R"LUA(
+        local ext = require("lprowsext")
+        local browser = require("lprowse").browser.new()
+        local session = browser:create_session()
+        session:load_html("<title>Results</title><p>one</p><p>two</p>")
+        ext.register_document_processor("failure", function() error("fixture failure") end)
+        ext.register_document_processor("nothing", function() return nil end)
+        ext.register_document_processor("false_value", function() return false end)
+        ext.register_document_processor("count", function(d) return #d:query_selector_all("p") end)
+        ext.register_document_processor("structured", function(d) return {title = d:title()} end)
+        for i = 1, 20 do
+            local result = ext.process_document(session:document())
+            assert(result.failure == nil and result.nothing == nil)
+            assert(result.false_value == false and result.count == 2)
+            assert(result.structured.title == "Results")
+        end
+    )LUA").ok) << lua.last_error();
+}
+
 TEST(Lprowsext, RequiresModule) {
     if (!LuaRuntime::available()) {
         GTEST_SKIP() << "ProwseTk was built without Lua support";
