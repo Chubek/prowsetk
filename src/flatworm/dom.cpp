@@ -329,6 +329,29 @@ std::vector<std::shared_ptr<Element>> Document::query_selector_all(
 }
 
 std::shared_ptr<Element> Document::get_element_by_id(std::string_view id) const {
+    if (root_ == nullptr || id.empty()) {
+        return nullptr;
+    }
+    std::shared_ptr<Element> result;
+    const std::function<bool(const std::shared_ptr<flatworm::Node>&)> scan =
+        [&](const std::shared_ptr<flatworm::Node>& node) -> bool {
+        if (node->is_element()) {
+            const std::string* attr = node->attribute("id");
+            if (attr != nullptr && *attr == id) {
+                result = wrap(node);
+                return true;
+            }
+        }
+        for (const auto& child : node->children) {
+            if (scan(child)) {
+                return true;
+            }
+        }
+        return false;
+    };
+    if (scan(root_)) {
+        return result;
+    }
     return query_selector("#" + std::string(id));
 }
 

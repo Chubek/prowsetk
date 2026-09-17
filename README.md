@@ -1627,6 +1627,16 @@ This keeps drivers deterministic and usable without a network.
 
 ## Build and Runtime Strategy
 
+The command reference lives in `man/man1/prowsetk.1` and
+`man/man5/Prowse.toml.5`. `scripts/build-docs.sh [output-directory]` builds
+HTML and LaTeX from `manual/` with Pandoc once the 30-chapter manual has been
+written and its implementation coverage verified. It fails explicitly if the
+manual is incomplete; generated output defaults to `build/docs/`.
+
+The WASM adapter currently returns a disabled runtime even with
+`PROWSETK_ENABLE_WASM=ON`. The WASM preset checks the disabled-path contract;
+it does not establish that Wasmtime components are executable.
+
 First implementation sequence:
 
 1. Add the `WasmRuntime` abstraction to the C++ core.

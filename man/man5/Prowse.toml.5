@@ -1,0 +1,42 @@
+.TH PROWSE.TOML 5 "2026-09-17" "ProwseTk 0.1.0" "File Formats"
+.SH NAME
+Prowse.toml \- ProwseTk project and driver configuration
+.SH DESCRIPTION
+The \fBprowsetk run\fR command reads Prowse.toml from the working directory
+unless \fB--config\fR selects another file. The file uses TOML syntax.
+Drivers are declared as \fB[[drivers]]\fR tables.
+.SH DRIVER FIELDS
+.TP
+.B name
+Name passed to \fBprowsetk run\fR.
+.TP
+.B script
+Path to the Lua script, resolved against the project root.
+.TP
+.B entrypoint
+Lua function to call; shipped drivers use \fBmain(args)\fR.
+.TP
+.B enabled
+Whether the driver may be run.
+.TP
+.B arguments
+Array of inline tables specifying \fBname\fR, \fBtype\fR,
+\fBrequired\fR, optional \fBdefault\fR, and optional \fBsecret\fR.
+Supported argument types include string, integer, boolean, path, and url.
+.SH EXAMPLE
+.nf
+[[drivers]]
+name = "crawl-site"
+script = "drivers/crawl_site.lua"
+entrypoint = "main"
+enabled = true
+arguments = [
+  { name = "url", type = "url", required = true },
+  { name = "depth", type = "integer", default = 2 }
+]
+.fi
+.SH SECURITY
+Declare sensitive arguments with \fBsecret = true\fR. Such arguments are
+never intended for driver output or logs.
+.SH SEE ALSO
+.BR prowsetk (1)

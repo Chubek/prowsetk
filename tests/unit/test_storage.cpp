@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <tuple>
+
 #include "prowsetk/storage.hpp"
 #include "prowsetk/url.hpp"
 
@@ -151,4 +154,124 @@ TEST(Storage, CookieHeaderOrdersMoreSpecificPathsFirst) {
 
     EXPECT_EQ(storage.cookies().cookie_header(origin),
               "scope=narrow; scope=broad");
+}
+
+TEST(Storage, CookieSameSiteAttribute) {
+    MemoryStorage storage;
+    Cookie cookie;
+    cookie.name = "samesite";
+    cookie.value = "test";
+    cookie.same_site = "Strict";
+    storage.cookies().set(parse_url("https://example.com/"), cookie);
+
+    auto cookies = storage.cookies().get(parse_url("https://example.com/"));
+    ASSERT_EQ(cookies.size(), 1u);
+    EXPECT_EQ(cookies[0].same_site, "Strict");
+}
+
+TEST(Storage, CookieHttpOnlyAttribute) {
+    MemoryStorage storage;
+    Cookie cookie;
+    cookie.name = "httponly";
+    cookie.value = "test";
+    cookie.http_only = true;
+    storage.cookies().set(parse_url("https://example.com/"), cookie);
+
+    auto cookies = storage.cookies().get(parse_url("https://example.com/"));
+    ASSERT_EQ(cookies.size(), 1u);
+    EXPECT_TRUE(cookies[0].http_only);
+}
+
+TEST(Storage, CookieMaxAgeTakesPrecedenceOverExpires) {
+    MemoryStorage storage;
+    Cookie cookie;
+    cookie.name = "maxage";
+    cookie.value = "test";
+    cookie.expires_unix = 9999999999;
+    storage.cookies().set(parse_url("https://example.com/"), cookie);
+
+    auto cookies = storage.cookies().get(parse_url("https://example.com/"));
+    ASSERT_EQ(cookies.size(), 1u);
+    EXPECT_TRUE(cookies[0].expires_unix.has_value());
+}
+
+TEST(Storage, LocalStorageKeysEnumeration) {
+    MemoryStorage storage;
+    auto& store = storage.local_storage("s");
+    store.set("a", "1");
+    store.set("b", "2");
+    store.set("c", "3");
+
+    auto keys = store.keys();
+    EXPECT_EQ(keys.size(), 3u);
+    std::sort(keys.begin(), keys.end());
+    EXPECT_EQ(keys, (std::vector<std::string>{"a", "b", "c"}));
+}
+
+TEST(Storage, SessionStorageClear) {
+    MemoryStorage storage;
+    auto& store = storage.session_storage("s");
+    store.set("k", "v");
+    store.clear();
+    EXPECT_FALSE(store.get("k").has_value());
+    EXPECT_TRUE(store.keys().empty());
+}
+
+TEST(Storage, StorageAccessListenerReportsOperations) {
+    MemoryStorage storage;
+    std::vector<std::tuple<std::string, std::string, std::string>> events;
+    storage.set_access_listener(
+        [&](std::string_view name, std::string_view key, std::string_view op) {
+            events.emplace_back(name, key, op);
+        });
+
+    auto& store = storage.local_storage("s1");
+    store.set("key", "value");
+    store.get("key");
+    store.remove("key");
+    store.clear();
+
+    ASSERT_EQ(events.size(), 4u);
+    EXPECT_EQ(std::get<2>(events[0]), "set");
+    EXPECT_EQ(std::get<2>(events[1]), "get");
+    EXPECT_EQ(std::get<2>(events[2]), "remove");
+    EXPECT_EQ(std::get<2>(events[3]), "clear");
+}
+
+TEST(Storage, CookieJarClear) {
+    MemoryStorage storage;
+    Cookie cookie;
+    cookie.name = "test";
+    cookie.value = "value";
+    storage.cookies().set(parse_url("https://example.com/"), cookie);
+
+    storage.cookies().clear();
+    EXPECT_TRUE(storage.cookies().get(parse_url("https://example.com/")).empty());
+}
+
+TEST(Storage, CookieWithEmptyDomainDefaultsToHost) {
+    MemoryStorage storage;
+    Cookie cookie;
+    cookie.name = "nodefault";
+    cookie.value = "value";
+    storage.cookies().set(parse_url("https://example.com/path"), cookie);
+
+    auto cookies = storage.cookies().get(parse_url("https://example.com/path"));
+    ASSERT_EQ(cookies.size(), 1u);
+    EXPECT_EQ(cookies[0].domain, "example.com");
+    EXPECT_TRUE(cookies[0].host_only);
+}
+
+TEST(Storage, CookieDomainCaseInsensitive) {
+    MemoryStorage storage;
+    Cookie cookie;
+    cookie.name = "case";
+    cookie.value = "test";
+    cookie.domain = ".Example.COM";
+    cookie.host_only = false;
+    storage.cookies().set(parse_url("https://www.example.com/"), cookie);
+
+    auto cookies = storage.cookies().get(parse_url("https://api.example.com/"));
+    ASSERT_EQ(cookies.size(), 1u);
+    EXPECT_EQ(cookies[0].domain, "example.com");
 }

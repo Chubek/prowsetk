@@ -3,6 +3,7 @@
 #ifdef PROWSETK_HAVE_QUICKJS
 
 #include <chrono>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -31,11 +32,47 @@ using ContextPtr = std::unique_ptr<JSContext, ContextDeleter>;
 
 struct Deadline {
     std::chrono::steady_clock::time_point expires_at;
+    bool expired = false;
 };
 
 int interrupt_at_deadline(JSRuntime*, void* opaque) {
-    const auto* deadline = static_cast<const Deadline*>(opaque);
-    return std::chrono::steady_clock::now() >= deadline->expires_at ? 1 : 0;
+    auto* deadline = static_cast<Deadline*>(opaque);
+    deadline->expired = deadline->expired ||
+                        std::chrono::steady_clock::now() >= deadline->expires_at;
+    return deadline->expired ? 1 : 0;
+}
+
+class ExecutionScope {
+public:
+    ExecutionScope(JSRuntime* runtime, bool& active, const ScriptOptions& options)
+        : runtime_(runtime), active_(active),
+          deadline_{std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(options.timeout_ms)} {
+        active_ = true;
+        JS_UpdateStackTop(runtime_);
+        JS_SetMemoryLimit(runtime_, options.memory_limit_bytes);
+        JS_SetInterruptHandler(runtime_, interrupt_at_deadline, &deadline_);
+    }
+
+    ~ExecutionScope() {
+        JS_SetInterruptHandler(runtime_, nullptr, nullptr);
+        JS_SetMemoryLimit(runtime_, std::numeric_limits<std::size_t>::max());
+        active_ = false;
+    }
+
+    bool expired() { return interrupt_at_deadline(runtime_, &deadline_) != 0; }
+
+private:
+    JSRuntime* runtime_;
+    bool& active_;
+    Deadline deadline_;
+};
+
+std::string validate_options(const ScriptOptions& options) {
+    if (options.timeout_ms <= 0) return "JavaScript timeout must be positive";
+    if (options.memory_limit_bytes == 0) return "JavaScript memory limit must be positive";
+    if (options.max_microtask_jobs == 0) return "JavaScript microtask limit must be positive";
+    return {};
 }
 
 std::string value_to_string(JSContext* context, JSValueConst value) {
@@ -62,12 +99,28 @@ std::string take_exception(JSContext* context) {
         JS_FreeValue(context, stack);
     }
     JS_FreeValue(context, exception);
+    if (JS_HasException(context)) {
+        JS_FreeValue(context, JS_GetException(context));
+    }
     return message.empty() ? "JavaScript evaluation failed" : message;
 }
 
 // Defined after QuickJavaScriptRuntime so the console bindings can reach its
 // console handler through the context opaque slot.
 int install_console_binding(JSContext* context);
+
+JSValue microtask_job(JSContext* context, int, JSValueConst* argv) {
+    return JS_Call(context, argv[0], JS_UNDEFINED, 0, nullptr);
+}
+
+JSValue queue_microtask(JSContext* context, JSValueConst, int argc,
+                        JSValueConst* argv) {
+    if (argc == 0 || !JS_IsFunction(context, argv[0])) {
+        return JS_ThrowTypeError(context, "queueMicrotask requires a callable");
+    }
+    if (JS_EnqueueJob(context, microtask_job, 1, argv) < 0) return JS_EXCEPTION;
+    return JS_UNDEFINED;
+}
 
 class QuickJavaScriptRuntime final : public JavaScriptRuntime {
 public:
@@ -77,7 +130,13 @@ public:
         if (runtime_ == nullptr || context_ == nullptr) throw std::bad_alloc();
         JS_SetCanBlock(runtime_.get(), false);
         JS_SetContextOpaque(context_.get(), this);
-        install_console_binding(context_.get());
+        if (install_console_binding(context_.get()) < 0) throw std::bad_alloc();
+        JSValue global = JS_GetGlobalObject(context_.get());
+        const int status = JS_SetPropertyStr(
+            context_.get(), global, "queueMicrotask",
+            JS_NewCFunction(context_.get(), queue_microtask, "queueMicrotask", 1));
+        JS_FreeValue(context_.get(), global);
+        if (status < 0) throw std::bad_alloc();
     }
 
     ~QuickJavaScriptRuntime() override {
@@ -89,7 +148,8 @@ public:
     void forward_console(ConsoleMessage message) {
         if (console_handler_) {
             try {
-                console_handler_(std::move(message));
+                auto handler = console_handler_;
+                handler(message);
             } catch (...) {
                 // A console handler must not break page evaluation.
             }
@@ -98,40 +158,59 @@ public:
 
     ScriptResult evaluate(std::string_view script,
                           const ScriptOptions& options) override {
-        if (options.timeout_ms <= 0) {
-            return {false, {}, "JavaScript timeout must be positive"};
+        if (active_) return {false, {}, "JavaScript runtime is already executing"};
+        if (const auto error = validate_options(options); !error.empty()) {
+            return {false, {}, error};
         }
-        if (options.memory_limit_bytes == 0) {
-            return {false, {}, "JavaScript memory limit must be positive"};
-        }
-
-        JS_SetMemoryLimit(runtime_.get(), options.memory_limit_bytes);
-        Deadline deadline{std::chrono::steady_clock::now() +
-                          std::chrono::milliseconds(options.timeout_ms)};
-        JS_SetInterruptHandler(runtime_.get(), interrupt_at_deadline, &deadline);
-        JSValue value = JS_Eval(context_.get(), script.data(), script.size(),
+        const std::string source(script);
+        ExecutionScope scope(runtime_.get(), active_, options);
+        JSValue value = JS_Eval(context_.get(), source.c_str(), source.size(),
                                 "<prowsetk>", JS_EVAL_TYPE_GLOBAL);
-        JS_SetInterruptHandler(runtime_.get(), nullptr, nullptr);
-
+        ScriptResult result;
         if (JS_IsException(value)) {
-            JS_FreeValue(context_.get(), value);
-            return {false, {}, take_exception(context_.get())};
+            result.error = take_exception(context_.get());
+        } else {
+            result.value = value_to_string(context_.get(), value);
+            if (JS_HasException(context_.get())) {
+                result.value.clear();
+                result.error = take_exception(context_.get());
+            } else {
+                result.ok = true;
+            }
         }
-        std::string result = value_to_string(context_.get(), value);
         JS_FreeValue(context_.get(), value);
-        if (JS_HasException(context_.get())) {
-            return {false, {}, take_exception(context_.get())};
+        if (scope.expired()) return {false, {}, "JavaScript execution deadline exceeded"};
+        const auto checkpoint = drain_microtasks(options, scope);
+        if (!checkpoint.ok && result.ok) return checkpoint;
+        return result;
+    }
+
+    ScriptResult run_microtasks(const ScriptOptions& options) override {
+        if (active_) return {false, {}, "JavaScript runtime is already executing"};
+        if (const auto error = validate_options(options); !error.empty()) {
+            return {false, {}, error};
         }
-        return {true, std::move(result), {}};
+        ExecutionScope scope(runtime_.get(), active_, options);
+        return drain_microtasks(options, scope);
+    }
+
+    bool has_pending_microtasks() const override {
+        return JS_IsJobPending(runtime_.get());
     }
 
     void set_global(std::string_view name, std::string_view value) override {
+        if (active_) return;
+        ExecutionScope scope(runtime_.get(), active_, ScriptOptions{});
         JSValue global = JS_GetGlobalObject(context_.get());
-        JSValue string_value = JS_NewStringLen(context_.get(), value.data(), value.size());
-        const std::string property(name);
-        if (JS_SetPropertyStr(context_.get(), global, property.c_str(), string_value) < 0) {
-            (void)take_exception(context_.get());
+        const JSAtom property = JS_NewAtomLen(context_.get(), name.data(), name.size());
+        if (property != JS_ATOM_NULL) {
+            JSValue string_value = JS_NewStringLen(context_.get(), value.data(), value.size());
+            if (!JS_IsException(string_value)) {
+                JS_SetProperty(context_.get(), global, property, string_value);
+            }
+            JS_FreeAtom(context_.get(), property);
         }
+        if (JS_HasException(context_.get())) (void)take_exception(context_.get());
         JS_FreeValue(context_.get(), global);
     }
 
@@ -145,17 +224,40 @@ public:
         CapabilitySet capabilities;
         capabilities.set("javascript", ImplementationClass::FullyImplemented,
                          "QuickJS page scripting runtime");
-        capabilities.set("console", ImplementationClass::FullyImplemented,
-                         "console.* forwarded as console events");
+        capabilities.set("console", ImplementationClass::PartiallyImplemented,
+                          "log/info/warn/error/debug; space-joined string conversion, no format substitutions");
+        capabilities.set("promises", ImplementationClass::ImplementedWithRestrictions,
+                          "ECMAScript promises; bounded checkpoints after evaluation, no implicit promise unwrapping or rejection events");
+        capabilities.set("queueMicrotask", ImplementationClass::ImplementedWithRestrictions,
+                          "FIFO jobs; bounded checkpoints, remaining jobs retained on limit or callback failure");
         capabilities.set("fetch", ImplementationClass::Unsupported,
                          "network host binding is not installed yet");
         return capabilities;
     }
 
 private:
+    ScriptResult drain_microtasks(const ScriptOptions& options, ExecutionScope& scope) {
+        std::size_t executed = 0;
+        while (JS_IsJobPending(runtime_.get())) {
+            if (scope.expired()) return {false, {}, "JavaScript execution deadline exceeded"};
+            if (executed == options.max_microtask_jobs) {
+                return {false, {}, "JavaScript microtask job limit exceeded"};
+            }
+            JSContext* job_context = nullptr;
+            const int status = JS_ExecutePendingJob(runtime_.get(), &job_context);
+            ++executed;
+            if (status < 0) {
+                return {false, {}, take_exception(job_context != nullptr ? job_context : context_.get())};
+            }
+        }
+        if (scope.expired()) return {false, {}, "JavaScript execution deadline exceeded"};
+        return {true, "undefined", {}};
+    }
+
     RuntimePtr runtime_;
     ContextPtr context_;
     ConsoleHandler console_handler_;
+    bool active_ = false;
 };
 
 // Called by the `console.log/info/warn/error/debug` host bindings. Reads the
@@ -170,10 +272,9 @@ JSValue console_method(JSContext* context, const char* level, int argc,
     ConsoleMessage message;
     message.level = level;
     for (int i = 0; i < argc; ++i) {
-        if (!message.text.empty()) {
-            message.text += ' ';
-        }
+        if (i != 0) message.text += ' ';
         message.text += value_to_string(context, argv[i]);
+        if (JS_HasException(context)) return JS_EXCEPTION;
     }
     runtime->forward_console(std::move(message));
     return JS_UNDEFINED;

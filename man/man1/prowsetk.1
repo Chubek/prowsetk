@@ -1,0 +1,53 @@
+.TH PROWSETK 1 "2026-09-17" "ProwseTk 0.1.0" "User Commands"
+.SH NAME
+prowsetk \- headless browser automation and endpoint discovery
+.SH SYNOPSIS
+.B prowsetk version
+.br
+.B prowsetk serve
+[\fB--host\fR \fIADDRESS\fR] [\fB--port\fR \fIPORT\fR]
+[\fB--web-root\fR \fIDIR\fR] [\fB--no-javascript\fR]
+.br
+.B prowsetk endpoints --url
+\fIURL\fR [\fB--output\fR \fIFILE\fR] [\fB--no-javascript\fR]
+.br
+.B prowsetk run
+\fIDRIVER\fR [\fB--config\fR \fIFILE\fR] [\fB--\fIargument\fR \fIVALUE\fR ...]
+.SH DESCRIPTION
+ProwseTk runs a headless automation engine without a graphical browser.
+The \fBversion\fR command prints the installed version.
+\fBserve\fR runs the embedded HTTP interface, listening on 127.0.0.1:8080
+by default. \fBendpoints\fR discovers candidate endpoints and emits an
+OpenAPI document; inferred endpoints carry provenance and confidence rather
+than being authoritative. \fBrun\fR executes a declared Lua driver.
+.SH OPTIONS
+.TP
+.B --host \fIADDRESS\fR
+Address on which the embedded web interface listens.
+.TP
+.B --port \fIPORT\fR
+Port on which the embedded web interface listens.
+.TP
+.B --web-root \fIDIR\fR
+Directory containing the static web interface assets.
+.TP
+.B --url \fIURL\fR
+Target URL for endpoint discovery or a declared driver argument.
+.TP
+.B --output \fIFILE\fR
+Output file for endpoint discovery, or a declared driver argument.
+.TP
+.B --config \fIFILE\fR
+Project configuration for \fBrun\fR (default: Prowse.toml).
+.TP
+.B --no-javascript
+Disable page JavaScript for \fBserve\fR and \fBendpoints\fR.
+.SH SECURITY
+Drivers validate and coerce declared arguments. Secret arguments must not
+be printed or logged. Network access remains mediated by the host engine.
+.SH FILES
+.TP
+.I Prowse.toml
+Project settings and driver declarations; see \fBProwse.toml\fR(5).
+.SH SEE ALSO
+.BR Prowse.toml (5)

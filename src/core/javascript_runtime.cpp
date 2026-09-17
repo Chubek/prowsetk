@@ -38,6 +38,14 @@ public:
 
 }  // namespace
 
+ScriptResult JavaScriptRuntime::run_microtasks(const ScriptOptions&) {
+    return {false, {}, "JavaScript microtasks are not available in this runtime"};
+}
+
+bool JavaScriptRuntime::has_pending_microtasks() const {
+    return false;
+}
+
 std::unique_ptr<JavaScriptRuntime> make_null_javascript_runtime() {
     return std::make_unique<NullJavaScriptRuntime>();
 }

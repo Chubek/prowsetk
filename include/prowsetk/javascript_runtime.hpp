@@ -14,6 +14,7 @@ namespace prowsetk {
 struct ScriptOptions {
     int timeout_ms = 5000;
     std::size_t memory_limit_bytes = std::size_t{16} * 1024u * 1024u;
+    std::size_t max_microtask_jobs = 10000;
 };
 
 struct ScriptResult {
@@ -39,6 +40,8 @@ public:
 
     virtual ScriptResult evaluate(std::string_view script,
                                   const ScriptOptions& options = {}) = 0;
+    virtual ScriptResult run_microtasks(const ScriptOptions& options = {});
+    virtual bool has_pending_microtasks() const;
     virtual void set_global(std::string_view name, std::string_view value) = 0;
 
     // Installs the handler invoked for every console.* call made by page

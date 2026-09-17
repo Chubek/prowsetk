@@ -24,6 +24,12 @@ enum class PseudoKind {
     LastChild,
     OnlyChild,
     NthChild,
+    NthLastChild,
+    FirstOfType,
+    LastOfType,
+    OnlyOfType,
+    NthOfType,
+    NthLastOfType,
     Empty,
     Root,
     Not
@@ -99,14 +105,14 @@ std::vector<std::string> split_whitespace(std::string_view value) {
     return parts;
 }
 
-std::size_t element_index(const Node& node) {
+std::size_t element_index(const Node& node, bool of_type = false) {
     const auto parent = node.shared_parent();
     if (parent == nullptr) {
         return 1;
     }
     std::size_t index = 0;
     for (const auto& sibling : parent->children) {
-        if (sibling->is_element()) {
+        if (sibling->is_element() && (!of_type || sibling->name == node.name)) {
             ++index;
         }
         if (sibling.get() == &node) {
@@ -116,15 +122,16 @@ std::size_t element_index(const Node& node) {
     return index;
 }
 
-std::size_t element_count(const Node& node) {
+std::size_t element_count(const Node& node, bool of_type = false) {
     const auto parent = node.shared_parent();
     if (parent == nullptr) {
         return 1;
     }
     return static_cast<std::size_t>(
         std::count_if(parent->children.begin(), parent->children.end(),
-                      [](const std::shared_ptr<Node>& child) {
-                          return child->is_element();
+                      [&](const std::shared_ptr<Node>& child) {
+                          return child->is_element() &&
+                                 (!of_type || child->name == node.name);
                       }));
 }
 
@@ -138,6 +145,12 @@ bool match_pseudo(const Node& node, const PseudoClass& pseudo) {
             return element_index(node) == element_count(node);
         case PseudoKind::OnlyChild:
             return element_count(node) == 1;
+        case PseudoKind::FirstOfType:
+            return element_index(node, true) == 1;
+        case PseudoKind::LastOfType:
+            return element_index(node, true) == element_count(node, true);
+        case PseudoKind::OnlyOfType:
+            return element_count(node, true) == 1;
         case PseudoKind::Empty: {
             for (const auto& child : node.children) {
                 if (child->is_element() || child->is_text()) {
@@ -152,9 +165,17 @@ bool match_pseudo(const Node& node, const PseudoClass& pseudo) {
         case PseudoKind::Root:
             return node.shared_parent() != nullptr &&
                    node.shared_parent()->type == NodeType::Document;
-        case PseudoKind::NthChild: {
-            const auto index =
-                static_cast<long>(element_index(node));
+        case PseudoKind::NthChild:
+        case PseudoKind::NthLastChild:
+        case PseudoKind::NthOfType:
+        case PseudoKind::NthLastOfType: {
+            const bool of_type = pseudo.kind == PseudoKind::NthOfType ||
+                                 pseudo.kind == PseudoKind::NthLastOfType;
+            const bool reverse = pseudo.kind == PseudoKind::NthLastChild ||
+                                 pseudo.kind == PseudoKind::NthLastOfType;
+            const auto position = element_index(node, of_type);
+            const auto index = static_cast<long>(reverse
+                ? element_count(node, of_type) - position + 1 : position);
             const long a = pseudo.nth_a;
             const long b = pseudo.nth_b;
             if (a == 0) {
@@ -204,7 +225,8 @@ bool match_attr(const Node& node, const AttrSelector& attr) {
                    value->compare(value->size() - attr.value.size(),
                                   attr.value.size(), attr.value) == 0;
         case AttrOp::Substring:
-            return value->find(attr.value) != std::string::npos;
+            return attr.value.empty() ||
+                   value->find(attr.value) != std::string::npos;
     }
     return false;
 }
@@ -213,7 +235,8 @@ bool match_compound(const Node& node, const Compound& compound) {
     if (!node.is_element()) {
         return false;
     }
-    if (!compound.tag.empty() && node.name != compound.tag) {
+    if (!compound.universal && !compound.tag.empty() &&
+        node.name != compound.tag) {
         return false;
     }
     if (!compound.id.empty()) {
@@ -483,8 +506,23 @@ private:
             pseudo.kind = PseudoKind::Empty;
         } else if (name == "root") {
             pseudo.kind = PseudoKind::Root;
-        } else if (name == "nth-child") {
-            pseudo.kind = PseudoKind::NthChild;
+        } else if (name == "first-of-type") {
+            pseudo.kind = PseudoKind::FirstOfType;
+        } else if (name == "last-of-type") {
+            pseudo.kind = PseudoKind::LastOfType;
+        } else if (name == "only-of-type") {
+            pseudo.kind = PseudoKind::OnlyOfType;
+        } else if (name == "nth-child" || name == "nth-last-child" ||
+                   name == "nth-of-type" || name == "nth-last-of-type") {
+            if (name == "nth-child") {
+                pseudo.kind = PseudoKind::NthChild;
+            } else if (name == "nth-last-child") {
+                pseudo.kind = PseudoKind::NthLastChild;
+            } else if (name == "nth-of-type") {
+                pseudo.kind = PseudoKind::NthOfType;
+            } else {
+                pseudo.kind = PseudoKind::NthLastOfType;
+            }
             parse_nth(pseudo);
         } else if (name == "not") {
             pseudo.kind = PseudoKind::Not;

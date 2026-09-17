@@ -156,9 +156,141 @@ TEST(Element, MatchesSelector) {
     EXPECT_FALSE(heading->matches("h2"));
 }
 
+TEST(Document, GetElementByIdDoesNotInterpretCssCharacters) {
+    const auto document =
+        parse_html("<div id=\"a.b\"></div><div id=\"c:d\"></div>");
+    EXPECT_NE(document->get_element_by_id("a.b"), nullptr);
+    EXPECT_NE(document->get_element_by_id("c:d"), nullptr);
+    EXPECT_EQ(document->get_element_by_id("missing"), nullptr);
+}
+
 TEST(Document, HandlesMalformedMarkup) {
     const auto document = parse_html("<div><p>unclosed<span>x");
     EXPECT_NE(document->query_selector("div"), nullptr);
     EXPECT_NE(document->query_selector("span"), nullptr);
     EXPECT_EQ(document->query_selector("span")->text(), "x");
+}
+
+TEST(Document, CreateElementAndAttach) {
+    const auto document = parse_html("<div id='container'></div>", "http://x.test/");
+    auto container = document->query_selector("#container");
+    ASSERT_NE(container, nullptr);
+    auto p = document->create_element("p");
+    p->set_text("created");
+    container->append_child(p);
+    EXPECT_EQ(container->inner_html(), "<p>created</p>");
+    EXPECT_NE(document->html().find("<p>created</p>"), std::string::npos);
+}
+
+TEST(Element, SiblingTraversal) {
+    const auto document = parse_html(
+        "<ul><li>A</li><li>B</li><li>C</li></ul>", "http://x.test/");
+    auto first = document->query_selector("li");
+    ASSERT_NE(first, nullptr);
+    auto second = first->next_sibling();
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(second->text(), "B");
+    auto third = second->next_sibling();
+    ASSERT_NE(third, nullptr);
+    EXPECT_EQ(third->text(), "C");
+    EXPECT_EQ(third->next_sibling(), nullptr);
+    auto prev = third->previous_sibling();
+    ASSERT_NE(prev, nullptr);
+    EXPECT_EQ(prev->text(), "B");
+    EXPECT_EQ(first->previous_sibling(), nullptr);
+}
+
+TEST(Element, ChildrenAndFirstChild) {
+    const auto document = parse_html(
+        "<div><p>1</p><span>2</span><p>3</p></div>", "http://x.test/");
+    auto div = document->query_selector("div");
+    ASSERT_NE(div, nullptr);
+    auto children = div->children();
+    EXPECT_EQ(children.size(), 3u);
+    EXPECT_EQ(children[0]->tag_name(), "p");
+    EXPECT_EQ(children[1]->tag_name(), "span");
+    EXPECT_EQ(children[2]->tag_name(), "p");
+    EXPECT_EQ(div->first_child()->tag_name(), "p");
+    EXPECT_EQ(div->first_child()->text(), "1");
+}
+
+TEST(Element, RemoveChild) {
+    const auto document = parse_html("<div><p id='a'>A</p><p id='b'>B</p></div>", "http://x.test/");
+    auto div = document->query_selector("div");
+    auto a = document->query_selector("#a");
+    auto b = document->query_selector("#b");
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    EXPECT_TRUE(div->remove_child(a));
+    EXPECT_EQ(div->children().size(), 1u);
+    EXPECT_EQ(div->children()[0]->text(), "B");
+    EXPECT_FALSE(div->remove_child(a));
+}
+
+TEST(Element, SetTextReplacesChildren) {
+    const auto document = parse_html("<div><p>old</p><span>old2</span></div>", "http://x.test/");
+    auto div = document->query_selector("div");
+    div->set_text("new content");
+    EXPECT_EQ(div->text(), "new content");
+    EXPECT_EQ(div->inner_html(), "new content");
+    EXPECT_EQ(div->children().size(), 0u);
+}
+
+TEST(Element, AttributesRoundTrip) {
+    const auto document = parse_html("<div id='test'></div>", "http://x.test/");
+    auto div = document->query_selector("#test");
+    ASSERT_NE(div, nullptr);
+    div->set_attribute("data-value", "123");
+    div->set_attribute("data-empty", "");
+    EXPECT_TRUE(div->has_attribute("data-value"));
+    EXPECT_EQ(div->attribute("data-value"), "123");
+    EXPECT_TRUE(div->has_attribute("data-empty"));
+    EXPECT_EQ(div->attribute("data-empty"), "");
+    auto attrs = div->attributes();
+    EXPECT_EQ(attrs.size(), 3u);
+    EXPECT_TRUE(div->remove_attribute("data-value"));
+    EXPECT_FALSE(div->has_attribute("data-value"));
+    attrs = div->attributes();
+    EXPECT_EQ(attrs.size(), 2u);
+}
+
+TEST(Element, SelectValueForInputTypes) {
+    const auto document = parse_html(
+        "<select><option value='a'>A</option><option value='b' selected>B</option></select>"
+        "<select><option>first</option><option>second</option></select>"
+        "<input type='checkbox' value='on' checked>"
+        "<input type='radio' name='r' value='r1'>"
+        "<input type='radio' name='r' value='r2' checked>", "http://x.test/");
+    auto select1 = document->query_selector("select");
+    EXPECT_EQ(select1->value(), "b");
+    auto select2 = document->query_selector_all("select")[1];
+    EXPECT_EQ(select2->value(), "first");
+    auto checkbox = document->query_selector("input[type='checkbox']");
+    EXPECT_EQ(checkbox->value(), "on");
+    auto radio = document->query_selector("input[type='radio'][checked]");
+    EXPECT_EQ(radio->value(), "r2");
+}
+
+TEST(Document, MetadataIncludesCharset) {
+    const auto document = parse_html(
+        "<html><head><meta charset='utf-8'></head></html>", "http://x.test/");
+    const auto metadata = document->metadata();
+    EXPECT_EQ(metadata.at("charset"), "utf-8");
+}
+
+TEST(Document, ResourceUrlsHandlesDataAttributes) {
+    const auto document = parse_html(
+        "<img data-src='lazy.jpg'><source data-srcset='video.mp4'>", "http://x.test/");
+    const auto resources = document->resource_urls();
+    EXPECT_TRUE(std::find(resources.begin(), resources.end(), "http://x.test/lazy.jpg") == resources.end());
+}
+
+TEST(Element, OuterHtmlIncludesSelf) {
+    const auto document = parse_html("<div id='x'><p>inside</p></div>", "http://x.test/");
+    auto div = document->query_selector("#x");
+    ASSERT_NE(div, nullptr);
+    const std::string outer = div->outer_html();
+    EXPECT_NE(outer.find("<div id=\"x\">"), std::string::npos);
+    EXPECT_NE(outer.find("<p>inside</p>"), std::string::npos);
+    EXPECT_NE(outer.find("</div>"), std::string::npos);
 }

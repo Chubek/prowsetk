@@ -10,3 +10,7 @@ target_compile_definitions(prowsetk_cli PRIVATE
 
 install(TARGETS prowsetk_cli
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(FILES "${PROJECT_SOURCE_DIR}/man/man1/prowsetk.1"
+    DESTINATION "${CMAKE_INSTALL_MANDIR}/man1")
+install(FILES "${PROJECT_SOURCE_DIR}/man/man5/Prowse.toml.5"
+    DESTINATION "${CMAKE_INSTALL_MANDIR}/man5")

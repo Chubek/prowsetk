@@ -47,3 +47,50 @@ TEST(WebPlatform, UnknownApiIsUnsupported) {
               prowsetk::ImplementationClass::Unsupported);
     EXPECT_FALSE(platform.supports("unknown-api"));
 }
+
+TEST(WebPlatform, NetworkAndStorageClassifications) {
+    const auto platform = prowsetk::default_web_platform();
+    EXPECT_TRUE(platform.supports("network"));
+    EXPECT_EQ(platform.classification("network"),
+              prowsetk::ImplementationClass::ImplementedWithRestrictions);
+    EXPECT_TRUE(platform.supports("storage"));
+    EXPECT_EQ(platform.classification("storage"),
+              prowsetk::ImplementationClass::FullyImplemented);
+}
+
+TEST(WebPlatform, EndpointExtractionClassification) {
+    const auto platform = prowsetk::default_web_platform();
+    EXPECT_TRUE(platform.supports("endpoint-extraction"));
+    EXPECT_EQ(platform.classification("endpoint-extraction"),
+              prowsetk::ImplementationClass::PartiallyImplemented);
+}
+
+TEST(WebPlatform, EventsClassification) {
+    const auto platform = prowsetk::default_web_platform();
+    EXPECT_TRUE(platform.supports("events"));
+    EXPECT_EQ(platform.classification("events"),
+              prowsetk::ImplementationClass::FullyImplemented);
+}
+
+TEST(WebPlatform, CssSelectorsPartiallyImplemented) {
+    const auto platform = prowsetk::default_web_platform();
+    EXPECT_TRUE(platform.supports("css-selectors"));
+    EXPECT_EQ(platform.classification("css-selectors"),
+              prowsetk::ImplementationClass::PartiallyImplemented);
+}
+
+TEST(WebPlatform, JavaScriptPartiallyImplemented) {
+    const auto platform = prowsetk::default_web_platform();
+    EXPECT_TRUE(platform.supports("javascript"));
+    EXPECT_EQ(platform.classification("javascript"),
+              prowsetk::ImplementationClass::PartiallyImplemented);
+}
+
+TEST(WebPlatform, DummyCanvasClassification) {
+    const auto platform = prowsetk::default_web_platform();
+    EXPECT_TRUE(platform.supports("canvas"));
+    EXPECT_EQ(platform.classification("canvas"),
+              prowsetk::ImplementationClass::DummyImplementation);
+    EXPECT_EQ(platform.classification("WebGL"),
+              prowsetk::ImplementationClass::Unsupported);
+}
