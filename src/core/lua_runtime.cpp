@@ -15,6 +15,7 @@
 #include "prowsetk/endpoint_extraction.hpp"
 #include "prowsetk/error.hpp"
 #include "prowsetk/ir.hpp"
+#include "prowsetk/url.hpp"
 #include "prowsetk/xpath.hpp"
 
 #ifdef PROWSETK_HAVE_LUA
@@ -297,6 +298,25 @@ void push_browser(lua_State* L, Browser* browser, bool owned) {
     userdata->browser = browser;
     userdata->owned = owned;
     luaL_setmetatable(L, kBrowserMeta);
+}
+
+void copy_cookies(Browser& source, Browser& target) {
+    for (Cookie cookie : source.storage().cookies().all()) {
+        if (cookie.domain.empty()) {
+            continue;
+        }
+        std::string domain = cookie.domain;
+        while (!domain.empty() && domain.front() == '.') {
+            domain.erase(domain.begin());
+        }
+        if (domain.empty()) {
+            continue;
+        }
+        const std::string origin =
+            std::string(cookie.secure ? "https://" : "http://") + domain +
+            (cookie.path.empty() ? "/" : cookie.path);
+        target.storage().cookies().set(parse_url(origin), std::move(cookie));
+    }
 }
 
 void push_session(lua_State* L, const std::shared_ptr<Session>& session) {
@@ -673,6 +693,9 @@ int browser_new(lua_State* L) {
                         config.unsupported_api_behavior);
         }
         auto* browser = new Browser(std::move(config));
+        if (bound_browser != nullptr) {
+            copy_cookies(*bound_browser, *browser);
+        }
         push_browser(L, browser, true);
         return 1;
     });

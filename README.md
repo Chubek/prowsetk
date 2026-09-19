@@ -1646,6 +1646,10 @@ default_profile = "default"
 reuse_cookies = false
 persist_session = false
 isolate_storage = true
+# Optional browser-exported JSON cookie file. Values are loaded into the
+# session cookie jar before plugins and drivers run; cookie values are
+# secret-bearing and are redacted from logs.
+# cookies_json = "_scraped/cookies.json"
 
 # ----------------------------------------------------------------------
 # Project variables
@@ -1663,14 +1667,17 @@ A **driver** is a Lua script that controls one or more browser sessions
 (README `[[drivers]]`). Drivers live in `drivers/` and are invoked with:
 
 ```sh
-prowsetk run <name> [--arg VALUE ...] [--config Prowse.toml] [--user-agent VALUE]
+prowsetk run <name> [--arg VALUE ...] [--config Prowse.toml] [--user-agent VALUE] [--cookies-json FILE]
 ```
 
 `prowsetk run` reads the driver's declaration from `Prowse.toml` (by default
 `Prowse.toml` in the working directory; override with `--config`), resolves the
 script relative to the project root, and runs it through the `lprowse` Lua
 runtime. `[engine].user_agent` selects the browser identity for created
-sessions; `--user-agent VALUE` overrides it for that invocation. Command-line
+sessions; `--user-agent VALUE` overrides it for that invocation.
+`[sessions].cookies_json` imports browser-exported cookies into the session
+cookie jar before plugins and the driver run; `--cookies-json FILE` overrides it
+for that invocation. Command-line
 `--arg VALUE` pairs are validated against the driver's
 declared `arguments`, coerced to their declared TOML type (`string`, `integer`,
 `boolean`, `path`, `url`), and applied over declared defaults. Missing required

@@ -330,6 +330,8 @@ void parse_sessions(const toml::table& root, ProjectConfig& config) {
         table_bool(*table, "persist_session", sessions.persist_session);
     sessions.isolate_storage =
         table_bool(*table, "isolate_storage", sessions.isolate_storage);
+    sessions.cookies_json =
+        table_string(*table, "cookies_json", sessions.cookies_json);
 }
 
 void parse_variables(const toml::table& root, ProjectConfig& config) {

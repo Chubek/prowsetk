@@ -745,45 +745,59 @@ function main(args)
             })
         else
             local dotenv = load_dotenv(args.dotenv)
-            local username = env("BOOKING_DOTCOM_USER", dotenv)
-            local password = env("BOOKING_DOTCOM_PASS", dotenv)
-            if not username or username == "" or not password or password == "" then
-                error("booking-dotcom-admin: missing Booking.com credentials", 2)
-            end
             local captcha_inputs = apply_captcha_inputs(session, args, dotenv)
-            local as_token = env("BOOKING_DOTCOM_AS_TOKEN", dotenv)
-            local logged_in, login_err = pcall(function()
-                login(session, url, username, password, {
-                    as_token = as_token,
-                    success_selector = args.success_selector
-                })
-            end)
-            if not logged_in then
-                local message = tostring(login_err)
-                if message:find("requires browser JavaScript or captcha support", 1, true) then
+
+            local has_cookie_session =
+                (type(args.cookies_json) == "string" and args.cookies_json ~= "") or
+                (type(captcha_inputs.clearance_cookie) == "string" and captcha_inputs.clearance_cookie ~= "")
+            local loaded = false
+            if has_cookie_session then
+                loaded = pcall(function()
+                    load_authenticated_page(session, url, args.success_selector)
+                end)
+            end
+            if not loaded then
+                local username = env("BOOKING_DOTCOM_USER", dotenv)
+                local password = env("BOOKING_DOTCOM_PASS", dotenv)
+                if not username or username == "" or not password or password == "" then
+                    error("booking-dotcom-admin: missing Booking.com credentials", 2)
+                end
+
+                local as_token = env("BOOKING_DOTCOM_AS_TOKEN", dotenv)
+                local logged_in, login_err = pcall(function()
+                    login(session, url, username, password, {
+                        as_token = as_token,
+                        success_selector = args.success_selector
+                    })
+                end)
+                if not logged_in then
+                    local message = tostring(login_err)
+                    if message:find("requires browser JavaScript or captcha support", 1, true) then
+                        error(login_err, 0)
+                    end
+                    if message:lower():find("challenge detected", 1, true) or
+                       message:lower():find("captcha", 1, true) or
+                       message:find("Human Verification", 1, true) then
+                        error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs), 2)
+                    end
                     error(login_err, 0)
                 end
-                if message:lower():find("challenge detected", 1, true) or
-                   message:lower():find("captcha", 1, true) or
-                   message:find("Human Verification", 1, true) then
-                    error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs), 2)
-                end
-                error(login_err, 0)
-            end
-            local loaded, load_err = pcall(function()
-                load_authenticated_page(session, url, args.success_selector)
-            end)
-            if not loaded then
-                local message = tostring(load_err)
-                if message:find("requires browser JavaScript or captcha support", 1, true) then
+                local load_err
+                loaded, load_err = pcall(function()
+                    load_authenticated_page(session, url, args.success_selector)
+                end)
+                if not loaded then
+                    local message = tostring(load_err)
+                    if message:find("requires browser JavaScript or captcha support", 1, true) then
+                        error(load_err, 0)
+                    end
+                    if message:lower():find("challenge detected", 1, true) or
+                       message:lower():find("captcha", 1, true) or
+                       message:find("Human Verification", 1, true) then
+                        error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs), 2)
+                    end
                     error(load_err, 0)
                 end
-                if message:lower():find("challenge detected", 1, true) or
-                   message:lower():find("captcha", 1, true) or
-                   message:find("Human Verification", 1, true) then
-                    error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs), 2)
-                end
-                error(load_err, 0)
             end
             authenticated_flag = true
             endpoints = crawl(session, url, args, true)

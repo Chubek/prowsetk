@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <prowsetk/browser.hpp>
+#include <prowsetk/cookie_import.hpp>
 #include <prowsetk/endpoint_extraction.hpp>
 #include <prowsetk/error.hpp>
 #include <prowsetk/lua_runtime.hpp>
@@ -40,6 +41,7 @@ struct Arguments {
     std::string driver;
     std::string config_path = "Prowse.toml";
     std::string user_agent;
+    std::string cookies_json_path;
     std::vector<std::pair<std::string, std::string>> run_args;
 };
 
@@ -85,6 +87,8 @@ bool parse_arguments(int argc, char** argv, Arguments& args) {
                 args.config_path = argv[++i];
             } else if (arg == "--user-agent" && i + 1 < argc) {
                 args.user_agent = argv[++i];
+            } else if (arg == "--cookies-json" && i + 1 < argc) {
+                args.cookies_json_path = argv[++i];
             } else if (arg.rfind("--", 0) == 0 && i + 1 < argc) {
                 args.run_args.emplace_back(arg.substr(2), argv[++i]);
             } else {
@@ -130,7 +134,7 @@ void print_usage(std::ostream& out) {
         << "  prowsetk cdp [--host 127.0.0.1] [--port 0] [--no-javascript]\n"
         << "  prowsetk endpoints --url URL [--output FILE] [--javascript]\n"
         << "  prowsetk run <driver> [--arg VALUE ...] [--config Prowse.toml] "
-           "[--user-agent VALUE]\n";
+           "[--user-agent VALUE] [--cookies-json FILE]\n";
 }
 
 int run_serve(const Arguments& args) {
@@ -262,6 +266,15 @@ int run_driver(const Arguments& args) {
             ? std::filesystem::path(config.root)
             : config_dir / config.root;
     const std::filesystem::path script_path = project_root / driver.script;
+    std::filesystem::path cookies_path;
+    if (!args.cookies_json_path.empty()) {
+        cookies_path = args.cookies_json_path;
+    } else if (!config.sessions.cookies_json.empty()) {
+        cookies_path = config.sessions.cookies_json;
+        if (cookies_path.is_relative()) {
+            cookies_path = project_root / cookies_path;
+        }
+    }
 
     // Map command-line `--name value` pairs onto the driver's declared
     // arguments, applying defaults and rejecting unknown or missing ones.
@@ -291,6 +304,10 @@ int run_driver(const Arguments& args) {
         std::cerr << "prowsetk run: unknown argument: --" << name << '\n';
         return 2;
     }
+    if (!cookies_path.empty()) {
+        lua_args.push_back(prowsetk::LuaArgument{
+            "cookies_json", "path", cookies_path.string()});
+    }
 
     prowsetk::BrowserConfig browser_config;
     browser_config.javascript = config.javascript;
@@ -306,6 +323,14 @@ int run_driver(const Arguments& args) {
 
     prowsetk::Browser browser(std::move(browser_config));
     try {
+        if (!cookies_path.empty()) {
+            const auto import_result = prowsetk::import_cookies_json_file(
+                browser.storage().cookies(), cookies_path);
+            for (const auto& warning : import_result.warnings) {
+                std::cerr << "prowsetk run: cookie import warning: "
+                          << warning << '\n';
+            }
+        }
         for (const auto& plugin : config.plugins) {
             if (!plugin.enabled || !plugin.autoload || plugin.path.empty()) {
                 continue;

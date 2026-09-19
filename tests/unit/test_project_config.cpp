@@ -109,6 +109,7 @@ allow_private_networks = false
 default_profile = "scan"
 reuse_cookies = true
 persist_session = true
+cookies_json = "_scraped/cookies.json"
 
 [endpoint_extraction]
 enabled = true
@@ -123,6 +124,7 @@ redact_query_parameters = ["token", "api_key"]
     EXPECT_EQ(config.sessions.default_profile, "scan");
     EXPECT_TRUE(config.sessions.reuse_cookies);
     EXPECT_TRUE(config.sessions.persist_session);
+    EXPECT_EQ(config.sessions.cookies_json, "_scraped/cookies.json");
     EXPECT_EQ(config.endpoint_extraction.max_depth, 4u);
     EXPECT_EQ(config.endpoint_extraction.max_pages, 50u);
     EXPECT_DOUBLE_EQ(config.endpoint_extraction.minimum_confidence, 0.4);

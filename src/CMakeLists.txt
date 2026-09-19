@@ -4,6 +4,7 @@ set(PROWSETK_CORE_SOURCES
     core/capability.cpp
     core/event.cpp
     core/anti_bot_detection.cpp
+    core/cookie_import.cpp
     core/url.cpp
     core/redaction.cpp
     core/storage.cpp

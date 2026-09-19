@@ -24,6 +24,9 @@ prowsetk_gtest(prowsetk_unit_redaction "prowsetk.unit.redaction."
 prowsetk_gtest(prowsetk_unit_storage "prowsetk.unit.storage."
     "unit;storage" test_storage.cpp)
 
+prowsetk_gtest(prowsetk_unit_cookie_import "prowsetk.unit.cookie-import."
+    "unit;storage" test_cookie_import.cpp)
+
 prowsetk_gtest(prowsetk_unit_tcb_storage "prowsetk.unit.tcb_storage."
     "unit;storage" test_tcb_storage.cpp)
 target_link_libraries(prowsetk_unit_tcb_storage PRIVATE ProwseTk::session)

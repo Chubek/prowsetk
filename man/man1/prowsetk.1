@@ -12,7 +12,8 @@ prowsetk \- headless browser automation and endpoint discovery
 \fIURL\fR [\fB--output\fR \fIFILE\fR] [\fB--no-javascript\fR]
 .br
 .B prowsetk run
-\fIDRIVER\fR [\fB--config\fR \fIFILE\fR] [\fB--\fIargument\fR \fIVALUE\fR ...]
+\fIDRIVER\fR [\fB--config\fR \fIFILE\fR] [\fB--user-agent\fR \fIVALUE\fR]
+[\fB--cookies-json\fR \fIFILE\fR] [\fB--\fIargument\fR \fIVALUE\fR ...]
 .SH DESCRIPTION
 ProwseTk runs a headless automation engine without a graphical browser.
 The \fBversion\fR command prints the installed version.
@@ -39,6 +40,12 @@ Output file for endpoint discovery, or a declared driver argument.
 .TP
 .B --config \fIFILE\fR
 Project configuration for \fBrun\fR (default: Prowse.toml).
+.TP
+.B --user-agent \fIVALUE\fR
+Browser identity string for \fBrun\fR, overriding Prowse.toml.
+.TP
+.B --cookies-json \fIFILE\fR
+Browser-exported JSON cookie file to import before plugins and drivers run.
 .TP
 .B --no-javascript
 Disable page JavaScript for \fBserve\fR and \fBendpoints\fR.

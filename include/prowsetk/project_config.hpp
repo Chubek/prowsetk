@@ -119,6 +119,7 @@ struct SessionDefaultsConfig {
     bool reuse_cookies = false;
     bool persist_session = false;
     bool isolate_storage = true;
+    std::string cookies_json;
 };
 
 // The parsed `Prowse.toml` project configuration. Only documented sections are

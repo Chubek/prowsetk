@@ -17,6 +17,9 @@ libraries = ["lprowse", "lprowsext"]
 allow_extensions = true
 execution_timeout_ms = 60000
 
+[sessions]
+cookies_json = "../../_scraped/booking-dotcom-admin/cookies.json"
+
 [logging]
 level = "info"
 format = "text"

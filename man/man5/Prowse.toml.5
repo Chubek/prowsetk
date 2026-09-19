@@ -10,6 +10,13 @@ Drivers are declared as \fB[[drivers]]\fR tables.
 .B user_agent
 Browser identity string used for created sessions. \fBprowsetk run\fR can
 override this value for a single invocation with \fB--user-agent VALUE\fR.
+.SH SESSION FIELDS
+.TP
+.B cookies_json
+Path to a browser-exported JSON cookie file. The path is resolved against the
+project root and imported into the session cookie jar before plugins and drivers
+run. \fBprowsetk run\fR can override this value with
+\fB--cookies-json FILE\fR.
 .SH DRIVER FIELDS
 .TP
 .B name
