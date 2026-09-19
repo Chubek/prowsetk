@@ -39,6 +39,7 @@ struct Arguments {
     bool javascript = true;
     std::string driver;
     std::string config_path = "Prowse.toml";
+    std::string user_agent;
     std::vector<std::pair<std::string, std::string>> run_args;
 };
 
@@ -82,6 +83,8 @@ bool parse_arguments(int argc, char** argv, Arguments& args) {
             const std::string arg = argv[i];
             if (arg == "--config" && i + 1 < argc) {
                 args.config_path = argv[++i];
+            } else if (arg == "--user-agent" && i + 1 < argc) {
+                args.user_agent = argv[++i];
             } else if (arg.rfind("--", 0) == 0 && i + 1 < argc) {
                 args.run_args.emplace_back(arg.substr(2), argv[++i]);
             } else {
@@ -126,7 +129,8 @@ void print_usage(std::ostream& out) {
         << "  prowsetk webdriver [--host 127.0.0.1] [--port 0] [--no-javascript]\n"
         << "  prowsetk cdp [--host 127.0.0.1] [--port 0] [--no-javascript]\n"
         << "  prowsetk endpoints --url URL [--output FILE] [--javascript]\n"
-        << "  prowsetk run <driver> [--arg VALUE ...] [--config Prowse.toml]\n";
+        << "  prowsetk run <driver> [--arg VALUE ...] [--config Prowse.toml] "
+           "[--user-agent VALUE]\n";
 }
 
 int run_serve(const Arguments& args) {
@@ -292,6 +296,8 @@ int run_driver(const Arguments& args) {
     browser_config.javascript = config.javascript;
     browser_config.user_agent =
         config.user_agent.empty() ? browser_config.user_agent : config.user_agent;
+    browser_config.user_agent =
+        args.user_agent.empty() ? browser_config.user_agent : args.user_agent;
     browser_config.follow_redirects = config.follow_redirects;
     browser_config.max_redirects = config.max_redirects;
     browser_config.timeout_ms = config.timeout_ms;

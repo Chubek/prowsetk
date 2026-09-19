@@ -628,7 +628,18 @@ int browser_install_extension(lua_State* L) {
 
 int browser_new(lua_State* L) {
     return protect(L, [&]() -> int {
+        Browser* bound_browser = nullptr;
+        if (LuaRuntime* runtime = runtime_from_state(L)) {
+            bound_browser = runtime->bound_browser();
+        }
+        if (bound_browser != nullptr && !lua_istable(L, 1)) {
+            push_browser(L, bound_browser, false);
+            return 1;
+        }
         BrowserConfig config;
+        if (bound_browser != nullptr) {
+            config = bound_browser->config();
+        }
         if (lua_istable(L, 1)) {
             const auto read_bool = [&](const char* key, bool& target) {
                 lua_getfield(L, 1, key);

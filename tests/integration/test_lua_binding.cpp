@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <memory>
+
 #include "prowsetk/browser.hpp"
 #include "prowsetk/lua_runtime.hpp"
 
@@ -44,6 +46,44 @@ TEST(LuaBinding, DrivesBrowserAndDocument) {
 
     const auto result = lua.run(script, "lua_binding_test");
     EXPECT_TRUE(result.ok) << lua.last_error();
+}
+
+TEST(LuaBinding, BrowserNewUsesBoundBrowserDefaults) {
+    if (!LuaRuntime::available()) {
+        GTEST_SKIP() << "ProwseTk was built without Lua support";
+    }
+
+    prowsetk::BrowserConfig config;
+    config.user_agent = "BoundAgent/7.0";
+    Browser browser(config);
+
+    auto network = std::make_unique<prowsetk::MemoryNetworkClient>();
+    auto* network_ptr = network.get();
+    prowsetk::HttpResponse response;
+    response.status = 204;
+    response.final_url = "https://example.test/";
+    network->set_response("https://example.test/", response);
+    browser.set_network_client(std::move(network));
+
+    LuaRuntime lua;
+    lua.bind_browser(&browser);
+    const auto result = lua.run(R"LUA(
+        local prowse = require("lprowse")
+        local browser = prowse.browser.new()
+        local session = browser:create_session()
+        session:request("GET", "https://example.test/")
+    )LUA", "lua_bound_browser_user_agent");
+    ASSERT_TRUE(result.ok) << lua.last_error();
+    ASSERT_EQ(network_ptr->requests().size(), 1u);
+
+    bool found = false;
+    for (const auto& [name, value] : network_ptr->requests()[0].headers) {
+        if (name == "User-Agent") {
+            found = true;
+            EXPECT_EQ(value, "BoundAgent/7.0");
+        }
+    }
+    EXPECT_TRUE(found);
 }
 
 TEST(LuaBinding, InspectsAndMutatesDocuments) {

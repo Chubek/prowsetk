@@ -5,6 +5,11 @@ Prowse.toml \- ProwseTk project and driver configuration
 The \fBprowsetk run\fR command reads Prowse.toml from the working directory
 unless \fB--config\fR selects another file. The file uses TOML syntax.
 Drivers are declared as \fB[[drivers]]\fR tables.
+.SH ENGINE FIELDS
+.TP
+.B user_agent
+Browser identity string used for created sessions. \fBprowsetk run\fR can
+override this value for a single invocation with \fB--user-agent VALUE\fR.
 .SH DRIVER FIELDS
 .TP
 .B name

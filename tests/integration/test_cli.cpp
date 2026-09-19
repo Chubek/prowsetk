@@ -211,6 +211,7 @@ TEST(CliDriverRun, RejectsUnknownDriverAndArguments) {
               0);
 #endif
 }
+
 TEST(CliDriverRun, BookingDotcomOfflineOpenApi) {
 #if !defined(PROWSETK_HAVE_LUA) || !defined(PROWSETK_HAVE_TOMLPLUSPLUS)
     GTEST_SKIP() << "CLI driver support requires Lua and tomlplusplus";
