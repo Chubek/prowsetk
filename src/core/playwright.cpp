@@ -999,7 +999,7 @@ WebResponse CdpServer::handle_http(const WebRequest& request) {
     const std::string ws_base = "ws://" + host;
     const std::string path = request.path;
     if (request.method != "GET") return WebResponse::method_not_allowed();
-    if (path == "/json/version") {
+    if (path == "/json/version" || path == "/json/version/") {
         Value body = object_value();
         body.object.emplace_back("Browser",
                                  string_value(std::string("ProwseTk/") + version()));
@@ -1011,7 +1011,7 @@ WebResponse CdpServer::handle_http(const WebRequest& request) {
                                  string_value(ws_base + "/devtools/browser/prowsetk"));
         return WebResponse::json(200, serialize_value(body));
     }
-    if (path == "/json" || path == "/json/" || path == "/json/list") {
+    if (path == "/json" || path == "/json/" || path == "/json/list" || path == "/json/list/") {
         Value target = object_value();
         target.object.emplace_back("description", string_value(""));
         target.object.emplace_back("devtoolsFrontendUrl", string_value(""));
@@ -1026,7 +1026,7 @@ WebResponse CdpServer::handle_http(const WebRequest& request) {
         list.array.push_back(std::move(target));
         return WebResponse::json(200, serialize_value(list));
     }
-    if (path == "/json/close/" + impl_->target_id) {
+    if (path == "/json/close/" + impl_->target_id || path == "/json/close/" + impl_->target_id + "/") {
         return WebResponse::text(200, "Target is closing");
     }
     return WebResponse::not_found();

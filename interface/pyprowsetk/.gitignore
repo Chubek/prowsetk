@@ -1,0 +1,8 @@
+__pycache__/
+*.so
+*.pyd
+_core.pyi
+pyprowsetk/_core.*
+build/
+dist/
+*.egg-info/

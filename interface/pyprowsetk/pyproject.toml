@@ -1,0 +1,34 @@
+[build-system]
+requires = ["scikit-build-core>=0.9", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "pyprowsetk"
+version = "0.1.0"
+description = "Python interface for ProwseTk - headless browser toolkit"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "ProwseTk" }]
+keywords = ["browser", "scraping", "headless", "automation"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: C++",
+  "Topic :: Internet :: WWW/HTTP :: Browsers",
+]
+dependencies = []
+
+[project.optional-dependencies]
+pandas = ["pandas"]
+dev = ["pytest", "pandas"]
+
+[project.urls]
+Homepage = "https://github.com/prowsetk/prowsetk"
+
+[tool.scikit-build]
+cmake.build-type = "RelWithDebInfo"
+cmake.args = ["-DPROWSETK_BUILD_TESTS=OFF", "-DPROWSETK_BUILD_EXAMPLES=OFF"]
+wheel.packages = ["pyprowsetk"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

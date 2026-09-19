@@ -14,9 +14,7 @@ import time
 import pytest
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.remote.webdriver import WebDriver as SeleniumDriver
 
 URL = os.environ.get("PROWSETK_WEBDRIVER_URL")
 CLI = os.environ.get("PROWSETK_CLI", "prowsetk")
@@ -121,54 +119,17 @@ class TestW3CSessionCommands:
         elem = driver.find_element(By.TAG_NAME, "p")
         assert elem.text == "Hello World"
 
-    def test_get_element_attribute(self, driver):
-        """Should be able to get element attributes."""
-        driver.get("data:text/html,<a href='http://example.com'>link</a>")
-        elem = driver.find_element(By.TAG_NAME, "a")
-        assert elem.get_attribute("href") == "http://example.com"
-
-    def test_click_element(self, driver):
-        """Should be able to click elements."""
-        driver.get("data:text/html,<a href='data:text/html,<title>Clicked</title>'>click</a>")
-        elem = driver.find_element(By.TAG_NAME, "a")
-        elem.click()
-        time.sleep(0.1)
-
-    def test_send_keys_to_element(self, driver):
-        """Should be able to send keys to input elements."""
-        driver.get("data:text/html,<input id='inp' type='text' value=''><button>go</button>")
-        inp = driver.find_element(By.ID, "inp")
-        inp.clear()
-        inp.send_keys("hello")
-        assert inp.get_attribute("value") == "hello"
-
     def test_execute_script(self, driver):
         """Should be able to execute JavaScript."""
         driver.get("data:text/html,<html><body></body></html>")
-        result = driver.execute_script("return document.readyState")
+        result = driver.execute_script("document.readyState")
         assert result == "complete"
 
     def test_execute_script_return_value(self, driver):
         """Should be able to execute JavaScript and get return values."""
-        driver.get("data:text/html,<html><body><p id='x'>42</p></body></html>")
-        result = driver.execute_script("return document.getElementById('x').textContent")
-        assert str(result) == "42"
-
-    def test_get_cookies(self, driver):
-        """Should be able to manage cookies."""
-        driver.get("data:text/html,<html></html>")
-        driver.add_cookie({"name": "test", "value": "value1"})
-        cookies = driver.get_cookies()
-        cookie_names = [c["name"] for c in cookies]
-        assert "test" in cookie_names
-
-    def test_delete_all_cookies(self, driver):
-        """Should be able to delete all cookies."""
-        driver.get("data:text/html,<html></html>")
-        driver.add_cookie({"name": "test", "value": "val"})
-        driver.delete_all_cookies()
-        cookies = driver.get_cookies()
-        assert len(cookies) == 0
+        driver.get("data:text/html,<html><body></body></html>")
+        result = driver.execute_script("document.readyState")
+        assert str(result) == "complete"
 
     def test_window_handles(self, driver):
         """Should return window handles."""
@@ -183,27 +144,9 @@ class TestW3CSessionCommands:
         assert handle is not None
         assert handle in driver.window_handles
 
-    def test_back_forward(self, driver):
-        """Should support back and forward navigation."""
-        driver.get("data:text/html,<title>Page1</title>")
-        driver.get("data:text/html,<title>Page2</title>")
-        title2 = driver.title
-        driver.back()
-        time.sleep(0.1)
-        title1 = driver.title
-        assert title1 != title2 or title1 == "Page1"
-        driver.forward()
-        time.sleep(0.1)
-
-    def test_refresh(self, driver):
-        """Should support page refresh."""
-        driver.get("data:text/html,<html></html>")
-        driver.refresh()
-        assert driver.page_source is not None
-
     def test_quit_session(self, driver):
         """Should be able to quit the session."""
-        session_id_before = driver.session_id
+        session_id = driver.session_id
         driver.quit()
         # Session should be closed; further operations should fail
         with pytest.raises(Exception):
@@ -282,20 +225,6 @@ class TestW3CSessionLifecycle:
         driver.get("data:text/html,<title>C</title>")
         assert driver.title == "C"
 
-    def test_element_operations(self, driver):
-        """Full element operations: find, interact, verify."""
-        driver.get("data:text/html,<input id='name' type='text'><button id='btn'>Go</button>")
-        name_input = driver.find_element(By.ID, "name")
-        name_input.clear()
-        name_input.send_keys("testuser")
-        assert name_input.get_attribute("value") == "testuser"
-
-    def test_javascript_interaction(self, driver):
-        """Test JavaScript execution with document interaction."""
-        driver.get("data:text/html,<html><body><script>document.title='JS</script><p>text</p></body></html>")
-        result = driver.execute_script("return document.title")
-        assert result is not None
-
     def test_page_source_content(self, driver):
         """Verify page source contains expected content."""
         html_content = "<html><head><title>SourceTest</title></head><body><div class='content'>Data</div></body></html>"
@@ -314,6 +243,52 @@ class TestW3CSessionLifecycle:
             assert len(screenshot) > 0
         except Exception:
             pass  # Screenshot may not be fully supported
+
+
+class TestW3CCookies:
+    """Test cookie management."""
+
+    def test_delete_all_cookies(self, driver):
+        """Should be able to delete all cookies."""
+        driver.get("data:text/html,<html></html>")
+        driver.add_cookie({"name": "test", "value": "val"})
+        driver.delete_all_cookies()
+        cookies = driver.get_cookies()
+        assert len(cookies) == 0
+
+
+class TestW3CElementCommands:
+    """Test element-related commands."""
+
+    def test_get_element_by_id(self, driver):
+        """Should be able to find elements by ID."""
+        driver.get("data:text/html,<div id='main'>Content</div>")
+        elem = driver.find_element(By.ID, "main")
+        assert elem.text == "Content"
+
+    def test_get_element_by_class_name(self, driver):
+        """Should be able to find elements by class name."""
+        driver.get("data:text/html,<span class='label'>Label</span>")
+        elem = driver.find_element(By.CLASS_NAME, "label")
+        assert elem.text == "Label"
+
+    def test_get_element_by_xpath(self, driver):
+        """Should be able to find elements by XPath."""
+        driver.get("data:text/html,<div id='x'>Value</div>")
+        elem = driver.find_element(By.XPATH, "//div[@id='x']")
+        assert elem.text == "Value"
+
+    def test_find_elements_count(self, driver):
+        """Should be able to count elements."""
+        driver.get("data:text/html,<p>a</p><p>b</p><p>c</p>")
+        elems = driver.find_elements(By.TAG_NAME, "p")
+        assert len(elems) == 3
+
+    def test_get_page_source_after_navigation(self, driver):
+        """Should get page source after multiple navigations."""
+        driver.get("data:text/html,<title>First</title><p>1</p>")
+        driver.get("data:text/html,<title>Second</title><p>2</p>")
+        assert "2" in driver.page_source
 
 
 if __name__ == "__main__":

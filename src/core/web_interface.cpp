@@ -804,7 +804,7 @@ bool json_string_list(const Json* value, std::string& result) {
 Json webdriver_script_result(const std::shared_ptr<Session>& session,
                              const Json& body, WebDriverState& state,
                              const std::string& session_id) {
-    const Json* script_value = field_alias(body, "script", "script");
+    const Json* script_value = field_alias(body, "script", "value");
     if (script_value == nullptr || !script_value->is_string()) {
         throw Error(ErrorCode::InvalidArgument, "script is required");
     }
@@ -813,7 +813,11 @@ Json webdriver_script_result(const std::shared_ptr<Session>& session,
            std::isspace(static_cast<unsigned char>(script.front()))) {
         script.erase(script.begin());
     }
-    if (script.rfind("return ", 0) == 0) script.erase(0, 7);
+    bool has_return = false;
+    if (script.rfind("return ", 0) == 0) {
+        script.erase(0, 7);
+        has_return = true;
+    }
     while (!script.empty() &&
            std::isspace(static_cast<unsigned char>(script.back()))) {
         script.pop_back();
@@ -888,7 +892,11 @@ Json webdriver_script_result(const std::shared_ptr<Session>& session,
     }
 
     if (session->browser().config().javascript) {
-        return string_json(session->evaluate_js(script));
+        std::string js_script = script;
+        if (has_return) {
+            js_script = "(function() { return " + script + "; })()";
+        }
+        return string_json(session->evaluate_js(js_script));
     }
     throw Error(ErrorCode::Unsupported,
                 "script execution requires JavaScript to be enabled");
@@ -1484,7 +1492,12 @@ WebResponse handle_evaluate(const std::shared_ptr<Session>& session,
     if (script == nullptr || !script->is_string()) {
         throw Error(ErrorCode::InvalidArgument, "missing required 'script'");
     }
-    const std::string value = session->evaluate_js(script->string);
+    std::string eval_script = script->string;
+    std::string js_script = eval_script;
+    if (eval_script.rfind("return ", 0) == 0) {
+        js_script = "(function() { return " + eval_script + "; })()";
+    }
+    const std::string value = session->evaluate_js(js_script);
 
     Json response;
     response.kind = Json::Kind::Object;

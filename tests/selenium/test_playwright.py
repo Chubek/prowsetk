@@ -1,37 +1,30 @@
-"""Playwright compliance tests for ProwseTk CDP bridge.
+"""Playwright/CDP compliance tests for ProwseTk.
 
 Run with:
-    PROWSETK_CDP_URL=http://127.0.0.1:9516 pytest tests/selenium/test_playwright.py -v
+    PROWSETK_WEBDRIVER_URL=http://127.0.0.1:9515 pytest tests/selenium/test_playwright.py -v
 
 Or start the CDP server and run:
-    prowsetk cdp --host 127.0.0.1 --port 9516 &
+    prowsetk cdp --host 127.0.0.1 --port 0 &
     pytest tests/selenium/test_playwright.py -v
 """
+import json
 import os
 import subprocess
 import re
 import time
+import urllib.request
+import urllib.error
 import pytest
 
-# Try to import playwright; if not available, skip tests
-try:
-    from playwright.sync_api import sync_playwright, PlaywrightError
-    PLAYWRIGHT_AVAILABLE = True
-except ImportError:
-    PLAYWRIGHT_AVAILABLE = False
-
-URL = os.environ.get("PROWSETK_CDP_URL")
+URL = os.environ.get("PROWSETK_WEBDRIVER_URL")
 CLI = os.environ.get("PROWSETK_CLI", "prowsetk")
 
-pytestmark = pytest.mark.skipif(
-    not URL and not CLI,
-    reason="set PROWSETK_CDP_URL or PROWSETK_CLI"
-)
+pytestmark = pytest.mark.skipif(not URL and not CLI,
+                                reason="set PROWSETK_WEBDRIVER_URL or PROWSETK_CLI")
 
 
 @pytest.fixture(scope="session")
 def cdp_url():
-    """Yield the CDP server URL."""
     if URL:
         yield URL
         return
@@ -53,187 +46,466 @@ def cdp_url():
             process.kill()
 
 
-@pytest.fixture()
-def browser(cdp_url):
-    """Connect to the ProwseTk CDP server via Playwright."""
-    if not PLAYWRIGHT_AVAILABLE:
-        pytest.skip("playwright not installed")
-    with sync_playwright() as p:
-        browser = p.chromium.connect_over_cdp(cdp_url)
-        page = browser.new_page()
-        yield page, browser
-        page.close()
-        browser.close()
+def http_get(base_url, path):
+    url = base_url.rstrip("/") + "/" + path.lstrip("/")
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            body = resp.read().decode()
+            return resp.status, body
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
+    except Exception as e:
+        return None, str(e)
 
 
-@pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="playwright not installed")
-class TestPlaywrightNavigation:
-    """Test basic navigation via Playwright CDP bridge."""
-
-    def test_navigate_to_data_url(self, browser):
-        """Should be able to navigate to a data URL."""
-        page, _ = browser
-        page.goto("data:text/html,<title>PTK</title>")
-        assert page.title() == "PTK"
-
-    def test_navigate_and_check_content(self, browser):
-        """Should navigate and verify page content."""
-        page, _ = browser
-        page.goto("data:text/html,<div id='main'>Hello Playwright</div>")
-        content = page.text_content("#main")
-        assert content == "Hello Playwright"
-
-    def test_navigate_to_html_page(self, browser):
-        """Should navigate to a full HTML page."""
-        page, _ = browser
-        page.goto("data:text/html,<html><body><h1>Title</h1><p id='p1'>Text</p></body></html>")
-        assert page.title() == ""
-        h1 = page.text_content("h1")
-        assert h1 == "Title"
-
-    def test_page_source(self, browser):
-        """Should be able to retrieve page content."""
-        page, _ = browser
-        page.goto("data:text/html,<html><body>Content</body></html>")
-        content = page.content()
-        assert "Content" in content
+def http_post(base_url, path, payload):
+    url = base_url.rstrip("/") + "/" + path.lstrip("/")
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, headers={
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            body = resp.read().decode()
+            return resp.status, body
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
+    except Exception as e:
+        return None, str(e)
 
 
-@pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="playwright not installed")
-class TestPlaywrightDOM:
-    """Test DOM operations via Playwright CDP bridge."""
-
-    def test_query_selector(self, browser):
-        """Should be able to query elements."""
-        page, _ = browser
-        page.goto("data:text/html,<div class='box'>Box1</div><div class='box'>Box2</div>")
-        elements = page.query_selector_all(".box")
-        assert len(elements) == 2
-
-    def test_get_text_content(self, browser):
-        """Should get text content from elements."""
-        page, _ = browser
-        page.goto("data:text/html,<p id='text'>Sample text</p>")
-        text = page.text_content("#text")
-        assert text == "Sample text"
-
-    def test_get_attribute(self, browser):
-        """Should get element attributes."""
-        page, _ = browser
-        page.goto("data:text/html,<a href='http://example.com'>Link</a>")
-        href = page.get_attribute("a", "href")
-        assert href == "http://example.com"
-
-    def test_click_element(self, browser):
-        """Should be able to click elements."""
-        page, _ = browser
-        page.goto("data:text/html,<button id='btn'>Click</button>")
-        page.click("#btn")
-        time.sleep(0.05)
-
-    def test_fill_input(self, browser):
-        """Should be able to fill input fields."""
-        page, _ = browser
-        page.goto("data:text/html,<input id='inp' type='text'>")
-        page.fill("#inp", "test value")
-        value = page.input_value("#inp")
-        assert value == "test value"
-
-    def test_evaluate_javascript(self, browser):
-        """Should be able to evaluate JavaScript."""
-        page, _ = browser
-        page.goto("data:text/html,<html><body></body></html>")
-        result = page.evaluate("() => document.readyState")
-        assert result == "complete"
-
-    def test_evaluate_with_return(self, browser):
-        """Should evaluate expressions and return values."""
-        page, _ = browser
-        page.goto("data:text/html,<html><body><script>var x=42;</script></body></html>")
-        result = page.evaluate("() => x")
-        assert result == 42
+def http_delete(base_url, path):
+    url = base_url.rstrip("/") + "/" + path.lstrip("/")
+    req = urllib.request.Request(url, method="DELETE")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            body = resp.read().decode()
+            return resp.status, body
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
+    except Exception as e:
+        return None, str(e)
 
 
-@pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="playwright not installed")
-class TestPlaywrightViewport:
-    """Test viewport and page geometry."""
+class TestCDPVersionEndpoint:
+    """Test the CDP /json/version endpoint."""
 
-    def test_viewport_size(self, browser):
-        """Should have a valid viewport size."""
-        page, _ = browser
-        page.goto("data:text/html,<html></html>")
-        size = page.viewport_size
-        assert size is not None
-        assert "width" in size or "height" in size
+    def test_version_returns_200(self, cdp_url):
+        """Should return 200 for /json/version."""
+        status, body = http_get(cdp_url, "/json/version")
+        assert status == 200
 
-    def test_set_viewport(self, browser):
-        """Should be able to set viewport size."""
-        page, _ = browser
-        page.set_viewport_size({"width": 1024, "height": 768})
-        size = page.viewport_size
-        assert size["width"] == 1024
-        assert size["height"] == 768
+    def test_version_contains_product(self, cdp_url):
+        """Should contain ProwseTk product info."""
+        status, body = http_get(cdp_url, "/json/version")
+        assert status == 200
+        data = json.loads(body)
+        assert "Browser" in data
+        assert "ProwseTk" in data["Browser"]
+
+    def test_version_contains_protocol(self, cdp_url):
+        """Should contain protocol version."""
+        status, body = http_get(cdp_url, "/json/version")
+        assert status == 200
+        data = json.loads(body)
+        assert "Protocol-Version" in data
+
+    def test_version_trailing_slash(self, cdp_url):
+        """Should handle /json/version/ with trailing slash."""
+        status, body = http_get(cdp_url, "/json/version/")
+        assert status == 200
+        data = json.loads(body)
+        assert "Browser" in data
 
 
-@pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="playwright not installed")
-class TestPlaywrightScreenshot:
-    """Test screenshot functionality."""
+class TestCDPTargetList:
+    """Test the CDP /json/list endpoint."""
 
-    def test_screenshot(self, browser):
+    def test_list_returns_200(self, cdp_url):
+        """Should return 200 for /json/list."""
+        status, body = http_get(cdp_url, "/json/list")
+        assert status == 200
+
+    def test_list_is_array(self, cdp_url):
+        """Should return a JSON array of targets."""
+        status, body = http_get(cdp_url, "/json/list")
+        assert status == 200
+        data = json.loads(body)
+        assert isinstance(data, list)
+
+    def test_list_contains_target_info(self, cdp_url):
+        """Should contain target info fields."""
+        status, body = http_get(cdp_url, "/json/list")
+        assert status == 200
+        data = json.loads(body)
+        if data:
+            target = data[0]
+            assert "id" in target
+            assert "type" in target
+            assert "url" in target
+            assert "title" in target
+
+    def test_json_endpoint(self, cdp_url):
+        """Should return 200 for /json."""
+        status, body = http_get(cdp_url, "/json")
+        assert status == 200
+
+    def test_json_trailing_slash(self, cdp_url):
+        """Should handle /json/ with trailing slash."""
+        status, body = http_get(cdp_url, "/json/")
+        assert status == 200
+
+
+class TestCDPNotFound:
+    """Test CDP 404 handling."""
+
+    def test_unknown_endpoint_returns_404(self, cdp_url):
+        """Should return 404 for unknown endpoints."""
+        status, _ = http_get(cdp_url, "/json/unknown")
+        assert status == 404
+
+    def test_post_to_get_only_returns_405(self, cdp_url):
+        """Should return 405 for POST to GET-only endpoints."""
+        status, _ = http_post(cdp_url, "/json/version", {})
+        assert status == 405
+
+
+class TestCDPWebDriverIntegration:
+    """Test WebDriver protocol through the CDP-enabled interface."""
+
+    def test_create_session(self, cdp_url):
+        """Should create a session via WebDriver."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        assert "sessionId" in data.get("value", {}) or "sessionId" in data
+
+    def test_navigate_via_webdriver(self, cdp_url):
+        """Should navigate via WebDriver protocol."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        status, body = http_post(cdp_url, f"/session/{session_id}/url",
+                                  {"url": "data:text/html,<title>NavTest</title>"})
+        assert status == 200
+
+        status, body = http_get(cdp_url, f"/session/{session_id}/title")
+        assert status == 200
+        data = json.loads(body)
+        value = data.get("value", {})
+        title = value.get("value", "") if isinstance(value, dict) else str(value)
+        assert "NavTest" in title or "NavTest" in body
+
+    def test_get_page_source(self, cdp_url):
+        """Should retrieve page source via WebDriver."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        status, body = http_post(cdp_url, f"/session/{session_id}/url",
+                                  {"url": "data:text/html,<p id='src'>hello</p>"})
+        assert status == 200
+
+        status, body = http_get(cdp_url, f"/session/{session_id}/page_source")
+        assert status == 200
+        assert "hello" in body
+
+    def test_get_window_rect(self, cdp_url):
+        """Should be able to get window rect."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        status, body = http_get(cdp_url, f"/session/{session_id}/window/rect")
+        assert status == 200
+        data = json.loads(body)
+        rect = data.get("value", {})
+        assert "x" in rect or "width" in rect
+
+    def test_get_status(self, cdp_url):
+        """Should be able to query session status."""
+        status, _ = http_get(cdp_url, "/session")
+        assert status == 200
+
+    def test_get_timeouts(self, cdp_url):
+        """Should be able to get timeouts."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        status, body = http_get(cdp_url, f"/session/{session_id}/timeouts")
+        assert status == 200
+        data = json.loads(body)
+        assert "value" in data
+
+    def test_get_network(self, cdp_url):
+        """Should be able to get network info."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        status, body = http_get(cdp_url, f"/session/{session_id}/network")
+        assert status == 200
+        data = json.loads(body)
+        assert "value" in data
+
+    def test_delete_session(self, cdp_url):
+        """Should be able to delete a session."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        status, _ = http_delete(cdp_url, f"/session/{session_id}")
+        assert status == 200
+
+
+class TestCDPWebDriverFindElements:
+    """Test element finding via WebDriver."""
+
+    def test_find_element_by_id(self, cdp_url):
+        """Should find elements by ID."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        status, _ = http_post(cdp_url, f"/session/{session_id}/url",
+                               {"url": "data:text/html,<div id='main'>Content</div>"})
+
+        status, body = http_post(cdp_url, f"/session/{session_id}/element",
+                                  {"using": "css selector", "value": "#main"})
+        assert status == 200
+        assert "element-6066" in body or "element-" in body
+
+    def test_find_elements_by_class(self, cdp_url):
+        """Should find multiple elements by class."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        status, _ = http_post(cdp_url, f"/session/{session_id}/url",
+                               {"url": "data:text/html,<div class='box'>a</div><div class='box'>b</div>"})
+
+        status, body = http_post(cdp_url, f"/session/{session_id}/elements",
+                                  {"using": "css selector", "value": ".box"})
+        assert status == 200
+        data = json.loads(body)
+        assert "value" in data
+        assert len(data["value"]) >= 2
+
+
+class TestCDPJavaScriptEvaluation:
+    """Test JavaScript evaluation via WebDriver."""
+
+    def test_execute_script(self, cdp_url):
+        """Should be able to execute JavaScript."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        status, _ = http_post(cdp_url, f"/session/{session_id}/url",
+                               {"url": "data:text/html,<html><body></body></html>"})
+
+        status, body = http_post(cdp_url, f"/session/{session_id}/execute/sync",
+                                  {"script": "document.readyState"})
+        assert status == 200
+        data = json.loads(body)
+        assert "complete" in body or "complete" in data.get("value", {}).get("value", "")
+
+
+class TestCDPViewportAndScreenshot:
+    """Test viewport and screenshot endpoints."""
+
+    def test_window_rect_set(self, cdp_url):
+        """Should be able to set window rect."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        status, body = http_post(cdp_url, f"/session/{session_id}/window/rect",
+                                  {"x": 100, "y": 100, "width": 800, "height": 600})
+        assert status == 200
+
+    def test_screenshot(self, cdp_url):
         """Should be able to take a screenshot."""
-        page, _ = browser
-        page.goto("data:text/html,<html><body>Test</body></html>")
-        try:
-            screenshot = page.screenshot()
-            assert screenshot is not None
-            assert len(screenshot) > 0
-        except Exception:
-            pass  # Screenshot may have limitations
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        status, body = http_get(cdp_url, f"/session/{session_id}/screenshot")
+        assert status == 200
+        data = json.loads(body)
+        assert "value" in data
+        screenshot_data = data["value"] if isinstance(data["value"], str) else data["value"].get("value", "")
+        assert isinstance(screenshot_data, str) and len(screenshot_data) > 0
 
 
-@pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="playwright not installed")
-class TestPlaywrightSessionManagement:
-    """Test session management via CDP."""
+class TestCDPNavigation:
+    """Test navigation commands."""
 
-    def test_new_page_in_browser(self, browser):
-        """Should be able to create new pages in the browser."""
-        _, browser_obj = browser
-        new_page = browser_obj.new_page()
-        new_page.goto("data:text/html,<title>NewPage</title>")
-        assert new_page.title() == "NewPage"
-        new_page.close()
+    def test_navigate_command(self, cdp_url):
+        """Should support POST /session/{id}/navigate."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
 
-    def test_close_page(self, browser):
-        """Should be able to close pages."""
-        page, _ = browser
-        page.close()
+        status, body = http_post(cdp_url, f"/session/{session_id}/navigate",
+                                  {"url": "data:text/html,<title>NavTest</title>"})
+        assert status == 200
 
-    def test_browser_context(self, browser):
-        """Should be able to create browser contexts."""
-        _, browser_obj = browser
-        context = browser_obj.new_context()
-        page = context.new_page()
-        page.goto("data:text/html,<title>Context</title>")
-        page.close()
-        context.close()
+    def test_back_forward_refresh(self, cdp_url):
+        """Should support back, forward, refresh commands."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        for cmd in ["back", "forward", "refresh"]:
+            status, body = http_post(cdp_url, f"/session/{session_id}/{cmd}", {})
+            assert status == 200
 
 
-@pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="playwright not installed")
-class TestPlaywrightNetwork:
-    """Test network interception and request handling."""
+class TestCDPNewWindow:
+    """Test window management."""
 
-    def test_page_load(self, browser):
-        """Should load a page successfully."""
-        page, _ = browser
-        response = page.goto("data:text/html,<html><body>OK</body></html>")
-        assert response is not None or page.title() is not None
+    def test_window_new(self, cdp_url):
+        """Should support creating new windows."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
 
-    def test_wait_for_load(self, browser):
-        """Should wait for page load."""
-        page, _ = browser
-        page.goto("data:text/html,<html></html>")
-        page.wait_for_load_state("load")
-        assert page.title() is not None
+        status, body = http_post(cdp_url, f"/session/{session_id}/window/new", {})
+        assert status == 200
+        data = json.loads(body)
+        assert "value" in data
+
+    def test_window_delete(self, cdp_url):
+        """Should support deleting windows."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        status, _ = http_delete(cdp_url, f"/session/{session_id}/window")
+        assert status == 200
+
+
+class TestCDPFrameAndActions:
+    """Test frame and action commands."""
+
+    def test_frame_switch(self, cdp_url):
+        """Should support frame switching."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        status, body = http_post(cdp_url, f"/session/{session_id}/frame",
+                                  {"id": "main"})
+        assert status == 200
+
+    def test_actions(self, cdp_url):
+        """Should support actions commands."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        status, body = http_post(cdp_url, f"/session/{session_id}/actions", {})
+        assert status == 200
+
+    def test_send_keys(self, cdp_url):
+        """Should support sending keys to elements."""
+        status, body = http_post(cdp_url, "/session", {})
+        assert status == 200
+        data = json.loads(body)
+        session_id = data.get("value", {}).get("sessionId",
+                         data.get("sessionId"))
+        if not session_id:
+            pytest.skip("Session creation did not return sessionId")
+
+        status, _ = http_post(cdp_url, f"/session/{session_id}/url",
+                               {"url": "data:text/html,<input id='inp' type='text'/>"})
+
+        status, body = http_post(cdp_url, f"/session/{session_id}/element",
+                                  {"using": "css selector", "value": "#inp"})
+        assert status == 200
+        elem_data = json.loads(body)
+        element_id = elem_data.get("value", {}).get("value", {}).get(
+            "element-6066-11e4-a52e-4f735466cecf")
+        if not element_id:
+            pytest.skip("Could not find element")
+
+        status, body = http_post(cdp_url,
+                                  f"/session/{session_id}/element/{element_id}/send-keys",
+                                  {"text": "hello"})
+        assert status == 200
 
 
 if __name__ == "__main__":

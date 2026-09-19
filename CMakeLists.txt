@@ -40,3 +40,7 @@ endif()
 if(PROWSETK_BUILD_EXAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt")
     add_subdirectory(examples)
 endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/interface/pyprowsetk/CMakeLists.txt")
+    add_subdirectory(interface/pyprowsetk)
+endif()
