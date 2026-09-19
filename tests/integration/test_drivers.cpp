@@ -160,3 +160,39 @@ TEST(Drivers, LoginRejectsMissingPasswordField) {
     EXPECT_FALSE(result.ok);
     EXPECT_NE(lua.last_error().find("password"), std::string::npos);
 }
+TEST(Drivers, BookingDotcomOfflineExtraction) {
+    if (!LuaRuntime::available()) GTEST_SKIP();
+    LuaRuntime lua;
+    ASSERT_TRUE(lua.run_file(std::string(PROWSETK_SOURCE_DIR) +
+        "/examples/scrape_booking_dotcom.lua").ok) << lua.last_error();
+    const std::string output = std::string(TEST_BINARY_DIR) + "/booking-offline.yaml";
+    const auto result = lua.call_function("main", {
+        {"html", "string", "<a href='/reservations'>Reservations</a><script>fetch('/api/hotels')</script>"},
+        {"output", "path", output}});
+    ASSERT_TRUE(result.ok) << result.error;
+    const auto yaml = read_file(output);
+    EXPECT_NE(yaml.find("/reservations"), std::string::npos);
+    EXPECT_NE(yaml.find("/api/hotels"), std::string::npos);
+    EXPECT_NE(yaml.find("authenticated: false"), std::string::npos);
+}
+
+TEST(Drivers, BookingDotcomLoginAndFailureBoundaries) {
+    if (!LuaRuntime::available()) GTEST_SKIP();
+    for (const std::string scenario : {"success", "two-step", "rejected", "foreign-action",
+                                      "foreign-redirect", "get-form", "challenge", "malformed-dotenv"}) {
+        SCOPED_TRACE(scenario);
+        LuaRuntime lua;
+        const std::string output = std::string(TEST_BINARY_DIR) + "/booking-" + scenario + ".yaml";
+        std::remove(output.c_str());
+        const auto setup = lua.run(
+            "scenario = '" + scenario + "'\n"
+            "test_directory = [==[" TEST_BINARY_DIR "]==]\n"
+            "output_file = [==[" + output + "]==]\n"
+            "dotenv_file = [==[" + output + ".env]==]\n"
+            "driver_file = [==[" PROWSETK_SOURCE_DIR "/examples/scrape_booking_dotcom.lua]==]\n");
+        ASSERT_TRUE(setup.ok) << setup.error;
+        const auto result = lua.run_file(std::string(PROWSETK_SOURCE_DIR) +
+            "/tests/integration/booking_driver_fixture.lua");
+        EXPECT_TRUE(result.ok) << result.error;
+    }
+}

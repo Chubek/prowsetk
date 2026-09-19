@@ -5,6 +5,13 @@
 #include <cstdlib>
 #include <map>
 #include <mutex>
+#include <memory>
+
+#ifdef PROWSETK_HAVE_OPENSSL
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/x509v3.h>
+#endif
 
 #include "prowsetk/error.hpp"
 #include "prowsetk/url.hpp"
@@ -112,17 +119,113 @@ std::string read_status_line_error() {
     return "malformed HTTP response";
 }
 
+// Each request owns its socket and TLS state. Destruction never emits network
+// traffic (in particular, no potentially blocking SSL_shutdown()).
+class SocketConnection {
+public:
+    explicit SocketConnection(int socket) : fd_(socket) {}
+    ~SocketConnection() { ::close(fd_); }
+    SocketConnection(const SocketConnection&) = delete;
+    SocketConnection& operator=(const SocketConnection&) = delete;
+
+    void enable_tls(const std::string& host) {
+#ifdef PROWSETK_HAVE_OPENSSL
+        context_.reset(SSL_CTX_new(TLS_client_method()));
+        if (!context_ || SSL_CTX_set_min_proto_version(context_.get(), TLS1_2_VERSION) != 1 ||
+            SSL_CTX_set_default_verify_paths(context_.get()) != 1) {
+            throw Error(ErrorCode::NetworkError, "TLS trust store initialization failed");
+        }
+        SSL_CTX_set_verify(context_.get(), SSL_VERIFY_PEER, nullptr);
+        ssl_.reset(SSL_new(context_.get()));
+        if (!ssl_ || SSL_set_fd(ssl_.get(), fd_) != 1 ||
+            SSL_set_tlsext_host_name(ssl_.get(), host.c_str()) != 1) {
+            throw Error(ErrorCode::NetworkError, "TLS initialization failed");
+        }
+        SSL_set_hostflags(ssl_.get(), X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+        // X509_VERIFY_PARAM handles literal IP SANs too, including OpenSSL 3.0.
+        auto* parameters = SSL_get0_param(ssl_.get());
+        if (X509_VERIFY_PARAM_set1_ip_asc(parameters, host.c_str()) != 1 &&
+            SSL_set1_host(ssl_.get(), host.c_str()) != 1) {
+            throw Error(ErrorCode::NetworkError, "TLS hostname configuration failed");
+        }
+        ERR_clear_error();
+        const int result = SSL_connect(ssl_.get());
+        if (result != 1) tls_error(result, "TLS handshake failed");
+        if (SSL_get_verify_result(ssl_.get()) != X509_V_OK) {
+            throw Error(ErrorCode::NetworkError, "TLS certificate verification failed");
+        }
+#else
+        (void)host;
+        throw Error(ErrorCode::Unsupported, "HTTPS requires an OpenSSL-enabled build");
+#endif
+    }
+
+    ssize_t write(const char* bytes, std::size_t size) {
+#ifdef PROWSETK_HAVE_OPENSSL
+        if (ssl_) {
+            std::size_t written = 0;
+            ERR_clear_error();
+            const int result = SSL_write_ex(ssl_.get(), bytes, size, &written);
+            if (result != 1) tls_error(result, "TLS write failed");
+            return static_cast<ssize_t>(written);
+        }
+#endif
+        return ::send(fd_, bytes, size, 0);
+    }
+
+    ssize_t read(char* bytes, std::size_t size) {
+#ifdef PROWSETK_HAVE_OPENSSL
+        if (ssl_) {
+            std::size_t received = 0;
+            ERR_clear_error();
+            const int result = SSL_read_ex(ssl_.get(), bytes, size, &received);
+            if (result != 1) {
+                if (SSL_get_error(ssl_.get(), result) == SSL_ERROR_ZERO_RETURN) return 0;
+                tls_error(result, "TLS read failed");
+            }
+            return static_cast<ssize_t>(received);
+        }
+#endif
+        return ::recv(fd_, bytes, size, 0);
+    }
+
+private:
+    int fd_;
+#ifdef PROWSETK_HAVE_OPENSSL
+    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> context_{nullptr, SSL_CTX_free};
+    std::unique_ptr<SSL, decltype(&SSL_free)> ssl_{nullptr, SSL_free};
+    [[noreturn]] void tls_error(int result, const char* message) {
+        const int code = SSL_get_error(ssl_.get(), result);
+        if (code == SSL_ERROR_WANT_READ || code == SSL_ERROR_WANT_WRITE ||
+            (code == SSL_ERROR_SYSCALL && (errno == EAGAIN || errno == EWOULDBLOCK))) {
+            throw Error(ErrorCode::Timeout, "TLS operation timed out");
+        }
+        if (SSL_get_verify_result(ssl_.get()) != X509_V_OK) {
+            throw Error(ErrorCode::NetworkError, "TLS certificate verification failed");
+        }
+        throw Error(ErrorCode::NetworkError, message);
+    }
+#endif
+};
+
 class SocketNetworkClient : public NetworkClient {
 public:
     HttpResponse send(const HttpRequest& request) override {
         const Url url = parse_url(request.url);
-        if (url.scheme != "http") {
+        if (url.scheme != "http" && url.scheme != "https") {
             throw Error(ErrorCode::Unsupported,
-                        "socket client supports plain HTTP only: " + url.scheme);
+                        "socket client supports HTTP and HTTPS only");
         }
-        const std::string port = url.port.empty() ? "80" : url.port;
+        #ifndef PROWSETK_HAVE_OPENSSL
+        if (url.scheme == "https") {
+            throw Error(ErrorCode::Unsupported, "HTTPS requires an OpenSSL-enabled build");
+        }
+#endif
+        const std::string port = url.port.empty()
+            ? (url.scheme == "https" ? "443" : "80") : url.port;
 
-        int fd = open_connection(url.host, port, request.timeout_ms);
+        SocketConnection connection(open_connection(url.host, port, request.timeout_ms));
+        if (url.scheme == "https") connection.enable_tls(url.host);
 
         std::string path = url.path.empty() ? "/" : url.path;
         if (!url.query.empty()) {
@@ -130,6 +233,7 @@ public:
         }
         std::string payload =
             request.method + " " + path + " HTTP/1.1\r\nHost: " + url.host;
+        if (!url.port.empty()) payload += ":" + url.port;
         bool has_user_agent = false;
         for (const auto& [name, value] : request.headers) {
             payload += "\r\n" + name + ": " + value;
@@ -149,28 +253,18 @@ public:
 
         std::size_t sent = 0;
         while (sent < payload.size()) {
-            const ssize_t n = ::send(fd, payload.data() + sent,
-                                     payload.size() - sent, 0);
+            const ssize_t n = connection.write(payload.data() + sent, payload.size() - sent);
             if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-                ::close(fd);
                 throw Error(ErrorCode::Timeout,
                             "request timed out while sending to " + url.host);
             }
             if (n <= 0) {
-                ::close(fd);
                 throw Error(ErrorCode::NetworkError, "socket send failed");
             }
             sent += static_cast<std::size_t>(n);
         }
 
-        HttpResponse response;
-        try {
-            response = read_response(fd, request.max_response_bytes);
-        } catch (...) {
-            ::close(fd);
-            throw;
-        }
-        ::close(fd);
+        HttpResponse response = read_response(connection, request.max_response_bytes);
         response.final_url = request.url;
         return response;
     }
@@ -252,9 +346,9 @@ private:
         return fd;
     }
 
-    static bool recv_more(int fd, std::string& raw) {
+    static bool recv_more(SocketConnection& connection, std::string& raw) {
         char buffer[8192];
-        const ssize_t n = ::recv(fd, buffer, sizeof(buffer), 0);
+        const ssize_t n = connection.read(buffer, sizeof(buffer));
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
             throw Error(ErrorCode::Timeout,
                         "response read timed out before completion");
@@ -268,14 +362,14 @@ private:
 
     // Reads until `needle` appears at or after `offset` in `raw`, appending
     // socket data as required. Returns false on EOF before a match.
-    static bool fill_until(int fd, std::string& raw, std::size_t offset,
+    static bool fill_until(SocketConnection& connection, std::string& raw, std::size_t offset,
                            const std::string& needle) {
         while (true) {
             const std::size_t found = raw.find(needle, offset);
             if (found != std::string::npos) {
                 return true;
             }
-            if (!recv_more(fd, raw)) {
+            if (!recv_more(connection, raw)) {
                 return false;
             }
         }
@@ -283,12 +377,12 @@ private:
 
     // Decodes a chunked-transfer body beginning at `raw[offset]`. Appends to
     // `raw` as needed and returns the decoded body.
-    static std::string decode_chunked(int fd, std::string& raw,
+    static std::string decode_chunked(SocketConnection& connection, std::string& raw,
                                       std::size_t offset,
                                       std::size_t max_bytes) {
         std::string body;
         while (true) {
-            if (!fill_until(fd, raw, offset, "\r\n")) {
+            if (!fill_until(connection, raw, offset, "\r\n")) {
                 throw Error(ErrorCode::NetworkError,
                             "truncated chunked response");
             }
@@ -330,7 +424,7 @@ private:
             chunk_size = static_cast<std::size_t>(parsed);
 
             if (chunk_size == 0) {
-                if (!fill_until(fd, raw, offset, "\r\n")) {
+                if (!fill_until(connection, raw, offset, "\r\n")) {
                     throw Error(ErrorCode::NetworkError,
                                 "truncated chunked trailer");
                 }
@@ -340,7 +434,7 @@ private:
                 throw Error(ErrorCode::ResourceLimit,
                             "response body exceeds the configured limit");
             }
-            if (!fill_until(fd, raw, offset + chunk_size, "\r\n")) {
+            if (!fill_until(connection, raw, offset + chunk_size, "\r\n")) {
                 throw Error(ErrorCode::NetworkError,
                             "truncated chunk data");
             }
@@ -349,9 +443,9 @@ private:
         }
     }
 
-    static HttpResponse read_response(int fd, std::size_t max_bytes) {
+    static HttpResponse read_response(SocketConnection& connection, std::size_t max_bytes) {
         std::string raw;
-        if (!fill_until(fd, raw, 0, "\r\n\r\n")) {
+        if (!fill_until(connection, raw, 0, "\r\n\r\n")) {
             throw Error(ErrorCode::NetworkError, read_status_line_error());
         }
         const std::size_t header_end = raw.find("\r\n\r\n");
@@ -389,7 +483,7 @@ private:
             to_lower(response.header("Transfer-Encoding"));
         if (transfer_encoding.find("chunked") != std::string::npos) {
             response.body =
-                decode_chunked(fd, raw, body_offset, max_bytes);
+                decode_chunked(connection, raw, body_offset, max_bytes);
             return response;
         }
 
@@ -402,8 +496,8 @@ private:
                             "response body exceeds the configured limit");
             }
             while (raw.size() < body_offset + length) {
-                if (!recv_more(fd, raw)) {
-                    break;
+                if (!recv_more(connection, raw)) {
+                    throw Error(ErrorCode::NetworkError, "truncated HTTP response body");
                 }
             }
             response.body = raw.substr(body_offset, length);
@@ -411,7 +505,7 @@ private:
         }
 
         while (raw.size() - body_offset < max_bytes) {
-            if (!recv_more(fd, raw)) {
+            if (!recv_more(connection, raw)) {
                 break;
             }
         }

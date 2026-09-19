@@ -1,5 +1,17 @@
 include_guard(GLOBAL)
 
+# OpenSSL's supported CMake discovery uses FindOpenSSL. HTTPS remains optional;
+# the vendored upstream uses its own Configure build, so install it first when
+# a system package is unavailable (OPENSSL_ROOT_DIR selects that installation).
+find_package(OpenSSL 3.0 QUIET COMPONENTS SSL Crypto)
+set(PROWSETK_HAVE_OPENSSL ${OpenSSL_FOUND} CACHE INTERNAL "Verified HTTPS available")
+if(OpenSSL_FOUND)
+    add_library(ProwseTk::tls ALIAS OpenSSL::SSL)
+    message(STATUS "ProwseTk: OpenSSL enables verified HTTPS")
+else()
+    message(STATUS "ProwseTk: OpenSSL unavailable; socket transport is HTTP only")
+endif()
+
 set(PROWSETK_LIBTOMCRYPT_SOURCE_DIR
     "${PROJECT_SOURCE_DIR}/third_party/libtomcrypt")
 if(EXISTS "${PROWSETK_LIBTOMCRYPT_SOURCE_DIR}/CMakeLists.txt")

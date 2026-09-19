@@ -315,3 +315,21 @@ lprowseir.xax:AddListener("//tag/td", function() ... end)
 ```
 
 All the listeners and walkers use XPath. We use Pugixml's XPath engine.
+
+
+## Booking.com example and HTTPS
+
+`examples/scrape_booking_dotcom.lua` is an example driver registered by
+`examples/booking_dotcom.toml`. It follows the `main(args)` and offline `html`
+contracts despite living in `examples/`. Load dotenv before looking up its
+Booking.com credentials; never log those values. Require positive login
+evidence before exporting a live page, and retain the documented limitation
+that the current JavaScript-only Booking.com portal is not supported.
+Discovery is heuristic and bounded, with explicit incomplete coverage metadata.
+Tests cover the real extractor, simulated login flows, CLI, redaction, and
+rejected form actions/redirects.
+
+The POSIX transport optionally uses OpenSSL 3 for certificate-verified HTTPS.
+Keep TLS dependency discovery in `cmake/Dependencies.cmake`, default trust and
+hostname verification enabled, and the HTTP-only build usable without OpenSSL.
+TLS tests use a local test CA and loopback peer; no public network is required.

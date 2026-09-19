@@ -62,8 +62,9 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-// Plain-HTTP client built on POSIX sockets. HTTPS requires a TLS provider and
-// is reported as unsupported until one is wired in.
+// POSIX socket client. With OpenSSL 3 available at build time, HTTPS verifies
+// the certificate chain and hostname using OpenSSL's default trust paths.
+// Builds without OpenSSL report HTTPS as unsupported; HTTP remains available.
 std::unique_ptr<NetworkClient> make_socket_network_client();
 
 }  // namespace prowsetk

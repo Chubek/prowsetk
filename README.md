@@ -258,6 +258,15 @@ redirect or issuing the next request. Cookie scope is enforced by scheme,
 domain, and RFC-style path boundaries; replacement and expiration use the
 cookie name/domain/path identity.
 
+The POSIX socket transport supports HTTPS when OpenSSL 3 is found at configure
+time. It verifies the certificate chain and hostname, sends SNI, and requires
+TLS 1.2 or newer. OpenSSL's default CA paths (including `SSL_CERT_FILE` and
+`SSL_CERT_DIR`) select the trust store; there is no insecure verification
+override. Without OpenSSL, HTTP remains available and HTTPS fails explicitly.
+Use `OPENSSL_ROOT_DIR` to select a separately installed copy of the vendored
+OpenSSL submodule, or `CMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON` for an HTTP-only
+build.
+
 ### `JavaScriptRuntime`
 
 Provides JavaScript execution through QuickJS.
@@ -1666,6 +1675,59 @@ This keeps drivers deterministic and usable without a network.
   session cookie jar. Credentials are validated in memory but never written to
   the `build/login.json` summary or logs.
 
+### Booking.com example driver
+
+`examples/scrape_booking_dotcom.lua` uses the existing `plugins/scrape2oapi/`
+Lua plugin to write OpenAPI 3.1 YAML. From the repository root:
+
+```sh
+build/default/src/cli/prowsetk run booking-dotcom \
+  --config examples/booking_dotcom.toml --output build/booking.yaml
+```
+
+Omit `--output` to use `~/BookingDotcomAdminPanel.yaml`. The parent directory
+must exist. The driver reads `.env` first (`--dotenv PATH` selects another
+file), then resolves `BOOKING_DOTCOM_URL`, `BOOKING_DOTCOM_USER`, and
+`BOOKING_DOTCOM_PASS`, giving existing process variables precedence. Set the
+URL to `https://admin.booking.com`; bare hostnames acquire an HTTPS scheme.
+Dotenv supports assignments, `export`, comments, and single/double quotes,
+with common double-quote escapes. It never executes shell code or expands
+variables; loaded values stay local to the driver.
+
+The login workflow supports HTML POST forms, hidden fields, username-first
+flows, and bounded redirects. It sends the password once and requires an
+authenticated-page marker (logout/signout link or account menu). Override
+the marker with `--success_selector SELECTOR` for a known authenticated-only
+element. Form actions and redirects must remain on the configured HTTPS
+origin, or on Booking.com subdomains when the starting host is Booking.com.
+
+**Live compatibility limitation:** the tested `admin.booking.com` response is
+a JavaScript account-portal shell with no form/input elements and a message
+requiring JavaScript. Flatworm's current QuickJS runtime lacks the browser DOM
+and fetch bindings needed by that portal. The live attempt therefore stops
+before sending credentials and writes no authenticated specification. This
+example does not yet establish working Booking.com authentication; it does
+not solve interactive challenges or MFA.
+
+After confirmed login, the driver inspects the current page plus at most 32
+same-origin external script requests, without executing scripts or calling
+discovered API endpoints. Script inspection is capped at 2 MiB per script and
+16 MiB total. It forwards `scrape_all_paths=true` through the Lua plugin and
+extractor, so ordinary links/resources are included alongside API patterns,
+forms, and literal fetch/XHR calls. Imported scripts are analyzed in the page
+context. Provenance/confidence and redaction are retained; output explicitly
+marks `complete: false`. Dynamic URLs, lazy chunks, other pages, and unobserved
+requests remain outside this static discovery scope.
+
+For a hermetic extraction without reading credentials or claiming login:
+
+```sh
+build/default/src/cli/prowsetk run booking-dotcom \
+  --config examples/booking_dotcom.toml \
+  --html '<a href="/reservations">Reservations</a>' \
+  --output build/booking-offline.yaml
+```
+
 ## Build and Runtime Strategy
 
 The command reference lives in `man/man1/prowsetk.1` and
@@ -1746,6 +1808,7 @@ optional components depending on the build configuration.
 | `lua` | Automation and extension runtime |
 | `mbedtls` | TLS primitives |
 | `nexus` | Optional HTTP/3 (QUIC) transport |
+| `openssl` | Optional verified HTTPS for the POSIX socket transport (3.0+) |
 | `pugixml` | XML handling and XPath |
 | `quickjs` | Page JavaScript runtime |
 | `re2` | Safe regular-expression matching |

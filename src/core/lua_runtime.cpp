@@ -253,6 +253,7 @@ EndpointExtractionOptions read_endpoint_options(lua_State* L, int index) {
         lua_pop(L, 1);
     };
     read_bool("follow_links", options.follow_links);
+    read_bool("scrape_all_paths", options.scrape_all_paths);
     read_bool("inspect_scripts", options.inspect_scripts);
     read_bool("observe_network", options.observe_network);
     read_bool("infer_schemas", options.infer_schemas);

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <map>
 #include <sstream>
 
@@ -102,11 +103,21 @@ std::vector<std::string> form_parameters(const Element& form) {
     return parameters;
 }
 
-// Extracts (method, url) pairs from inline JavaScript. This is a heuristic
-// scanner, not a JavaScript parser.
-std::vector<std::pair<std::string, std::string>> script_endpoints(
-    std::string_view script) {
-    std::vector<std::pair<std::string, std::string>> endpoints;
+// A single endpoint discovered inside a script. Carries enough metadata so
+// the extractor can honour per-endpoint confidence and discovery-method hints.
+struct ScriptEndpoint {
+    std::string method;
+    std::string url;
+    double confidence = 0.65;
+    std::string discovery_method = "inline-script";
+};
+
+// Extracts endpoints from inline JavaScript. Detects `fetch(...)` calls,
+// `XMLHttpRequest.open(...)` calls, and standalone quoted URL-path strings
+// (common in SPA routing tables). This is a heuristic scanner, not a
+// JavaScript parser.
+std::vector<ScriptEndpoint> script_endpoints(std::string_view script) {
+    std::vector<ScriptEndpoint> endpoints;
     const auto read_quoted = [&script](std::size_t start,
                                        std::string& out) -> std::size_t {
         if (start >= script.size()) {
@@ -183,7 +194,7 @@ std::vector<std::pair<std::string, std::string>> script_endpoints(
                         comma < close
                     ? fetch_options_method(comma + 1, close)
                     : "get";
-            endpoints.emplace_back(normalize_method(method), url);
+            endpoints.push_back(ScriptEndpoint{normalize_method(method), url});
         }
         cursor += 6;
     }
@@ -212,9 +223,61 @@ std::vector<std::pair<std::string, std::string>> script_endpoints(
         }
         std::string url;
         if (read_quoted(i, url) != std::string::npos) {
-            endpoints.emplace_back(normalize_method(std::move(method)), url);
+            endpoints.push_back(ScriptEndpoint{normalize_method(std::move(method)), url});
         }
         cursor += 6;
+    }
+
+    // Scan for standalone quoted URL-path strings. Many SPA bundles embed
+    // routing tables and endpoint references as bare strings (e.g.
+    // `"/api/v1/..."` in a switch statement) that are not preceded by
+    // `fetch(` or `.open(`. This heuristic scanner collects those strings
+    // and emits them as GET endpoints so comprehensive discovery captures
+    // the full routing surface.
+    //
+    // Filtering rules to limit noise:
+    //  - must start with '/' followed by a letter
+    //  - length >= 4 characters
+    //  - all characters must be valid URL-path characters
+    //  - must not contain control characters or spaces
+    //  - emitted with low confidence (0.30) so callers must explicitly
+    //    opt-in with a low minimum_confidence threshold.
+    static const char valid_path_chars[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+        "_./?=&%-";
+    const auto looks_like_quoted_path = [](const std::string& candidate) {
+        if (candidate.size() < 4) return false;
+        if (candidate[0] != '/') return false;
+        // Must start with a letter after the leading slash.
+        if (!std::isalpha(static_cast<unsigned char>(candidate[1]))) return false;
+        // All characters must be valid URL-path characters.
+        for (char c : candidate) {
+            if (c == '\0') return false;
+            if (!std::memchr(valid_path_chars, c, sizeof(valid_path_chars) - 1))
+                return false;
+        }
+        return true;
+    };
+
+    // Walk all quoted strings and collect path-like ones.
+    {
+        std::size_t pos = 0;
+        while (pos < script.size()) {
+            // Find the next quote character.
+            pos = script.find_first_of("'\"`", pos);
+            if (pos == std::string_view::npos) break;
+            std::string candidate;
+            const std::size_t end = read_quoted(pos, candidate);
+            if (end == std::string_view::npos) {
+                ++pos;
+                continue;
+            }
+            if (looks_like_quoted_path(candidate)) {
+                endpoints.push_back(ScriptEndpoint{
+                    "get", candidate, 0.30, "inline-script-literal"});
+            }
+            pos = end;
+        }
     }
 
     return endpoints;
@@ -292,15 +355,15 @@ void EndpointExtractor::observe(std::string method, std::string url, int status,
 
 void EndpointExtractor::observe_script(std::string source_url,
                                        std::string_view script_text) {
-    for (auto& [method, reference] : script_endpoints(script_text)) {
-        if (reference.empty()) {
+    for (const auto& ep : script_endpoints(script_text)) {
+        if (ep.url.empty()) {
             continue;
         }
         DiscoveredEndpoint endpoint;
-        endpoint.url = std::move(reference);
-        endpoint.method = normalize_method(std::move(method));
-        endpoint.discovery_method = "external-script";
-        endpoint.confidence = 0.65;
+        endpoint.url = ep.url;
+        endpoint.method = normalize_method(ep.method);
+        endpoint.discovery_method = ep.discovery_method;
+        endpoint.confidence = ep.confidence;
         endpoint.source = std::move(source_url);
         try {
             const Url parsed = parse_url(endpoint.url);
@@ -498,12 +561,11 @@ EndpointExtractionResult EndpointExtractor::extract(
             if (script->has_attribute("src")) {
                 continue;
             }
-            for (const auto& [method, reference] :
-                 script_endpoints(script->text())) {
-                if (reference.empty()) {
+            for (const auto& ep : script_endpoints(script->text())) {
+                if (ep.url.empty()) {
                     continue;
                 }
-                const std::string url = resolve(reference);
+                const std::string url = resolve(ep.url);
                 Url parsed;
                 try {
                     parsed = parse_url(url);
@@ -513,13 +575,15 @@ EndpointExtractionResult EndpointExtractor::extract(
                 DiscoveredEndpoint endpoint;
                 endpoint.url = url;
                 endpoint.path = parsed.path.empty() ? "/" : parsed.path;
-                endpoint.method = normalize_method(method);
+                endpoint.method = normalize_method(ep.method);
                 endpoint.source = document.url();
-                endpoint.discovery_method = "inline-script";
-                endpoint.confidence = 0.65;
+                endpoint.discovery_method = ep.discovery_method;
+                endpoint.confidence = ep.confidence;
                 endpoint.parameters = query_parameters(parsed.query);
                 endpoint.notes.push_back(
-                    "inferred from a fetch/XMLHttpRequest call");
+                    ep.discovery_method == "inline-script-literal"
+                        ? "inferred from a quoted string literal in script"
+                        : "inferred from a fetch/XMLHttpRequest call");
                 add(std::move(endpoint));
             }
         }

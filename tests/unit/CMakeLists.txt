@@ -88,3 +88,14 @@ target_compile_definitions(prowsetk_unit_web_interface PRIVATE
 
 prowsetk_gtest(prowsetk_unit_ir_emitters "prowsetk.unit.ir."
     "unit;document" test_ir_emitters.cpp)
+
+if(PROWSETK_HAVE_OPENSSL AND UNIX)
+    prowsetk_gtest(prowsetk_unit_tls_network "prowsetk.unit.network.tls."
+        "unit;network" test_tls_network.cpp)
+    target_link_libraries(prowsetk_unit_tls_network PRIVATE ProwseTk::tls Threads::Threads)
+    target_compile_definitions(prowsetk_unit_tls_network PRIVATE
+        TEST_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+endif()
+
+prowsetk_gtest(prowsetk_unit_lua_endpoint_options "prowsetk.unit.lua."
+    "unit;lua;endpoint-extraction" test_lua_endpoint_options.cpp)
