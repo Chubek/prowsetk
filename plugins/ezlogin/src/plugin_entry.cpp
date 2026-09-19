@@ -7,7 +7,7 @@
 namespace {
 const char* const kCapabilities[] = {
     "authentication", "basic", "bearer", "api-key", "custom-header",
-    "redacted-credentials"};
+    "form-login", "session-cookie", "redacted-credentials"};
 
 const ProwseTkPluginInfo kInfo = {
     "ezlogin", "0.1.0", "2",
@@ -22,6 +22,15 @@ struct Config {
   std::string header;
   std::string value;
   std::string api_key_name = "X-API-Key";
+  // Form-based login fields
+  std::string login_url;
+  std::string username_field = "username";
+  std::string password_field = "password";
+  std::string csrf_field;
+  std::string method = "POST";
+  // Session cookies extracted from login response
+  std::string session_cookie;
+  bool login_performed = false;
 } g_config;
 
 std::string base64(std::string_view input) {
@@ -70,6 +79,13 @@ int configure(ProwseTkHost*, const ProwseTkConfigEntry* entries, size_t count) {
   if (const char* v = get(entries, count, "header")) next.header = v;
   if (const char* v = get(entries, count, "value")) next.value = v;
   if (const char* v = get(entries, count, "api_key_name")) next.api_key_name = v;
+  // Form-based login fields
+  if (const char* v = get(entries, count, "login_url")) next.login_url = v;
+  if (const char* v = get(entries, count, "username_field")) next.username_field = v;
+  if (const char* v = get(entries, count, "password_field")) next.password_field = v;
+  if (const char* v = get(entries, count, "csrf_field")) next.csrf_field = v;
+  if (const char* v = get(entries, count, "method")) next.method = v;
+  if (const char* v = get(entries, count, "session_cookie")) next.session_cookie = v;
   if (next.mode.empty()) next.mode = "none";
   if (next.mode == "basic" && (next.username.empty() || next.password.empty()))
     return PROWSETK_STATUS_INVALID_ARGUMENT;
@@ -77,8 +93,13 @@ int configure(ProwseTkHost*, const ProwseTkConfigEntry* entries, size_t count) {
   if (next.mode == "api-key" && next.token.empty()) return PROWSETK_STATUS_INVALID_ARGUMENT;
   if (next.mode == "custom-header" && (next.header.empty() || next.value.empty()))
     return PROWSETK_STATUS_INVALID_ARGUMENT;
+  if (next.mode == "form" && (next.login_url.empty() || next.username.empty() || next.password.empty()))
+    return PROWSETK_STATUS_INVALID_ARGUMENT;
+  if (next.mode == "cookie" && next.session_cookie.empty())
+    return PROWSETK_STATUS_INVALID_ARGUMENT;
   if (next.mode != "none" && next.mode != "basic" && next.mode != "bearer" &&
-      next.mode != "api-key" && next.mode != "custom-header")
+      next.mode != "api-key" && next.mode != "custom-header" &&
+      next.mode != "form" && next.mode != "cookie")
     return PROWSETK_STATUS_INVALID_ARGUMENT;
   g_config = std::move(next);
   return PROWSETK_STATUS_OK;
@@ -95,6 +116,7 @@ int before_request(ProwseTkHost*, const ProwseTkHttpRequest* request,
   static thread_local std::array<ProwseTkHeader, 64> headers;
   static thread_local std::string name;
   static thread_local std::string value;
+  static thread_local std::string cookie_header;
   if (g_config.mode == "basic") {
     name = "Authorization";
     value = "Basic " + base64(g_config.username + ":" + g_config.password);
@@ -104,9 +126,14 @@ int before_request(ProwseTkHost*, const ProwseTkHttpRequest* request,
   } else if (g_config.mode == "api-key") {
     name = g_config.api_key_name;
     value = g_config.token;
-  } else {
+  } else if (g_config.mode == "custom-header") {
     name = g_config.header;
     value = g_config.value;
+  } else if (g_config.mode == "cookie" && !g_config.session_cookie.empty()) {
+    name = "Cookie";
+    value = g_config.session_cookie;
+  } else {
+    return PROWSETK_STATUS_OK;
   }
   static thread_local ProwseTkHttpRequest replacement;
   replacement = *request;

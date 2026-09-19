@@ -164,7 +164,7 @@ TEST(Drivers, BookingDotcomOfflineExtraction) {
     if (!LuaRuntime::available()) GTEST_SKIP();
     LuaRuntime lua;
     ASSERT_TRUE(lua.run_file(std::string(PROWSETK_SOURCE_DIR) +
-        "/examples/scrape_booking_dotcom.lua").ok) << lua.last_error();
+        "/examples/booking-dotcom/scrape_booking_dotcom.lua").ok) << lua.last_error();
     const std::string output = std::string(TEST_BINARY_DIR) + "/booking-offline.yaml";
     const auto result = lua.call_function("main", {
         {"html", "string", "<a href='/reservations'>Reservations</a><script>fetch('/api/hotels')</script>"},
@@ -184,13 +184,16 @@ TEST(Drivers, BookingDotcomLoginAndFailureBoundaries) {
         SCOPED_TRACE(scenario);
         LuaRuntime lua;
         const std::string output = std::string(TEST_BINARY_DIR) + "/booking-" + scenario + ".yaml";
+        const std::string postman_output = output + ".postman.json";
         std::remove(output.c_str());
+        std::remove(postman_output.c_str());
         const auto setup = lua.run(
             "scenario = '" + scenario + "'\n"
             "test_directory = [==[" TEST_BINARY_DIR "]==]\n"
             "output_file = [==[" + output + "]==]\n"
+            "postman_file = [==[" + postman_output + "]==]\n"
             "dotenv_file = [==[" + output + ".env]==]\n"
-            "driver_file = [==[" PROWSETK_SOURCE_DIR "/examples/scrape_booking_dotcom.lua]==]\n");
+            "driver_file = [==[" PROWSETK_SOURCE_DIR "/examples/booking-dotcom/scrape_booking_dotcom.lua]==]\n");
         ASSERT_TRUE(setup.ok) << setup.error;
         const auto result = lua.run_file(std::string(PROWSETK_SOURCE_DIR) +
             "/tests/integration/booking_driver_fixture.lua");
