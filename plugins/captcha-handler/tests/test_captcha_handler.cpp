@@ -41,6 +41,55 @@ TEST(CaptchaHandler, InspectDocumentReturnsDetectionAndPlans) {
     EXPECT_EQ(result.methods.size(), 8u);
 }
 
+TEST(CaptchaHandler, ConfirmsChallengeFromHttpEvidence) {
+    prowsetk::HttpRequest request;
+    request.method = "GET";
+    request.url = "https://admin.booking.com/";
+    prowsetk::HttpResponse response;
+    response.status = 403;
+    response.final_url = request.url;
+    response.headers.emplace_back("cf-mitigated", "challenge");
+    response.body = "<div class='cf-turnstile'></div>";
+
+    const auto result = captcha::inspect_response(request, response);
+
+    EXPECT_TRUE(result.detection.activated);
+    EXPECT_TRUE(result.server_confirmed);
+    EXPECT_EQ(result.detection.category, "captcha");
+    EXPECT_NE(result.diagnostic.find("server response"), std::string::npos);
+}
+
+TEST(CaptchaHandler, DoesNotTreatCaptchaWordAloneAsServerConfirmation) {
+    prowsetk::HttpRequest request;
+    request.method = "GET";
+    request.url = "https://admin.booking.com/help";
+    prowsetk::HttpResponse response;
+    response.status = 200;
+    response.final_url = request.url;
+    response.body = "Read our captcha accessibility documentation.";
+
+    const auto result = captcha::inspect_response(request, response);
+
+    EXPECT_TRUE(result.detection.activated);
+    EXPECT_FALSE(result.server_confirmed);
+}
+
+TEST(CaptchaHandler, SelectsConfiguredClearanceWithoutExposingItsValue) {
+    captcha::CaptchaHandlerOptions options;
+    options.allow_cookie_session_reuse = true;
+    options.allow_pre_solved_token = true;
+    captcha::CaptchaHandlerResult result;
+    result.detection.activated = true;
+    result.detection.category = "captcha";
+
+    EXPECT_EQ(captcha::select_handling_method(
+                  result, {.has_pre_solved_token = true,
+                           .has_clearance_cookie = true},
+                  options),
+              captcha::HandlingMethod::CookieSessionReuse);
+    EXPECT_EQ(result.diagnostic.find("secret-cookie-value"), std::string::npos);
+}
+
 TEST(CaptchaHandler, NativePluginLoadsAndEmitsDetectionEvent) {
     prowsetk::Browser browser;
     browser.plugins().load_native(CAPTCHA_HANDLER_PLUGIN_PATH);

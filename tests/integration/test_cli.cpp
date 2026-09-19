@@ -216,12 +216,15 @@ TEST(CliDriverRun, BookingDotcomOfflineOpenApi) {
     GTEST_SKIP() << "CLI driver support requires Lua and tomlplusplus";
 #else
     const std::string output = std::string(TEST_BINARY_DIR) + "/booking-cli.yaml";
+    const std::string postman_output = output + ".postman.json";
     const std::string log = output + ".log";
     const std::string command = quote_shell(PROWSETK_CLI_BIN) +
-        " run booking-dotcom --config " +
-        quote_shell(std::string(PROWSETK_SOURCE_DIR) + "/examples/booking_dotcom.toml") +
+        " run booking-dotcom-admin --config " +
+        quote_shell(std::string(PROWSETK_SOURCE_DIR) + "/examples/booking-dotcom-admin-scrape/Prowse.toml") +
         " --html " + quote_shell("<a href='/reservations'>Reservations</a><script>fetch('/api/hotels')</script>") +
-        " --output " + quote_shell(output) + " > " + quote_shell(log) + " 2>&1";
+        " --output " + quote_shell(output) +
+        " --postman " + quote_shell(postman_output) +
+        " > " + quote_shell(log) + " 2>&1";
     ASSERT_EQ(run_command(command), 0) << read_file(log);
     const auto yaml = read_file(output);
     EXPECT_NE(yaml.find("openapi: 3.1.0"), std::string::npos);

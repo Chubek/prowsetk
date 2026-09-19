@@ -108,6 +108,11 @@ TEST(Scrape2OapiApiPath, RecognizesPrivateFallback) {
     EXPECT_TRUE(scrape::is_api_path("/private/health", {}));
 }
 
+TEST(Scrape2OapiApiPath, RecognizesBookingAdminFallbacks) {
+    EXPECT_TRUE(scrape::is_api_path("/hotel/hoteladmin", {}));
+    EXPECT_TRUE(scrape::is_api_path("/partner-settings/security", {}));
+}
+
 TEST(Scrape2OapiApiPath, IsCaseInsensitive) {
     EXPECT_TRUE(scrape::is_api_path("/API/Users", {}));
 }

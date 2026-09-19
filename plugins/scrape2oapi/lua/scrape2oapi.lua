@@ -25,7 +25,7 @@ local scrape2oapi = {
 local DEFAULT_PATTERNS = {
     "/api", "/v1", "/v2", "/v3", "/graphql", "/rest", "/internal", "/data",
     "/ajax", "/rpc", "/json", "/xml", "/gateway", "/service", "/backend", "/bff",
-    "/dml"
+    "/dml", "/hotel/hoteladmin", "/partner-settings"
 }
 
 local function is_api_path(path, patterns)
@@ -38,6 +38,9 @@ local function is_api_path(path, patterns)
     -- fallback markers from the core extractor
     for _, m in ipairs({ "/api", "/v1", "/v2", "/v3", "/graphql", "/rest", "/rpc", ".json",
         "/data", "/internal", "/ajax", "/gateway", "/service", "/backend", "/bff", "/dml" }) do
+        if string.find(lower, m, 1, true) ~= nil then return true end
+    end
+    for _, m in ipairs({ "/hotel/hoteladmin", "/partner-settings" }) do
         if string.find(lower, m, 1, true) ~= nil then return true end
     end
     return false

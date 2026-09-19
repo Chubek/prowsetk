@@ -43,6 +43,13 @@ struct HandlingPlan {
 struct CaptchaHandlerResult {
     AntiBotDetection detection;
     std::vector<HandlingPlan> methods;
+    bool server_confirmed = false;
+    std::string diagnostic;
+};
+
+struct HandlingInputs {
+    bool has_pre_solved_token = false;
+    bool has_clearance_cookie = false;
 };
 
 const char* to_string(HandlingMethod method) noexcept;
@@ -52,6 +59,14 @@ std::vector<HandlingPlan> available_methods(
 
 CaptchaHandlerResult inspect_document(
     const Document& document,
+    const CaptchaHandlerOptions& options = {});
+
+CaptchaHandlerResult inspect_response(
+    const HttpRequest& request, const HttpResponse& response,
+    const CaptchaHandlerOptions& options = {});
+
+HandlingMethod select_handling_method(
+    const CaptchaHandlerResult& result, const HandlingInputs& inputs = {},
     const CaptchaHandlerOptions& options = {});
 
 }  // namespace prowsetk::plugins::captcha_handler

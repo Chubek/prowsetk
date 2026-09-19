@@ -1706,20 +1706,23 @@ This keeps drivers deterministic and usable without a network.
 
 ### Booking.com example driver
 
-`examples/booking-dotcom/scrape_booking_dotcom.lua` uses the existing
-`plugins/scrape2oapi/`
-Lua plugin to write OpenAPI 3.1 YAML. From the repository root:
+`examples/booking-dotcom-admin-scrape/scrape-booking-dotcom-admin.lua` uses the
+existing `plugins/scrape2oapi/` and `plugins/scrape2postman/` Lua plugins to
+write OpenAPI 3.1 YAML and a Postman collection. From the repository root:
 
 ```sh
-build/default/src/cli/prowsetk run booking-dotcom \
-  --config examples/booking_dotcom.toml --output build/booking.yaml
+build/default/src/cli/prowsetk run booking-dotcom-admin \
+  --config examples/booking-dotcom-admin-scrape/Prowse.toml \
+  --output build/booking.yaml
 ```
 
-Omit `--output` to use `$HOME/booking-dotcom/BookingDotcomAdminPanel.yaml`; the
-driver creates the parent directory. Postman collections are written beside it
-(`--postman PATH` overrides), so both artifacts land in `$HOME/booking-dotcom` by
-default. The driver reads `.env` first (`--dotenv PATH` selects another
-file), then targets `https://admin.booking.com/` and resolves
+Omit `--output` to use
+`_scraped/booking-dotcom-admin/BookingDotcomAdminPanel.yaml`; the driver creates
+the parent directory. Postman collections are written beside it
+(`--postman PATH` overrides), so both artifacts land under
+`_scraped/booking-dotcom-admin` by default. The driver reads `.env` first
+(`--dotenv PATH` selects another file), then targets
+`https://admin.booking.com/` and resolves
 `BOOKING_DOTCOM_USER` and `BOOKING_DOTCOM_PASS`, giving dotenv values
 precedence over existing process variables. `BOOKING_DOTCOM_AS_TOKEN` is
 optional and is forwarded only to the account-portal OAuth attempt when present.
@@ -1743,8 +1746,12 @@ events, `location`, cookies, and web storage), so pages that mount their
 login form through those standard APIs render for scraping and pages are not
 misread as `<noscript>` fallbacks. The Booking.com account portal may still
 return human-verification, CAPTCHA, or MFA challenges. Those challenges are
-reported without writing an authenticated specification; this example does not
-solve interactive challenges or MFA.
+reported without writing an authenticated specification. `plugins/captcha-handler`
+inspects the actual HTTP response and marks whether the challenge has server-side
+evidence, such as WAF headers, 403/429 status, or concrete reCAPTCHA/hCaptcha/
+Turnstile/human-verification markup. The driver may reuse a caller-provided
+`BOOKING_DOTCOM_CLEARANCE_COOKIE`; a `BOOKING_DOTCOM_CAPTCHA_TOKEN` is treated
+as secret challenge material and is never reused as an OAuth `as_token`.
 
 After confirmed login, the driver crawls same-origin admin pages up to
 `--max_depth` / `--max_pages`, imports at most 32 same-origin external scripts
@@ -1752,7 +1759,9 @@ per page, and then resolves discovered API endpoints through the authenticated
 session. JSON API responses are scanned for additional same-origin API-looking
 links and followed recursively up to `--max_api_depth` and
 `--max_api_requests`; the OpenAPI and Postman outputs both include those
-recursively discovered endpoints. Script inspection is capped at 2 MiB per
+recursively discovered endpoints. Booking admin paths under `hotel/hoteladmin`
+and `partner-settings/*` are treated as recursive admin endpoints even though
+they do not use the generic `/api` prefix. Script inspection is capped at 2 MiB per
 script and 16 MiB total. It forwards `scrape_all_paths=true` through the Lua
 plugin and extractor, so ordinary links/resources are included alongside API
 patterns, forms, and literal fetch/XHR calls. Imported scripts are analyzed in
@@ -1763,8 +1772,8 @@ requests remain outside this heuristic discovery scope.
 For a hermetic extraction without reading credentials or claiming login:
 
 ```sh
-build/default/src/cli/prowsetk run booking-dotcom \
-  --config examples/booking_dotcom.toml \
+build/default/src/cli/prowsetk run booking-dotcom-admin \
+  --config examples/booking-dotcom-admin-scrape/Prowse.toml \
   --html '<a href="/reservations">Reservations</a>' \
   --output build/booking-offline.yaml
 ```

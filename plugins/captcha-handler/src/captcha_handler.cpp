@@ -1,5 +1,7 @@
 #include "prowsetk/plugins/captcha_handler.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <utility>
 
 namespace prowsetk::plugins::captcha_handler {
@@ -14,6 +16,29 @@ HandlingPlan plan(HandlingMethod method, bool available, std::string name,
                         std::move(description),
                         std::move(configuration_key),
                         std::move(security_note)};
+}
+
+std::string lower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](char ch) {
+        return static_cast<char>(
+            std::tolower(static_cast<unsigned char>(ch)));
+    });
+    return value;
+}
+
+bool has_server_challenge_signal(const AntiBotDetection& detection) {
+    for (const auto& signal : detection.signals) {
+        const std::string source = lower(signal.source);
+        const std::string evidence = lower(signal.name + " " + signal.detail);
+        if (source == "header" ||
+            evidence.find("recaptcha") != std::string::npos ||
+            evidence.find("hcaptcha") != std::string::npos ||
+            evidence.find("turnstile") != std::string::npos ||
+            evidence.find("human-verification") != std::string::npos) {
+            return true;
+        }
+    }
+    return detection.status == 403 || detection.status == 429;
 }
 
 }  // namespace
@@ -75,7 +100,50 @@ CaptchaHandlerResult inspect_document(const Document& document,
     CaptchaHandlerResult result;
     result.detection = detector.inspect_document(document);
     result.methods = available_methods(options);
+    result.diagnostic = result.detection.activated
+                            ? "challenge inferred from rendered document"
+                            : "no challenge evidence in rendered document";
     return result;
+}
+
+CaptchaHandlerResult inspect_response(const HttpRequest& request,
+                                      const HttpResponse& response,
+                                      const CaptchaHandlerOptions& options) {
+    AntiBotDetector detector;
+    CaptchaHandlerResult result;
+    result.detection = detector.inspect_response(request, response);
+    result.methods = available_methods(options);
+    result.server_confirmed =
+        result.detection.activated && has_server_challenge_signal(result.detection);
+    if (!result.detection.activated) {
+        result.diagnostic = "no challenge evidence in HTTP response";
+    } else if (result.server_confirmed) {
+        result.diagnostic = "server response contains anti-bot challenge evidence";
+    } else {
+        result.diagnostic =
+            "challenge is heuristic and lacks a server confirmation signal";
+    }
+    return result;
+}
+
+HandlingMethod select_handling_method(const CaptchaHandlerResult& result,
+                                      const HandlingInputs& inputs,
+                                      const CaptchaHandlerOptions& options) {
+    if (!result.detection.activated) return HandlingMethod::AbortAndReport;
+    if (inputs.has_clearance_cookie && options.allow_cookie_session_reuse) {
+        return HandlingMethod::CookieSessionReuse;
+    }
+    if (inputs.has_pre_solved_token && options.allow_pre_solved_token) {
+        return HandlingMethod::PreSolvedToken;
+    }
+    if (result.detection.category == "rate-limit" &&
+        options.allow_wait_for_clearance) {
+        return HandlingMethod::WaitForClearance;
+    }
+    if (options.allow_manual_user_prompt) {
+        return HandlingMethod::ManualUserPrompt;
+    }
+    return HandlingMethod::AbortAndReport;
 }
 
 }  // namespace prowsetk::plugins::captcha_handler

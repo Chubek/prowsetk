@@ -36,7 +36,8 @@ struct Scrape2OapiOptions {
     // scrape2oapi-specific: heuristics for internal API detection.
     std::vector<std::string> api_patterns = {"/api", "/v1", "/v2", "/v3",
                                              "/graphql", "/rest", "/internal",
-                                             "/data"};
+                                             "/data", "/hotel/hoteladmin",
+                                             "/partner-settings"};
     bool require_api_pattern = true;
 
     // Chain resolution: when true, every discovered internal API endpoint is

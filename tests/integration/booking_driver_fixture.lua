@@ -36,12 +36,13 @@ end
 
 -- Dashboard page (shown after successful login)
 local dashboard = [[<a href="/logout">Log out</a><a href="/reservations">Reservations</a>
-<a href="/api/hotels?token=fixture-token">Hotels</a><script src="/app.js"></script>
+<a href="/api/hotels?token=fixture-token">Hotels</a><a href="/hotel/hoteladmin">Hotel admin</a>
+<a href="/partner-settings/security">Partner security</a><script src="/app.js"></script>
 <script>fetch('/api/inline')</script>]]
 
 -- Reservations page (for recursive crawl)
 local reservations = [[<a href="/logout">Log out</a><a href="/dashboard">Dashboard</a>
-<script>fetch('/api/bookings')</script>]]
+<script>fetch('/api/bookings'); fetch('/partner-settings/reservations')</script>]]
 
 local wrapper = {}
 function wrapper:load_html(...) return dom_session:load_html(...) end
@@ -123,6 +124,16 @@ function wrapper:request(method, url, options)
         return {status=200, body='{"rates":[],"next":"/service/pricing"}', headers={['Content-Type']='application/json'}}
     elseif url == 'https://admin.booking.com/service/pricing' then
         return {status=200, body='{"pricing":[]}', headers={['Content-Type']='application/json'}}
+    elseif url == 'https://admin.booking.com/hotel/hoteladmin' then
+        return {status=200, body='{"hoteladmin":[],"next":"/partner-settings/policies"}', headers={['Content-Type']='application/json'}}
+    elseif url == 'https://admin.booking.com/partner-settings/security' then
+        return {status=200, body='{"security":[],"next":"/partner-settings/users"}', headers={['Content-Type']='application/json'}}
+    elseif url == 'https://admin.booking.com/partner-settings/reservations' then
+        return {status=200, body='{"reservations":[]}', headers={['Content-Type']='application/json'}}
+    elseif url == 'https://admin.booking.com/partner-settings/policies' then
+        return {status=200, body='{"policies":[]}', headers={['Content-Type']='application/json'}}
+    elseif url == 'https://admin.booking.com/partner-settings/users' then
+        return {status=200, body='{"users":[]}', headers={['Content-Type']='application/json'}}
     end
     error('unexpected request: ' .. method .. ' ' .. url)
 end
@@ -169,7 +180,10 @@ if scenario == 'success' or scenario == 'js-built-form' or scenario == 'two-step
     local yaml = f:read('*a'); f:close()
     for _, path in ipairs({'/reservations','/api/hotels','/api/inline','/api/external',
                            '/api/bookings','/api/bookings/details','/api/availability',
-                           '/api/hotel-details','/gateway/rates','/service/pricing'}) do
+                           '/api/hotel-details','/gateway/rates','/service/pricing',
+                           '/hotel/hoteladmin','/partner-settings/security',
+                           '/partner-settings/reservations','/partner-settings/policies',
+                           '/partner-settings/users'}) do
         assert(yaml:find(path, 1, true), 'missing endpoint ' .. path)
     end
     assert(yaml:find('authenticated: true', 1, true))
@@ -184,6 +198,8 @@ if scenario == 'success' or scenario == 'js-built-form' or scenario == 'two-step
     assert(postman:find('/api/hotels', 1, true), 'Postman missing /api/hotels')
     assert(postman:find('/api/bookings/details', 1, true), 'Postman missing recursive /api/bookings/details')
     assert(postman:find('/service/pricing', 1, true), 'Postman missing recursive /service/pricing')
+    assert(postman:find('/hotel/hoteladmin', 1, true), 'Postman missing /hotel/hoteladmin')
+    assert(postman:find('/partner-settings/users', 1, true), 'Postman missing recursive /partner-settings/users')
     assert(postman:find('Discovered API', 1, true), 'Postman missing info')
     for _, secret in ipairs({'fixture-token','fixture#pass&word','fixture@example.com'}) do
         assert(not postman:find(secret, 1, true), 'secret leaked in Postman: ' .. secret)
@@ -195,11 +211,11 @@ if scenario == 'success' or scenario == 'js-built-form' or scenario == 'two-step
 elseif scenario == 'challenge' then
     assert(not succeeded, 'expected a challenge failure')
     assert(not io.open(output_file, 'r'), 'challenge produced output')
-    assert(message:find('login form not available', 1, true), message)
+    assert(message:find('captcha-handler detected a confirmed challenge', 1, true), message)
     for _, secret in ipairs({'fixture#pass&word','fixture@example.com','fixture-csrf'}) do
         assert(not message:find(secret, 1, true), 'error leaked a secret: ' .. secret)
     end
-    assert(#calls == 2, 'unexpected HTTP calls: ' .. #calls)
+    assert(#calls == 1, 'unexpected HTTP calls: ' .. #calls)
     
 elseif scenario == 'js-required' then
     assert(not succeeded, 'expected a JavaScript-required failure')

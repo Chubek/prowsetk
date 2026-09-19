@@ -33,6 +33,7 @@ end
 local ezlogin = require_first("ezlogin", "plugins.ezlogin.lua.ezlogin")
 local scrape2oapi = require_first("scrape2oapi", "plugins.scrape2oapi.lua.scrape2oapi")
 local scrape2postman = require_first("scrape2postman", "plugins.scrape2postman.lua.scrape2postman")
+local captcha_handler = require_first("captcha_handler", "plugins.captcha-handler.lua.captcha_handler")
 
 local function trim(value)
     return tostring(value or ""):match("^%s*(.-)%s*$")
@@ -184,7 +185,7 @@ local function is_api_like(url)
     for _, marker in ipairs({
         "/api", "/v1", "/v2", "/v3", "/graphql", "/rest", "/rpc", "/json",
         "/data", "/internal", "/ajax", "/gateway", "/service", "/backend",
-        "/bff", "/dml"
+        "/bff", "/dml", "/hotel/hoteladmin", "/partner-settings"
     }) do
         if lower:find(marker, 1, true) then return true end
     end
@@ -233,6 +234,7 @@ local function fetch_page(session, url, options)
         local response = session:request(method, current_url, {body = options.body, headers = options.headers})
         response.final_url = current_url
         response.redirect_chain = redirects
+        response.captcha = captcha_handler.inspect_response(method, current_url, response)
         local location = response_header(response, "Location")
         if not options.follow_redirects or not is_redirect(response.status) or not location then
             return response.body or "", response
@@ -281,6 +283,18 @@ local function detect_blocked_login(html)
     if lower:find("<noscript", 1, true) and not lower:find("<form", 1, true) then
         error("booking-dotcom-admin: login page requires browser JavaScript or captcha support", 2)
     end
+end
+
+local function confirmed_challenge(response)
+    local challenge = response and response.captcha
+    return challenge and challenge.activated and challenge.server_confirmed
+end
+
+local function challenge_status(response)
+    local challenge = response and response.captcha
+    if not challenge or not challenge.activated then return "none" end
+    return (challenge.server_confirmed and "confirmed" or "heuristic") ..
+        ":" .. tostring(challenge.category or "anti-bot")
 end
 
 local function extract_op_token(url, body)
@@ -352,11 +366,15 @@ local function login(session, url, username, password, options)
         login_url = resolved
         first_body = select(1, fetch_page(session, login_url))
     end
+    if confirmed_challenge(first_response) then
+        error("booking-dotcom-admin: login form not available; challenge detected (" ..
+              tostring(first_response.captcha.diagnostic) .. ")", 2)
+    end
 
     local op_token = extract_op_token(login_url, first_body)
     local page_as_token = extract_json_string(first_body, "as_token")
     local login_diagnostics = string.format(
-        "status=%s final_url=%s login_host=%s login_has_query=%s body_len=%d body_op_token=%s body_as_token=%s noscript=%s",
+        "status=%s final_url=%s login_host=%s login_has_query=%s body_len=%d body_op_token=%s body_as_token=%s noscript=%s challenge=%s",
         tostring(first_response.status),
         tostring(first_response.final_url ~= nil and first_response.final_url ~= ""),
         tostring(url_host(login_url) or ""),
@@ -364,7 +382,8 @@ local function login(session, url, username, password, options)
         #(first_body or ""),
         tostring(extract_json_string(first_body, "op_token") ~= nil),
         tostring(page_as_token ~= nil),
-        tostring((first_body or ""):lower():find("<noscript", 1, true) ~= nil))
+        tostring((first_body or ""):lower():find("<noscript", 1, true) ~= nil),
+        challenge_status(first_response))
     if op_token then
         local ok, err = pcall(function()
             ezlogin.configure(session, {
@@ -428,14 +447,23 @@ local function apply_captcha_inputs(session, args, dotenv)
     }
 end
 
-local function captcha_handler_note(inputs)
-    if inputs and inputs.clearance_cookie and inputs.clearance_cookie ~= "" then
+local function captcha_handler_note(inputs, response)
+    local challenge = response and response.captcha or {activated = true, category = "captcha"}
+    local method = captcha_handler.select_handling_method(challenge, {
+        has_clearance_cookie = inputs and inputs.clearance_cookie and inputs.clearance_cookie ~= "",
+        has_pre_solved_token = inputs and inputs.captcha_token and inputs.captcha_token ~= ""
+    }, {
+        allow_cookie_session_reuse = true,
+        allow_pre_solved_token = true,
+        allow_wait_for_clearance = true
+    })
+    if method == "cookie-session-reuse" then
         return "captcha-handler cookie-session-reuse did not clear the challenge"
     end
-    if inputs and inputs.captcha_token and inputs.captcha_token ~= "" then
-        return "captcha-handler pre-solved-token did not clear the challenge"
+    if method == "pre-solved-token" then
+        return "captcha-handler pre-solved-token is configured but cannot be safely injected into this challenge"
     end
-    return "captcha-handler detected a challenge; provide BOOKING_DOTCOM_CLEARANCE_COOKIE or BOOKING_DOTCOM_CAPTCHA_TOKEN"
+    return "captcha-handler detected a confirmed challenge; provide BOOKING_DOTCOM_CLEARANCE_COOKIE or handle the challenge outside the driver"
 end
 
 local function load_authenticated_page(session, url, success_selector)
@@ -724,10 +752,6 @@ function main(args)
             end
             local captcha_inputs = apply_captcha_inputs(session, args, dotenv)
             local as_token = env("BOOKING_DOTCOM_AS_TOKEN", dotenv)
-            if (not as_token or as_token == "") and
-               captcha_inputs.captcha_token and captcha_inputs.captcha_token ~= "" then
-                as_token = captcha_inputs.captcha_token
-            end
             local logged_in, login_err = pcall(function()
                 login(session, url, username, password, {
                     as_token = as_token,
@@ -736,7 +760,10 @@ function main(args)
             end)
             if not logged_in then
                 local message = tostring(login_err)
-                if message:lower():find("challenge", 1, true) or
+                if message:find("requires browser JavaScript or captcha support", 1, true) then
+                    error(login_err, 0)
+                end
+                if message:lower():find("challenge detected", 1, true) or
                    message:lower():find("captcha", 1, true) or
                    message:find("Human Verification", 1, true) then
                     error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs), 2)
@@ -748,7 +775,10 @@ function main(args)
             end)
             if not loaded then
                 local message = tostring(load_err)
-                if message:lower():find("challenge", 1, true) or
+                if message:find("requires browser JavaScript or captcha support", 1, true) then
+                    error(load_err, 0)
+                end
+                if message:lower():find("challenge detected", 1, true) or
                    message:lower():find("captcha", 1, true) or
                    message:find("Human Verification", 1, true) then
                     error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs), 2)

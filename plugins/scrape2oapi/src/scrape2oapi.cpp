@@ -31,7 +31,9 @@ bool builtin_api_marker(const std::string& path) {
     static const char* const markers[] = {"/api", "/v1", "/v2", "/v3",
                                           "/graphql", "/rest", "/rpc",
                                           "/json", ".json", "/data",
-                                          "/internal", "/private"};
+                                          "/internal", "/private",
+                                          "/hotel/hoteladmin",
+                                          "/partner-settings"};
     std::string lower = to_lower(path);
     for (const char* m : markers) {
         if (lower.find(m) != std::string::npos) return true;
