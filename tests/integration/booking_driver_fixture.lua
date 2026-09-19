@@ -12,6 +12,18 @@ local login = [[<form method="post" action="/auth"><input name="_csrf" type="hid
 <input type="email" name="username"><input type="password" name="password"></form>]]
 if scenario == 'two-step' then
     login = [[<form method="post" action="/identify"><input type="email" name="username"></form>]]
+elseif scenario == 'js-built-form' then
+    login = [[<html class="no-js"><head><title>Sign in</title></head><body>
+    <div id="mount"></div><noscript>Please enable JavaScript in your browser to proceed</noscript>
+    <script>
+    document.getElementById('mount').innerHTML = '<form method="post" action="/auth">'
+      + '<input name="_csrf" type="hidden" value="fixture-csrf">'
+      + '<input type="email" name="username">'
+      + '<input type="password" name="password">'
+      + '</form>';
+    document.documentElement.classList.remove('no-js');
+    document.documentElement.classList.add('js');
+    </script></body></html>]]
 elseif scenario == 'foreign-action' then
     login = [[<form method="post" action="https://untrusted.example/auth"><input name="username"><input type="password" name="password"></form>]]
 elseif scenario == 'get-form' then
@@ -47,8 +59,26 @@ function wrapper:request(method, url, options)
     calls[#calls+1] = {method=method, url=url, body=options.body}
     
     if url == 'https://admin.booking.com/' then
+        if scenario == 'oauth' and not authenticated then
+            return {status=302, body='', headers={Location='https://account.booking.com/sign-in?op_token=fixture-op-token'}}
+        end
         if authenticated then return {status=200, body=dashboard, headers={}} end
         return {status=200, body=login, headers={}}
+    elseif url == 'https://account.booking.com/sign-in?op_token=fixture-op-token' then
+        return {status=200, body='<html><body><noscript>Please enable JavaScript</noscript></body></html>', headers={}}
+    elseif url == 'https://account.booking.com/account/sign-in/login_name' then
+        assert(method == 'POST')
+        assert(options.body:find('"login_name":"fixture@example.com"', 1, true))
+        assert(options.body:find('"op_token":"fixture-op-token"', 1, true))
+        assert(not options.body:find('fixture#pass&word', 1, true),
+               'password sent to login_name endpoint')
+        return {status=200, body='{"state":"fixture-state","code_challenge":"fixture-code"}', headers={}}
+    elseif url == 'https://account.booking.com/account/sign-in/password' then
+        assert(method == 'POST')
+        assert(options.body:find('"password":"fixture#pass&word"', 1, true))
+        assert(options.body:find('"state":"fixture-state"', 1, true))
+        return {status=200, body='{"redirect_uri":"https://admin.booking.com/dashboard"}',
+                headers={['Set-Cookie']='session=fixture-session-token; Path=/; HttpOnly'}}
     elseif url == 'https://admin.booking.com/identify' then
         assert(options.body == 'username=fixture%40example.com')
         return {status=200, body=[[<form method="post" action="/auth"><input type="password" name="password"></form>]], headers={}}
@@ -130,7 +160,7 @@ local succeeded, message = pcall(main, {
 })
 
 -- Verify results based on scenario
-if scenario == 'success' or scenario == 'two-step' then
+if scenario == 'success' or scenario == 'js-built-form' or scenario == 'two-step' or scenario == 'oauth' then
     assert(succeeded, message)
     assert(message == 0)
     
@@ -159,7 +189,7 @@ if scenario == 'success' or scenario == 'two-step' then
         assert(not postman:find(secret, 1, true), 'secret leaked in Postman: ' .. secret)
     end
     
-    local minimum_calls = (scenario == 'two-step') and 14 or 13
+    local minimum_calls = (scenario == 'two-step' or scenario == 'oauth') and 14 or 13
     assert(#calls >= minimum_calls, 'recursive API crawl made too few calls: ' .. #calls)
     
 elseif scenario == 'challenge' then
@@ -169,7 +199,7 @@ elseif scenario == 'challenge' then
     for _, secret in ipairs({'fixture#pass&word','fixture@example.com','fixture-csrf'}) do
         assert(not message:find(secret, 1, true), 'error leaked a secret: ' .. secret)
     end
-    assert(#calls == 1, 'unexpected HTTP calls: ' .. #calls)
+    assert(#calls == 2, 'unexpected HTTP calls: ' .. #calls)
     
 elseif scenario == 'js-required' then
     assert(not succeeded, 'expected a JavaScript-required failure')
@@ -178,7 +208,7 @@ elseif scenario == 'js-required' then
     for _, secret in ipairs({'fixture#pass&word','fixture@example.com','fixture-csrf'}) do
         assert(not message:find(secret, 1, true), 'error leaked a secret: ' .. secret)
     end
-    assert(#calls == 1, 'unexpected HTTP calls: ' .. #calls)
+    assert(#calls == 2, 'unexpected HTTP calls: ' .. #calls)
     
 else
     -- Other failure scenarios
@@ -186,11 +216,14 @@ else
     assert(not io.open(output_file, 'r'), 'failure produced output')
     assert(not message:find('fixture', 1, true), 'error leaked a secret')
     if scenario == 'get-form' or scenario == 'foreign-action' then
-        assert(#calls == 1, 'credentials sent unexpectedly: ' .. #calls .. ' calls')
+        for _, call in ipairs(calls) do
+            assert(call.method ~= 'POST', 'credentials sent unexpectedly')
+        end
+        assert(#calls == 2, 'unexpected call count: ' .. #calls)
     elseif scenario == 'malformed-dotenv' then
         assert(#calls == 0, 'unexpected calls with malformed dotenv: ' .. #calls)
     else
-        assert(#calls == 2, 'unexpected call count: ' .. #calls)
+        assert(#calls == 3, 'unexpected call count: ' .. #calls)
     end
 end
 

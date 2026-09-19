@@ -291,7 +291,7 @@ int run_driver(const Arguments& args) {
     prowsetk::BrowserConfig browser_config;
     browser_config.javascript = config.javascript;
     browser_config.user_agent =
-        config.user_agent.empty() ? "ProwseTk/run" : config.user_agent;
+        config.user_agent.empty() ? browser_config.user_agent : config.user_agent;
     browser_config.follow_redirects = config.follow_redirects;
     browser_config.max_redirects = config.max_redirects;
     browser_config.timeout_ms = config.timeout_ms;

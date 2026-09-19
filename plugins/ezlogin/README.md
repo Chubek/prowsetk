@@ -10,12 +10,16 @@ with the plugin registry using `mode` plus the matching fields:
 - `custom-header`: `header`, `value`
 - `cookie`: `session_cookie` - sets a Cookie header with the session cookie value
 - `form`: `login_url`, `username`, `password`, optional `username_field`, `password_field`, `csrf_field`
-  - Performs form-based login: fetches the login page, extracts CSRF token, POSTs credentials,
-    and automatically configures session cookies for subsequent requests
+  - Performs form-based login: fetches the login page, loads it through the owning session so
+    Flatworm can execute page JavaScript and expose rendered forms, then POSTs credentials and
+    automatically configures session cookies for subsequent requests
+- `oauth`: `login_url`, `username`, `password`, optional `op_token`, `as_token`
+  - Follows the Booking.com account redirect, extracts `op_token` from the final URL or page,
+    posts the login name first, then submits the password to the account portal endpoint
 
 The plugin never logs credential values. It preserves existing request headers,
 and rejects incomplete or unknown configurations. HTML form/OAuth-style flows
-are now supported via the `form` mode.
+are now supported via the `form` and `oauth` modes.
 
 Example native configuration (form mode):
 

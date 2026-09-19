@@ -212,6 +212,11 @@ function main(args)
     local url = 'https://admin.booking.com/'
     local username = offline and '' or setting('BOOKING_DOTCOM_USER')
     local password = offline and '' or setting('BOOKING_DOTCOM_PASS')
+    local as_token = nil
+    if not offline then
+        as_token = env.BOOKING_DOTCOM_AS_TOKEN or os.getenv('BOOKING_DOTCOM_AS_TOKEN')
+        if as_token == '' then as_token = nil end
+    end
     local root = origin(url)
     if not root or root:find('@', 1, true) then fail('a credential-free HTTPS URL is required') end
     local output = args.output or home_booking_path('BookingDotcomAdminPanel.yaml')
@@ -431,24 +436,36 @@ function main(args)
             all_endpoints[#all_endpoints + 1] = page_endpoints
             pages_scraped = 1
         else
-            -- Use ezlogin form-based authentication
+            -- Prefer Booking.com's account-portal OAuth endpoints when the
+            -- admin page redirects to account.booking.com with op_token. If
+            -- that token is absent, fall back to the generic form flow used by
+            -- deterministic fixtures and simpler login pages.
             stage = 'authenticating with ezlogin'
-            local auth_ok, auth_err = pcall(function()
-                ezlogin.configure(session, {
-                    mode = 'form',
+            local function configure_auth(mode)
+                return ezlogin.configure(session, {
+                    mode = mode,
                     login_url = url,
                     username = username,
                     password = password,
+                    as_token = as_token,
                     username_field = 'username',
                     password_field = 'password',
                     csrf_field = '_csrf',
                     trusted = trusted
                 })
+            end
+            local auth_ok, auth_err = pcall(function()
+                configure_auth('oauth')
             end)
+            if not auth_ok and tostring(auth_err):find('did not expose op_token', 1, true) then
+                auth_ok, auth_err = pcall(function()
+                    configure_auth('form')
+                end)
+            end
             if not auth_ok then
                 -- Preserve ezlogin error messages for proper test assertions
                 local err_msg = tostring(auth_err)
-                if err_msg:find("JavaScript") or err_msg:find("captcha") then
+                if err_msg:find("human verification") or err_msg:find("JavaScript") or err_msg:find("captcha") then
                     fail('login page requires browser JavaScript or captcha support that Flatworm does not yet provide; no OpenAPI file written')
                 elseif err_msg:find("no login form") then
                     fail('login form not available or authentication not confirmed; no OpenAPI file written')

@@ -1352,6 +1352,20 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   WorkerStub.prototype.addEventListener = function () {};
   WorkerStub.prototype.removeEventListener = function () {};
 
+  function pluginArray(entries) {
+    entries = entries || [];
+    var array = entries.slice();
+    array.item = function (index) { return index >= 0 && index < array.length ? array[index] : null; };
+    array.namedItem = function (name) {
+      for (var i = 0; i < array.length; ++i) {
+        if (array[i] && (array[i].name === name || array[i].type === name)) return array[i];
+      }
+      return null;
+    };
+    array.refresh = function () {};
+    return array;
+  }
+
   // ---------- install globals ----------
   function install(name, value, force) {
     if (!force && typeof G[name] !== 'undefined') return;
@@ -1388,11 +1402,15 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   install('__prowsetkFlush', __prowsetkFlush, true);
 
   var nav = H.navigatorInfo();
+  var ua = String(nav.userAgent || '');
+  var chromeLike = /Chrome\//.test(ua) || /Chromium\//.test(ua);
+  var mimeTypes = pluginArray([{ type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' }]);
+  var plugins = pluginArray([{ name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', 0: mimeTypes[0], length: 1 }]);
   var navigator = {
     userAgent: nav.userAgent,
     appVersion: nav.userAgent.replace(/^.*Mozilla\//, ''),
     platform: nav.platform,
-    vendor: 'Flatworm',
+    vendor: chromeLike ? 'Google Inc.' : '',
     vendorSub: '',
     language: nav.language,
     languages: [nav.language],
@@ -1406,8 +1424,9 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     appCodeName: 'Mozilla',
     doNotTrack: null,
     webdriver: false,
-    plugins: [],
-    mimeTypes: [],
+    plugins: plugins,
+    mimeTypes: mimeTypes,
+    pdfViewerEnabled: true,
     javaEnabled: function () { return false; },
     sendBeacon: function (url, data) {
       H.request('POST', H.resolveUrl(String(url), H.pageInfo().url || H.baseUrl()).href, [], data == null ? undefined : String(data));
@@ -1418,7 +1437,44 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     mediaDevices: { getUserMedia: function () { return Promise.reject(new Error('not supported')); } },
     connection: { effectiveType: '4g', downlink: 10, rtt: 50 }
   };
+  if (chromeLike) {
+    navigator.userAgentData = {
+      brands: [
+        { brand: 'Chromium', version: '128' },
+        { brand: 'Google Chrome', version: '128' }
+      ],
+      mobile: false,
+      platform: 'Linux',
+      getHighEntropyValues: function (hints) {
+        var out = { mobile: false, platform: 'Linux' };
+        (hints || []).forEach(function (hint) {
+          if (hint === 'architecture') out.architecture = 'x86';
+          else if (hint === 'bitness') out.bitness = '64';
+          else if (hint === 'platformVersion') out.platformVersion = '0.0.0';
+          else if (hint === 'uaFullVersion') out.uaFullVersion = '128.0.0.0';
+          else if (hint === 'fullVersionList') out.fullVersionList = [
+            { brand: 'Chromium', version: '128.0.0.0' },
+            { brand: 'Google Chrome', version: '128.0.0.0' }
+          ];
+        });
+        return Promise.resolve(out);
+      }
+    };
+  }
   install('navigator', navigator, true);
+  install('window', G, true);
+  install('self', G, true);
+  install('top', G, true);
+  install('parent', G, true);
+  install('frames', G, true);
+  if (chromeLike) {
+    install('chrome', {
+      runtime: {},
+      app: { isInstalled: false },
+      csi: function () { return {}; },
+      loadTimes: function () { return {}; }
+    }, true);
+  }
 
   install('location', location, true);
   install('history', {

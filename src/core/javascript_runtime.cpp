@@ -54,7 +54,9 @@ void DocumentScriptHost::set_document_title(std::string_view) {}
 
 NavigatorInfo DocumentScriptHost::navigator_info() const {
     NavigatorInfo info;
-    info.user_agent = "ProwseTk/0.1 Flatworm";
+    info.user_agent =
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
     info.platform = "Linux x86_64";
     info.language = "en-US";
     return info;

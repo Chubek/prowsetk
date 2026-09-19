@@ -178,9 +178,9 @@ TEST(Drivers, BookingDotcomOfflineExtraction) {
 
 TEST(Drivers, BookingDotcomLoginAndFailureBoundaries) {
     if (!LuaRuntime::available()) GTEST_SKIP();
-    for (const std::string scenario : {"success", "two-step", "rejected", "foreign-action",
-                                      "foreign-redirect", "get-form", "challenge", "js-required",
-                                      "malformed-dotenv"}) {
+    for (const std::string scenario : {"success", "js-built-form", "two-step", "oauth", "rejected", "foreign-action",
+                                       "foreign-redirect", "get-form", "challenge", "js-required",
+                                       "malformed-dotenv"}) {
         SCOPED_TRACE(scenario);
         LuaRuntime lua;
         const std::string output = std::string(TEST_BINARY_DIR) + "/booking-" + scenario + ".yaml";

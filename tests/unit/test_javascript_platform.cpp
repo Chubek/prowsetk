@@ -74,6 +74,9 @@ TEST(JavaScriptPlatform, RuntimeAdvertisesGlobalsAndAliases) {
     EXPECT_EQ(platform.value("typeof setTimeout"), "function");
     EXPECT_EQ(platform.value("window === self"), "true");
     EXPECT_EQ(platform.value("typeof navigator.userAgent"), "string");
+    EXPECT_EQ(platform.value("navigator.vendor"), "Google Inc.");
+    EXPECT_EQ(platform.value("typeof window.chrome"), "object");
+    EXPECT_EQ(platform.value("navigator.plugins.length > 0"), "true");
 }
 
 TEST(JavaScriptPlatform, DocumentQueriesAndTraversal) {

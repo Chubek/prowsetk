@@ -29,7 +29,9 @@ class FlatwormScriptHost;
 class LuaRuntime;
 
 struct BrowserConfig {
-    std::string user_agent = "ProwseTk/0.1";
+    std::string user_agent =
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
     bool javascript = true;
     bool follow_redirects = true;
     int max_redirects = 10;

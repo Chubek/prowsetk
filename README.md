@@ -166,10 +166,13 @@ plain CSS selectors.
 When the vendored QuickJS-NG source is available, the core provides a
 persistent page-context JavaScript runtime with string globals, exception
 reporting, per-evaluation memory limits, and interrupt-based execution
-deadlines. Browser host bindings such as `console` and `fetch` remain
-unavailable until their Flatworm adapters are installed; runtime capability
-queries report that distinction instead of treating ECMAScript execution as
-full Web API support.
+deadlines. Flatworm installs a host-mediated web-platform shim over that
+runtime for page scripting, including `document`, timers, `location`,
+`fetch`, `XMLHttpRequest`, storage, cookies, `URL`, and `navigator`.
+The default browser identity is a configurable, Chrome-like Linux user agent
+and navigator surface so JavaScript-gated pages can progress far enough for
+automation, while capability queries still describe the implementation
+honestly rather than claiming full browser compatibility.
 
 ## Public C++ API
 
@@ -1718,29 +1721,30 @@ driver creates the parent directory. Postman collections are written beside it
 default. The driver reads `.env` first (`--dotenv PATH` selects another
 file), then targets `https://admin.booking.com/` and resolves
 `BOOKING_DOTCOM_USER` and `BOOKING_DOTCOM_PASS`, giving dotenv values
-precedence over existing process variables.
+precedence over existing process variables. `BOOKING_DOTCOM_AS_TOKEN` is
+optional and is forwarded only to the account-portal OAuth attempt when present.
 Dotenv supports assignments, `export`, comments, and single/double quotes,
 with common double-quote escapes. It never executes shell code or expands
 variables; loaded values stay local to the driver.
 
-The login workflow supports HTML POST forms, hidden fields, username-first
-flows, and bounded redirects. It sends the password once and requires an
-authenticated-page marker (logout/signout link or account menu). Override
-the marker with `--success_selector SELECTOR` for a known authenticated-only
-element. Form actions and redirects must remain on the configured HTTPS
-origin, or on Booking.com subdomains when the starting host is Booking.com.
+The login workflow first follows the Booking.com account-portal redirect and,
+when an `op_token` is exposed, uses ezlogin's OAuth endpoints. If the page has
+no OAuth token, it falls back to HTML POST forms, hidden fields, username-first
+flows, and bounded redirects. It sends the password only after the login-name
+step and requires an authenticated-page marker (logout/signout link or account
+menu). Override the marker with `--success_selector SELECTOR` for a known
+authenticated-only element. Form actions and redirects must remain on the
+configured HTTPS origin, or on Booking.com subdomains when the starting host is
+Booking.com.
 
 **Live compatibility limitation:** Flatworm enables QuickJS page scripting
 with a browser web platform (DOM bridge, `XMLHttpRequest`, `fetch`, timers,
 events, `location`, cookies, and web storage), so pages that mount their
 login form through those standard APIs render for scraping and pages are not
-misread as `<noscript>` fallbacks. The tested `admin.booking.com` response is
-still a large JavaScript account-portal shell whose bundle depends on layout,
-async chunk loading, and portal APIs beyond the current surface, so its form
-is not materialized. The live attempt therefore stops before sending
-credentials and writes no authenticated specification. This example does not
-yet establish working Booking.com authentication; it does not solve
-interactive challenges or MFA.
+misread as `<noscript>` fallbacks. The Booking.com account portal may still
+return human-verification, CAPTCHA, or MFA challenges. Those challenges are
+reported without writing an authenticated specification; this example does not
+solve interactive challenges or MFA.
 
 After confirmed login, the driver crawls same-origin admin pages up to
 `--max_depth` / `--max_pages`, imports at most 32 same-origin external scripts
