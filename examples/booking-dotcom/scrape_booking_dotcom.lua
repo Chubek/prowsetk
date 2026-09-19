@@ -50,6 +50,14 @@ assert(scrape2postman, 'booking-dotcom: cannot load scrape2postman plugin')
 local function fail(message) error('booking-dotcom: ' .. message, 0) end
 local function trim(s) return s:match('^%s*(.-)%s*$') end
 
+-- Creates the parent directory of a file path (POSIX mkdir -p). Best effort:
+-- io.open still reports the authoritative failure if the path is unusable.
+local function ensure_parent_dir(path)
+    local dir = path:match('^(.*)[/\\][^/\\]*$')
+    if not dir or dir == '' then return end
+    os.execute("mkdir -p '" .. dir:gsub("'", "'\\''") .. "'")
+end
+
 local function dotenv(path, required)
     local values = {}
     local file = io.open(path, 'r')
@@ -161,23 +169,52 @@ local function merge_endpoints(endpoint_arrays)
     return merged
 end
 
+local function redact_url(value)
+    if type(value) ~= 'string' then return value end
+    value = value:gsub("^(%a[%w+.-]*://)([^/?#]*)", function(prefix, authority)
+        return prefix .. authority:gsub("^.*@", "")
+    end)
+    for _, marker in ipairs({'token', 'secret', 'password', 'passwd', 'key', 'auth', 'session', 'csrf'}) do
+        value = value:gsub('([?&][^=&#]*' .. marker .. '[^=&#]*=)[^&#]*', '%1[REDACTED]')
+        value = value:gsub('([?&][^=&#]*' .. marker:upper() .. '[^=&#]*=)[^&#]*', '%1[REDACTED]')
+    end
+    return value
+end
+
+local function redact_endpoint_table(endpoints)
+    for _, ep in ipairs(endpoints) do
+        ep.url = redact_url(ep.url)
+        ep.source = redact_url(ep.source)
+        ep.final_url = redact_url(ep.final_url)
+        if ep.redirect_chain then
+            for i, hop in ipairs(ep.redirect_chain) do ep.redirect_chain[i] = redact_url(hop) end
+        end
+    end
+end
+
 function main(args)
     args = args or {}
     local offline = args.html ~= nil
     -- Load dotenv BEFORE resolving any credentials; offline runs do not read real secrets.
     local env = offline and {} or dotenv(args.dotenv or '.env', args.dotenv ~= nil)
+    local function home_booking_path(filename)
+        local home = os.getenv('HOME')
+        if not home or home == '' then fail('HOME is unset; supply --output') end
+        return home .. '/booking-dotcom/' .. filename
+    end
     local function setting(name)
-        local value = os.getenv(name) or env[name]
+        local value = env[name] or os.getenv(name)
         if not value or value == '' then fail('missing ' .. name) end
         return value
     end
-    local url = offline and 'https://booking.example/' or setting('BOOKING_DOTCOM_URL')
+    -- Dotenv is loaded before credentials are resolved. The live target is
+    -- intentionally fixed to the Booking.com admin portal.
+    local url = 'https://admin.booking.com/'
     local username = offline and '' or setting('BOOKING_DOTCOM_USER')
     local password = offline and '' or setting('BOOKING_DOTCOM_PASS')
-    if not url:match('^[%w+.-]+:') then url = 'https://' .. url end
     local root = origin(url)
     if not root or root:find('@', 1, true) then fail('a credential-free HTTPS URL is required') end
-    local output = args.output or '~/BookingDotcomAdminPanel.yaml'
+    local output = args.output or home_booking_path('BookingDotcomAdminPanel.yaml')
     if output:sub(1, 2) == '~/' then
         local home = os.getenv('HOME')
         if not home or home == '' then fail('HOME is unset; supply --output') end
@@ -260,9 +297,6 @@ function main(args)
     end
 
     local function login_requires_browser_js()
-        local text = (session:document():text() or ''):lower()
-        if text:find('please enable javascript', 1, true) or
-           text:find('enable javascript in your browser', 1, true) then return true end
         return #session:document():query_selector_all('html.no-js, noscript') > 0
     end
 
@@ -304,7 +338,36 @@ function main(args)
         return links
     end
 
-    -- Injects external scripts into document
+    local function script_like_url(value)
+        if type(value) ~= 'string' or value == '' then return false end
+        local lower = value:lower():gsub('[?#].*$', '')
+        if lower:match('%.m?js$') or lower:match('%.chunk%.js$') then return true end
+        if lower:find('/static/', 1, true) or lower:find('/assets/', 1, true) then
+            return lower:find('js', 1, true) ~= nil
+        end
+        return false
+    end
+
+    local function collect_script_references(text, base_url)
+        local refs = {}
+        if type(text) ~= 'string' or text == '' then return refs end
+        local seen = {}
+        local function add(raw)
+            if not script_like_url(raw) then return end
+            local ok, full = pcall(resolve, base_url, raw)
+            if ok and trusted(full) and not seen[full] then
+                seen[full] = true
+                refs[#refs + 1] = full
+            end
+        end
+        for quoted in text:gmatch('"([^"]+)"') do add(quoted:gsub('\\/', '/')) end
+        for quoted in text:gmatch("'([^']+)'") do add(quoted:gsub('\\/', '/')) end
+        for url in text:gmatch('https://[%w%._~:/%?#%[%]@!$&%(%)%*%+,;=%%%-]+') do add(url) end
+        for path in text:gmatch('/[%w%._~/%?#%[%]@!$&%(%)%*%+,;=%%%-]+%.m?js[%w%._~/%?#%[%]@!$&%(%)%*%+,;=%%%-]*') do add(path) end
+        return refs
+    end
+
+    -- Injects external scripts and same-origin lazy chunks into the document.
     local function inject_scripts(doc, page_url, max_scripts)
         local count, skipped, attempted, bytes = 0, 0, 0, 0
         local sources, seen = {}, {}
@@ -312,7 +375,10 @@ function main(args)
             local valid, target = pcall(resolve, page_url, script:attribute('src'))
             if valid then sources[#sources+1] = target else skipped = skipped + 1 end
         end
-        for _, source in ipairs(sources) do
+        local index = 1
+        while index <= #sources do
+            local source = sources[index]
+            index = index + 1
             if trusted(source) and not seen[source] and attempted < (max_scripts or 32) then
                 seen[source] = true
                 attempted = attempted + 1
@@ -324,15 +390,19 @@ function main(args)
                     script:set_text(body)
                     doc:root():append_child(script)
                     count = count + 1
+                    for _, ref in ipairs(collect_script_references(body, source)) do
+                        if not seen[ref] then sources[#sources + 1] = ref end
+                    end
                 else skipped = skipped + 1 end
             else skipped = skipped + 1 end
         end
         return count, skipped
     end
 
-    -- Scrapes a single page
-    local function scrape_page(doc, opts)
-        local result = scrape2oapi.scrape(doc, opts)
+    -- Scrapes a single page and optionally resolves JSON API chains through
+    -- the authenticated session.
+    local function scrape_page(target, opts)
+        local result = scrape2oapi.scrape(target, opts)
         return result.endpoints
     end
 
@@ -343,10 +413,10 @@ function main(args)
 
         if offline then
             session:load_html(args.html, url)
-            -- In offline mode, just scrape the provided HTML without crawling
+            -- In offline mode, just scrape the provided HTML without crawling.
+            -- No script injection: offline runs never touch the network.
             stage = 'scraping offline page'
             local doc = session:document()
-            local script_count, skipped = inject_scripts(doc, url, 32)
             local page_endpoints = scrape_page(doc, {
                 require_api_pattern = false,
                 scrape_all_paths = true,
@@ -355,6 +425,7 @@ function main(args)
                 redact_secrets = true,
                 include_provenance = true,
                 minimum_confidence = 0,
+                resolve_chain = false,
                 output = ''
             })
             all_endpoints[#all_endpoints + 1] = page_endpoints
@@ -370,7 +441,8 @@ function main(args)
                     password = password,
                     username_field = 'username',
                     password_field = 'password',
-                    csrf_field = '_csrf'
+                    csrf_field = '_csrf',
+                    trusted = trusted
                 })
             end)
             if not auth_ok then
@@ -421,7 +493,9 @@ function main(args)
                 local script_count, skipped = inject_scripts(doc, current_url, 32)
 
                 -- Scrape endpoints from this page
-                local page_endpoints = scrape_page(doc, {
+                local page_endpoints = scrape_page(session, {
+                    url = current_url,
+                    base_url = current_url,
                     require_api_pattern = false,
                     scrape_all_paths = true,
                     follow_links = true,
@@ -429,6 +503,13 @@ function main(args)
                     redact_secrets = true,
                     include_provenance = true,
                     minimum_confidence = 0,
+                    api_patterns = {'/api', '/graphql', '/dml', '/json', '/xml', '/ajax',
+                        '/gateway', '/service', '/backend', '/bff', '/rpc', '/v1', '/v2',
+                        '/v3', '/internal', '/data'},
+                    resolve_chain = true,
+                    follow_json_links = true,
+                    max_depth = tonumber(args.max_api_depth) or max_depth,
+                    max_resolve_requests = tonumber(args.max_api_requests) or 128,
                     output = ''
                 })
                 all_endpoints[#all_endpoints + 1] = page_endpoints
@@ -454,6 +535,7 @@ function main(args)
 
         -- Merge all endpoints
         local merged = merge_endpoints(all_endpoints)
+        redact_endpoint_table(merged)
 
         -- Render OpenAPI YAML using core renderer via lprowsext if available
         local yaml
@@ -486,21 +568,23 @@ function main(args)
 
         -- Write OpenAPI YAML
         stage = 'writing OpenAPI'
+        ensure_parent_dir(output)
         local file = io.open(output, 'w')
-        if not file then fail('cannot open output; parent directory must exist') end
+        if not file then fail('cannot open output for writing') end
         file:write(yaml)
         file:close()
 
         -- Render and write Postman JSON
         stage = 'writing Postman'
         local postman_spec = {
-            collection_name = 'Booking.com Admin API',
+            collection_name = 'Discovered API - Booking.com Admin',
             redact_secrets = true,
             include_provenance = true
         }
         local postman_json = scrape2postman.render_postman_json(merged, postman_spec)
+        ensure_parent_dir(postman_output)
         file = io.open(postman_output, 'w')
-        if not file then fail('cannot open Postman output') end
+        if not file then fail('cannot open Postman output for writing') end
         file:write(postman_json)
         file:close()
 

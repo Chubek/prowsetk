@@ -42,10 +42,12 @@ TEST(Capability, ToStringIsStable) {
 
 TEST(WebPlatform, DocumentsApiSurface) {
     const auto platform = default_web_platform();
-    // The C++ DOM engine is a real capability; the JavaScript fetch host
-    // binding is not installed and must not be advertised.
+    // The C++ DOM engine and the JavaScript fetch host binding are both real
+    // capabilities now; pixel rendering and WebGL remain absent.
     EXPECT_TRUE(platform.supports("dom"));
-    EXPECT_FALSE(platform.supports("fetch"));
+    EXPECT_TRUE(platform.supports("fetch"));
+    EXPECT_NE(platform.classification("fetch"),
+              ImplementationClass::FullyImplemented);
     EXPECT_FALSE(platform.supports("WebGL"));
     EXPECT_EQ(platform.classification("canvas"),
               ImplementationClass::DummyImplementation);

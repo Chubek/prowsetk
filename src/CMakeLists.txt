@@ -8,6 +8,7 @@ set(PROWSETK_CORE_SOURCES
     core/redaction.cpp
     core/storage.cpp
     core/network_client.cpp
+    core/flatworm_host.cpp
     core/javascript_runtime.cpp
     core/quickjs_runtime.cpp
     core/web_platform.cpp

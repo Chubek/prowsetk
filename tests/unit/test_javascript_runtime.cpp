@@ -58,7 +58,7 @@ TEST(JavaScriptRuntime, RejectsInvalidResourceLimits) {
     EXPECT_FALSE(runtime->evaluate("1", options).ok);
 }
 
-TEST(JavaScriptRuntime, AdvertisesOnlyInstalledHostBindings) {
+TEST(JavaScriptRuntime, AdvertisesInstalledWebPlatformBindings) {
     auto runtime = prowsetk::make_javascript_runtime();
     const auto capabilities = runtime->capabilities();
     if (runtime->name() == "null") {
@@ -66,9 +66,14 @@ TEST(JavaScriptRuntime, AdvertisesOnlyInstalledHostBindings) {
         return;
     }
     EXPECT_TRUE(capabilities.has("javascript"));
-    // console is installed and forwarded as events; fetch is not installed.
     EXPECT_TRUE(capabilities.has("console"));
-    EXPECT_FALSE(capabilities.has("fetch"));
+    // The web platform shim installs these page APIs over host-mediated
+    // primitives.
+    for (const char* api : {"dom", "eventtarget", "xmlhttprequest", "fetch",
+                            "timers", "storage", "url", "location",
+                            "navigator"}) {
+        EXPECT_TRUE(capabilities.has(api)) << api;
+    }
 }
 
 TEST(JavaScriptRuntime, ForwardsConsoleCallsToHandler) {

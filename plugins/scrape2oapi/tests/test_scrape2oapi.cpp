@@ -420,10 +420,13 @@ TEST(Scrape2OapiSession, HonorsResolutionRequestLimit) {
     browser.set_network_client(std::move(network));
     auto session = browser.create_session();
     session->load_html("<script>fetch('/api/one'); fetch('/api/two')</script>", "https://example.test/app");
+    // The engine executed both page-script fetches at load; the budget applies
+    // to the plugin's own JSON-chain resolution requests.
+    const auto page_requests = observed_network->requests().size();
     scrape::Scrape2OapiOptions options;
     options.resolve_chain = true;
     options.max_resolve_requests = 1;
     const auto result = scrape::scrape_from_session(*session, options);
-    EXPECT_EQ(observed_network->requests().size(), 1u);
+    EXPECT_EQ(observed_network->requests().size() - page_requests, 1u);
     EXPECT_EQ(result.resolved.size(), 2u);
 }

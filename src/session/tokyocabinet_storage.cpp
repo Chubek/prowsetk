@@ -226,19 +226,21 @@ public:
         BDBCUR* cur = tcbdbcurnew(bdb_);
         tcbdbcurfirst(cur);
         
-        const char* kbuf;
         int ksiz;
-        const char* vbuf;
         int vsiz;
         
-        while ((kbuf = static_cast<const char*>(tcbdbcurkey(cur, &ksiz))) != nullptr) {
-            vbuf = static_cast<const char*>(tcbdbcurval(cur, &vsiz));
+        // tcbdbcurkey/tcbdbcurval transfer ownership of malloc'd buffers;
+        // the guards free them on every exit path, including the continues.
+        while (std::unique_ptr<void, void (*)(void*)>
+                   kbuf{tcbdbcurkey(cur, &ksiz), tcfree}) {
+            std::unique_ptr<void, void (*)(void*)>
+                vbuf{tcbdbcurval(cur, &vsiz), tcfree};
             if (!vbuf) {
                 tcbdbcurnext(cur);
                 continue;
             }
             
-            Cookie cookie = deserialize_cookie(vbuf, vsiz);
+            Cookie cookie = deserialize_cookie(static_cast<const char*>(vbuf.get()), vsiz);
             if (cookie.name.empty()) {
                 tcbdbcurnext(cur);
                 continue;
@@ -301,15 +303,16 @@ public:
         BDBCUR* cur = tcbdbcurnew(bdb_);
         tcbdbcurfirst(cur);
         
-        const char* kbuf;
         int ksiz;
-        const char* vbuf;
         int vsiz;
         
-        while ((kbuf = static_cast<const char*>(tcbdbcurkey(cur, &ksiz))) != nullptr) {
-            vbuf = static_cast<const char*>(tcbdbcurval(cur, &vsiz));
+        while (std::unique_ptr<void, void (*)(void*)>
+                   kbuf{tcbdbcurkey(cur, &ksiz), tcfree}) {
+            static_cast<void>(kbuf);  // freed by the guard; only the value is decoded
+            std::unique_ptr<void, void (*)(void*)>
+                vbuf{tcbdbcurval(cur, &vsiz), tcfree};
             if (vbuf) {
-                Cookie cookie = deserialize_cookie(vbuf, vsiz);
+                Cookie cookie = deserialize_cookie(static_cast<const char*>(vbuf.get()), vsiz);
                 if (!expired(cookie)) {
                     result.push_back(std::move(cookie));
                 }
@@ -422,6 +425,8 @@ public:
         
         while ((kbuf = static_cast<const char*>(tcbdbcurkey(cur, &ksiz))) != nullptr) {
             result.emplace_back(kbuf, ksiz);
+            // tcbdbcurkey transfers ownership of the returned buffer.
+            tcfree(const_cast<char*>(kbuf));
             tcbdbcurnext(cur);
         }
         

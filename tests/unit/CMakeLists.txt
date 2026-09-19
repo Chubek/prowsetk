@@ -81,6 +81,12 @@ add_dependencies(prowsetk_unit_plugins prowsetk_test_plugin)
 prowsetk_gtest(prowsetk_unit_javascript "prowsetk.unit.javascript."
     "unit;javascript" test_javascript_runtime.cpp)
 
+prowsetk_gtest(prowsetk_unit_flatworm_host "prowsetk.unit.script_host."
+    "unit;document;javascript" test_flatworm_host.cpp)
+
+prowsetk_gtest(prowsetk_unit_javascript_platform "prowsetk.unit.javascript_platform."
+    "unit;javascript" test_javascript_platform.cpp)
+
 prowsetk_gtest(prowsetk_unit_web_platform "prowsetk.unit.web-platform."
     "unit;javascript" test_web_platform.cpp)
 

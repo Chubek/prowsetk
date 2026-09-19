@@ -21,8 +21,12 @@ local scrape2oapi = {
     _description = "Scrape internal APIs and dump OpenAPI YAML, optionally resolving chains"
 }
 
--- Default API pattern set. Callers may override via spec.api_patterns.
-local DEFAULT_PATTERNS = { "/api", "/v1", "/v2", "/v3", "/graphql", "/rest", "/internal", "/data" }
+-- Default API/backend pattern set. Callers may override via spec.api_patterns.
+local DEFAULT_PATTERNS = {
+    "/api", "/v1", "/v2", "/v3", "/graphql", "/rest", "/internal", "/data",
+    "/ajax", "/rpc", "/json", "/xml", "/gateway", "/service", "/backend", "/bff",
+    "/dml"
+}
 
 local function is_api_path(path, patterns)
     if path == nil or path == "" then return false end
@@ -32,7 +36,8 @@ local function is_api_path(path, patterns)
         if string.find(lower, string.lower(pat), 1, true) ~= nil then return true end
     end
     -- fallback markers from the core extractor
-    for _, m in ipairs({ "/api", "/v1", "/v2", "/v3", "/graphql", "/rest", "/rpc", ".json", "/data", "/internal" }) do
+    for _, m in ipairs({ "/api", "/v1", "/v2", "/v3", "/graphql", "/rest", "/rpc", ".json",
+        "/data", "/internal", "/ajax", "/gateway", "/service", "/backend", "/bff", "/dml" }) do
         if string.find(lower, m, 1, true) ~= nil then return true end
     end
     return false
@@ -72,6 +77,7 @@ local function normalize_spec(spec)
     opts.resolve_chain = spec.resolve_chain == true or spec.resolve == true
     opts.follow_json_links = spec.follow_json_links ~= false
     opts.max_resolve_requests = tonumber(spec.max_resolve_requests) or 64
+    opts.allow_cross_origin_resolve = spec.allow_cross_origin_resolve == true
     opts.output = spec.output or spec.out or ""
     return opts
 end
@@ -90,6 +96,51 @@ local function filter_api_endpoints(endpoints, spec)
     return filtered
 end
 
+local function url_origin(url)
+    return type(url) == "string" and url:match("^(https?://[^/?#]+)") or nil
+end
+
+local function resolve_url(base, ref)
+    if type(ref) ~= "string" or ref == "" then return nil end
+    if ref:match("^https?://") then return ref end
+    local root = url_origin(base)
+    if not root then return nil end
+    if ref:sub(1, 2) == "//" then return root:match("^(https?)") .. ":" .. ref end
+    if ref:match("^[%w+.-]+:") then return nil end
+    if ref:sub(1, 1) == "/" then return root .. ref end
+    local clean_base = base:gsub("[?#].*$", "")
+    local dir = clean_base:match("^(.*/)[^/]*$") or (root .. "/")
+    local joined = dir .. ref
+    local prefix = root .. "/"
+    local suffix = joined:sub(#prefix + 1)
+    local parts = {}
+    for part in suffix:gmatch("[^/]+") do
+        if part == ".." then
+            table.remove(parts)
+        elseif part ~= "." and part ~= "" then
+            parts[#parts + 1] = part
+        end
+    end
+    return prefix .. table.concat(parts, "/")
+end
+
+local function same_origin(a, b)
+    local oa, ob = url_origin(a), url_origin(b)
+    return oa ~= nil and ob ~= nil and oa:lower() == ob:lower()
+end
+
+local function json_unescape(value)
+    return (value:gsub("\\u(%x%x%x%x)", function(hex)
+            local code = tonumber(hex, 16)
+            if code and code < 128 then return string.char(code) end
+            return ""
+        end)
+        :gsub("\\([\\\"/bfnrt])", {
+            ["\\"] = "\\", ['"'] = '"', ["/"] = "/",
+            b = "\b", f = "\f", n = "\n", r = "\r", t = "\t"
+        }))
+end
+
 -- Resolves chain by issuing session:request for each endpoint. Host-mediated;
 -- respects the session's cookie jar and redirect policy. Deduplicated by URL.
 local function resolve_chain(session, endpoints, spec)
@@ -102,27 +153,64 @@ local function resolve_chain(session, endpoints, spec)
     local max = spec.max_resolve_requests or 64
     local count = 0
     local queue = {}
-    for _, ep in ipairs(endpoints) do queue[#queue + 1] = { ep = ep, depth = 0 } end
+    for _, ep in ipairs(endpoints) do
+        local clone = shallow_copy(ep)
+        clone.url = resolve_url(clone.source or spec.url or spec.base_url, clone.url) or clone.url
+        queue[#queue + 1] = { ep = clone, depth = 0 }
+    end
 
-    local function api_in_body(body)
+    local function api_in_body(body, base_url)
         if type(body) ~= "string" or #body == 0 then return {} end
-        local found = {}
-        -- naive scan for quoted API-like strings
-        for quoted in string.gmatch(body, "\"([^\"]+)\"") do
-            if is_api_path(quoted, spec.api_patterns) then
-                if string.sub(quoted, 1, 1) == "/" or string.match(quoted, "^https?://") then
-                    found[#found + 1] = quoted
-                end
+        local found, seen = {}, {}
+        local function add(candidate)
+            candidate = json_unescape(candidate)
+            if not is_api_path(candidate, spec.api_patterns) then return end
+            local resolved_url = resolve_url(base_url, candidate)
+            if not resolved_url then return end
+            if spec.allow_cross_origin_resolve ~= true and not same_origin(base_url, resolved_url) then return end
+            if not seen[resolved_url] then
+                seen[resolved_url] = true
+                found[#found + 1] = resolved_url
             end
         end
-        for quoted in string.gmatch(body, "'([^']+)'") do
-            if is_api_path(quoted, spec.api_patterns) then
-                if string.sub(quoted, 1, 1) == "/" or string.match(quoted, "^https?://") then
-                    found[#found + 1] = quoted
-                end
-            end
-        end
+        for quoted in body:gmatch('"([^"]+)"') do add(quoted) end
+        for quoted in body:gmatch("'([^']+)'") do add(quoted) end
+        for url in body:gmatch("https?://[%w%._~:/%?#%[%]@!$&%(%)%*%+,;=%%%-]+") do add(url) end
+        for path in body:gmatch("/[%w%._~/%?#%[%]@!$&%(%)%*%+,;=%%%-]+") do add(path) end
         return found
+    end
+
+    local function header(headers, name)
+        for key, value in pairs(headers or {}) do
+            if key:lower() == name then return value end
+        end
+    end
+
+    local function enqueue_discovered(parent, urls, depth)
+        for _, url in ipairs(urls) do
+            if not visited[url] then
+                local path = url:match("https?://[^/]+([^?#]*)") or url:match("([^?#]+)") or url
+                local found = false
+                for _, item in ipairs(queue) do
+                    if item.ep.url == url then found = true; break end
+                end
+                if not found then
+                    queue[#queue + 1] = {
+                        ep = {
+                            url = url,
+                            path = path,
+                            method = "get",
+                            source = parent.final_url or parent.url,
+                            discovery_method = "resolved-json",
+                            confidence = 0.60,
+                            parameters = {},
+                            notes = { "discovered in JSON response body" }
+                        },
+                        depth = depth
+                    }
+                end
+            end
+        end
     end
 
     while #queue > 0 and count < max do
@@ -136,33 +224,22 @@ local function resolve_chain(session, endpoints, spec)
             ep.status = resp.status
             ep.redirect_chain = resp.redirect_chain
             ep.body = resp.body
-            if resp.headers ~= nil and resp.headers["Content-Type"] ~= nil then
-                ep.response_content_type = resp.headers["Content-Type"]
-            end
+            ep.response_content_type = header(resp.headers, "content-type") or ep.response_content_type
             resolved[#resolved + 1] = ep
             count = count + 1
             if spec.follow_json_links ~= false and item.depth < (spec.max_depth or 2) then
-                local ct = (resp.headers and resp.headers["Content-Type"]) or ""
-                local is_json = string.find(string.lower(ct), "json", 1, true) ~= nil
-                if not is_json and type(resp.body) == "string" and #resp.body > 0 and string.sub(resp.body, 1, 1) == "{" then
-                    is_json = true
+                local ct = header(resp.headers, "content-type") or ""
+                local lower_ct = string.lower(ct)
+                local scan_text = string.find(lower_ct, "json", 1, true) ~= nil
+                    or string.find(lower_ct, "javascript", 1, true) ~= nil
+                    or string.find(lower_ct, "text/", 1, true) ~= nil
+                    or string.find(lower_ct, "html", 1, true) ~= nil
+                if not scan_text and type(resp.body) == "string" and #resp.body > 0 then
+                    local first = resp.body:match("^%s*(.)")
+                    scan_text = first == "{" or first == "[" or first == "<"
                 end
-                if is_json then
-                    for _, url in ipairs(api_in_body(resp.body)) do
-                        if not visited[url] then
-                            local ne = {
-                                url = url,
-                                path = url:match("https?://[^/]+([^?#]*)") or url:match("([^?#]+)") or url,
-                                method = "get",
-                                source = ep.final_url or ep.url,
-                                discovery_method = "resolved-json",
-                                confidence = 0.60,
-                                parameters = {},
-                                notes = { "discovered in JSON response body" }
-                            }
-                            queue[#queue + 1] = { ep = ne, depth = item.depth + 1 }
-                        end
-                    end
+                if scan_text then
+                    enqueue_discovered(ep, api_in_body(resp.body, ep.final_url or ep.url), item.depth + 1)
                 end
             end
         else
@@ -266,9 +343,10 @@ function scrape2oapi.scrape(session_or_document, spec)
         return true
     end
 
-    -- Build a filtered YAML if filtering removed endpoints.
+    -- Build YAML from the effective endpoint table whenever filtering or
+    -- recursive resolution changed the native extractor result.
     local yaml = result:openapi_yaml()
-    if #filtered ~= #endpoints then
+    if opts.resolve_chain or #filtered ~= #endpoints or #resolved ~= #endpoints then
         -- Re-render filtered paths by stripping non-API sections from YAML.
         -- Simple heuristic: keep header and only filtered paths.
         -- For correctness we ask the C++ layer to re-render when available via

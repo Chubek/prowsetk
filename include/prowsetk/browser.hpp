@@ -25,6 +25,7 @@ namespace prowsetk {
 
 class Session;
 class JavaScriptRuntime;
+class FlatwormScriptHost;
 class LuaRuntime;
 
 struct BrowserConfig {
@@ -96,7 +97,7 @@ private:
 
 // Represents an isolated browsing context: URL, cookies, storage, headers, and
 // the currently loaded document.
-class Session : private DocumentScriptHost {
+class Session {
 public:
     ~Session();
 
@@ -157,10 +158,18 @@ private:
     // Emits `event` through the browser dispatcher, stamped with this
     // session's id so Lua `session:on` subscriptions stay scoped.
     void emit_event(Event event);
-    std::string document_element_class_name() const override;
-    void set_document_element_class_name(std::string_view value) override;
-    std::string document_url() const override;
+    std::string document_element_class_name() const;
+    void set_document_element_class_name(std::string_view value);
 
+    // Runs the page lifecycle (DOMContentLoaded/load, timers, async script
+    // callbacks) to a bounded quiescence after the document's scripts.
+    void run_script_lifecycle();
+
+    // Performs script-initiated navigations (location, link clicks, form
+    // submits) recorded by the document host after a navigation completes.
+    void follow_script_navigations();
+
+    std::unique_ptr<FlatwormScriptHost> script_host_;
     Browser* browser_;
     SessionConfig config_;
     std::string id_;

@@ -1175,6 +1175,19 @@ The JavaScript environment may provide APIs such as:
 
 The exact API surface is documented by capability level.
 
+The page API is delivered by the **Flatworm web platform shim**: a JavaScript
+bootstrap installed on the QuickJS global over a small set of host-mediated
+primitives (`DocumentScriptHost`). DOM access is handle-based — page script
+never sees engine internals — and every network call an `XMLHttpRequest`,
+`fetch`, `navigator.sendBeacon`, or a `<script src>` load makes runs through
+the owning `Session`, so cookies, redirects, events, plugins, and redaction
+apply exactly as they do for navigations. Timers and lifecycle events
+(`DOMContentLoaded`, `load`) are drained in bounded flush passes after a
+document's scripts; script-initiated navigation (`location` assignment, link
+clicks, form submits) is performed after the current script pass and is
+hop-bounded. Restrictions are reported honestly via capabilities: no layout,
+no progress events, no streaming response bodies, no CORS enforcement.
+
 Lua does not replace JavaScript as the page scripting language:
 
 - **JavaScript** executes inside the web page context.
@@ -1690,7 +1703,8 @@ This keeps drivers deterministic and usable without a network.
 
 ### Booking.com example driver
 
-`examples/scrape_booking_dotcom.lua` uses the existing `plugins/scrape2oapi/`
+`examples/booking-dotcom/scrape_booking_dotcom.lua` uses the existing
+`plugins/scrape2oapi/`
 Lua plugin to write OpenAPI 3.1 YAML. From the repository root:
 
 ```sh
@@ -1698,11 +1712,13 @@ build/default/src/cli/prowsetk run booking-dotcom \
   --config examples/booking_dotcom.toml --output build/booking.yaml
 ```
 
-Omit `--output` to use `~/BookingDotcomAdminPanel.yaml`. The parent directory
-must exist. The driver reads `.env` first (`--dotenv PATH` selects another
-file), then resolves `BOOKING_DOTCOM_URL`, `BOOKING_DOTCOM_USER`, and
-`BOOKING_DOTCOM_PASS`, giving existing process variables precedence. Set the
-URL to `https://admin.booking.com`; bare hostnames acquire an HTTPS scheme.
+Omit `--output` to use `$HOME/booking-dotcom/BookingDotcomAdminPanel.yaml`; the
+driver creates the parent directory. Postman collections are written beside it
+(`--postman PATH` overrides), so both artifacts land in `$HOME/booking-dotcom` by
+default. The driver reads `.env` first (`--dotenv PATH` selects another
+file), then targets `https://admin.booking.com/` and resolves
+`BOOKING_DOTCOM_USER` and `BOOKING_DOTCOM_PASS`, giving dotenv values
+precedence over existing process variables.
 Dotenv supports assignments, `export`, comments, and single/double quotes,
 with common double-quote escapes. It never executes shell code or expands
 variables; loaded values stay local to the driver.
@@ -1714,25 +1730,31 @@ the marker with `--success_selector SELECTOR` for a known authenticated-only
 element. Form actions and redirects must remain on the configured HTTPS
 origin, or on Booking.com subdomains when the starting host is Booking.com.
 
-**Live compatibility limitation:** Flatworm enables QuickJS page scripting and
-provides a minimal browser DOM bridge for common JavaScript-enabled-page
-checks such as `document.documentElement.className`, so ordinary `<noscript>`
-fallbacks are not treated as rendered page text when JavaScript runs. The
-tested `admin.booking.com` response is still a JavaScript account-portal shell
-with no form/input elements and portal APIs that exceed the current DOM/fetch
-surface. The live attempt therefore stops before sending credentials and writes
-no authenticated specification. This example does not yet establish working
-Booking.com authentication; it does not solve interactive challenges or MFA.
+**Live compatibility limitation:** Flatworm enables QuickJS page scripting
+with a browser web platform (DOM bridge, `XMLHttpRequest`, `fetch`, timers,
+events, `location`, cookies, and web storage), so pages that mount their
+login form through those standard APIs render for scraping and pages are not
+misread as `<noscript>` fallbacks. The tested `admin.booking.com` response is
+still a large JavaScript account-portal shell whose bundle depends on layout,
+async chunk loading, and portal APIs beyond the current surface, so its form
+is not materialized. The live attempt therefore stops before sending
+credentials and writes no authenticated specification. This example does not
+yet establish working Booking.com authentication; it does not solve
+interactive challenges or MFA.
 
-After confirmed login, the driver inspects the current page plus at most 32
-same-origin external script requests without calling discovered API endpoints.
-Script inspection is capped at 2 MiB per script and 16 MiB total. It forwards
-`scrape_all_paths=true` through the Lua plugin and
-extractor, so ordinary links/resources are included alongside API patterns,
-forms, and literal fetch/XHR calls. Imported scripts are analyzed in the page
-context. Provenance/confidence and redaction are retained; output explicitly
-marks `complete: false`. Dynamic URLs, lazy chunks, other pages, and unobserved
-requests remain outside this static discovery scope.
+After confirmed login, the driver crawls same-origin admin pages up to
+`--max_depth` / `--max_pages`, imports at most 32 same-origin external scripts
+per page, and then resolves discovered API endpoints through the authenticated
+session. JSON API responses are scanned for additional same-origin API-looking
+links and followed recursively up to `--max_api_depth` and
+`--max_api_requests`; the OpenAPI and Postman outputs both include those
+recursively discovered endpoints. Script inspection is capped at 2 MiB per
+script and 16 MiB total. It forwards `scrape_all_paths=true` through the Lua
+plugin and extractor, so ordinary links/resources are included alongside API
+patterns, forms, and literal fetch/XHR calls. Imported scripts are analyzed in
+the page context. Provenance/confidence and redaction are retained; output
+explicitly marks `complete: false`. Dynamic URLs, lazy chunks, and unobserved
+requests remain outside this heuristic discovery scope.
 
 For a hermetic extraction without reading credentials or claiming login:
 

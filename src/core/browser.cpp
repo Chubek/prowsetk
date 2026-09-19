@@ -9,6 +9,7 @@
 #include <sstream>
 
 #include "prowsetk/error.hpp"
+#include "prowsetk/flatworm_host.hpp"
 #include "prowsetk/javascript_runtime.hpp"
 #include "prowsetk/lua_runtime.hpp"
 #include "prowsetk/url.hpp"
@@ -325,9 +326,67 @@ void Browser::handle_unsupported_api(std::string_view name,
 
 Session::Session(Browser* browser, SessionConfig config, std::string id)
     : browser_(browser), config_(std::move(config)), id_(std::move(id)) {
+    script_host_ = std::make_unique<FlatwormScriptHost>();
+    script_host_->set_request_hook([this](const HostRequest& host_request) {
+        HostResponse out;
+        try {
+            HttpRequest request;
+            request.method = host_request.method;
+            request.url = host_request.url;
+            request.headers = host_request.headers;
+            request.body = host_request.body;
+            const HttpResponse response =
+                this->request(std::move(request));
+            out.status = response.status;
+            out.headers = response.headers;
+            out.body = response.body;
+            out.final_url = response.final_url;
+            out.ok = true;
+        } catch (const std::exception& error) {
+            out.error = error.what();
+        }
+        return out;
+    });
+    script_host_->set_cookie_hooks(
+        [this]() -> std::string {
+            if (document_ == nullptr) return {};
+            try {
+                return browser_->storage().cookies().cookie_header(
+                    parse_url(document_->url()));
+            } catch (const std::exception&) {
+                return {};
+            }
+        },
+        [this](std::string_view cookie) {
+            if (document_ == nullptr) return;
+            try {
+                const Url origin = parse_url(document_->url());
+                const auto parsed = parse_set_cookie(cookie, origin);
+                if (!parsed.has_value()) return;
+                browser_->storage().cookies().set(origin, *parsed);
+                Event event;
+                event.type = EventType::CookieChange;
+                event.url = origin.to_string();
+                event.name = parsed->name;
+                emit_event(event);
+            } catch (const std::exception&) {
+                // A malformed document.cookie write is ignored, like in browsers.
+            }
+        });
+    script_host_->set_storage_hook(
+        [this](std::string_view area) -> KeyValueStore* {
+            return area == "session" ? &session_storage() : &local_storage();
+        });
+    script_host_->set_navigator_hook([this]() {
+        NavigatorInfo info;
+        info.user_agent = browser_->config().user_agent;
+        info.platform = "Linux x86_64";
+        info.language = "en-US";
+        return info;
+    });
     if (browser_->config().javascript) {
         javascript_ = browser_->create_javascript_runtime();
-        javascript_->set_document_host(this);
+        javascript_->set_document_host(script_host_.get());
         javascript_->set_console_handler([this](const ConsoleMessage& message) {
             Event event;
             event.type = EventType::Console;
@@ -378,32 +437,63 @@ void Session::report_anti_bot_detection(const AntiBotDetection& detection) {
 }
 
 std::string Session::document_element_class_name() const {
-    if (document_ == nullptr) {
-        return {};
-    }
-    auto document_element = document_->query_selector("html");
-    if (document_element == nullptr) {
-        document_element = document_->root();
-    }
-    return document_element != nullptr ? document_element->class_name()
-                                       : std::string();
+    return script_host_ != nullptr ? script_host_->document_element_class_name()
+                                   : std::string{};
 }
 
 void Session::set_document_element_class_name(std::string_view value) {
-    if (document_ == nullptr) {
-        return;
-    }
-    auto document_element = document_->query_selector("html");
-    if (document_element == nullptr) {
-        document_element = document_->root();
-    }
-    if (document_element != nullptr) {
-        document_element->set_attribute("class", value);
+    if (script_host_ != nullptr) {
+        script_host_->set_document_element_class_name(value);
     }
 }
 
-std::string Session::document_url() const {
-    return current_url_;
+void Session::run_script_lifecycle() {
+    if (javascript_ == nullptr || script_host_ == nullptr) {
+        return;
+    }
+    // Drains DOMContentLoaded/load listeners, due timers, and async script
+    // callbacks in bounded passes so a page never hangs document install.
+    for (int pass = 0; pass < 16; ++pass) {
+        const ScriptResult flushed =
+            javascript_->evaluate("__prowsetkFlush();");
+        if (!flushed.ok || flushed.value == "0") {
+            break;
+        }
+    }
+}
+
+void Session::follow_script_navigations() {
+    if (script_host_ == nullptr) {
+        return;
+    }
+    PendingNavigation navigation;
+    for (int hop = 0;
+         hop < browser_->config().max_redirects &&
+         script_host_->consume_pending_navigation(navigation);
+         ++hop) {
+        if (navigation.url.empty()) {
+            continue;
+        }
+        try {
+            HttpRequest request;
+            request.method = navigation.method;
+            request.url = navigation.url;
+            request.body = navigation.body;
+            if (navigation.method == "POST" &&
+                header_value(request.headers, "Content-Type").empty()) {
+                request.headers.emplace_back("Content-Type",
+                                             "application/x-www-form-urlencoded");
+            }
+            const HttpResponse response = this->request(std::move(request));
+            if (response.status >= 400) {
+                break;
+            }
+            install_document(response.body, response.final_url,
+                             response.final_url);
+        } catch (const std::exception&) {
+            break;
+        }
+    }
 }
 
 HttpRequest Session::build_request(std::string_view url) {
@@ -542,18 +632,25 @@ void Session::navigate(std::string_view url) {
     }
     install_document(response.body, response.final_url,
                      response.final_url);
+    follow_script_navigations();
+    std::string landed_url = current_url_;
 
     Event after;
     after.type = EventType::AfterNavigation;
-    after.url = response.final_url;
+    after.url = landed_url;
     after.attributes["status"] = std::to_string(response.status);
     emit_event(after);
 }
 
 void Session::install_document(std::string_view html, std::string url,
                                std::string base_url) {
+    std::string previous_url = std::move(current_url_);
     document_ = parse_html(html, std::move(url), std::move(base_url));
     current_url_ = document_->url();
+    if (script_host_ != nullptr) {
+        script_host_->install(document_, document_->base_url());
+        script_host_->set_referrer(std::move(previous_url));
+    }
     document_->set_mutation_listener([this](const flatworm::MutationInfo& info) {
         Event event;
         event.type = EventType::DomMutation;
@@ -593,6 +690,32 @@ void Session::install_document(std::string_view html, std::string url,
         browser_->handle_unsupported_api(
             "javascript", "page scripts were not executed: no JavaScript engine");
         return;
+    }
+    std::string class_name = document_element_class_name();
+    if (!class_name.empty()) {
+        std::istringstream stream(class_name);
+        std::string token;
+        std::string updated;
+        bool has_js = false;
+        while (stream >> token) {
+            if (token == "no-js") {
+                continue;
+            }
+            if (token == "js") {
+                has_js = true;
+            }
+            if (!updated.empty()) {
+                updated += ' ';
+            }
+            updated += token;
+        }
+        if (!has_js) {
+            if (!updated.empty()) {
+                updated += ' ';
+            }
+            updated += "js";
+        }
+        set_document_element_class_name(updated);
     }
     for (const auto& noscript : document_->query_selector_all("noscript")) {
         auto parent = noscript->parent();
@@ -635,6 +758,7 @@ void Session::install_document(std::string_view html, std::string url,
         }
         emit_event(end);
     }
+    run_script_lifecycle();
 }
 
 void Session::load_html(std::string_view html, std::string_view base_url) {
@@ -644,6 +768,12 @@ void Session::load_html(std::string_view html, std::string_view base_url) {
     const std::string base =
         base_url.empty() ? current_url_ : std::string(base_url);
     install_document(html, base, base);
+    // Offline document installs never navigate away (README "Drivers":
+    // deterministic offline runs).
+    PendingNavigation discarded;
+    while (script_host_ != nullptr &&
+           script_host_->consume_pending_navigation(discarded)) {
+    }
 }
 
 void Session::set_header(std::string name, std::string value) {

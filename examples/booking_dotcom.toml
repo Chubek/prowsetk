@@ -9,11 +9,13 @@ entrypoint = "main"
 enabled = true
 description = "Scrape admin.booking.com endpoints after authentication"
 arguments = [
-  { name = "output", type = "path", required = false, default = "~/BookingDotcomAdminPanel.yaml", description = "OpenAPI YAML output path" },
+  { name = "output", type = "path", required = false, description = "OpenAPI YAML output path; defaults to $HOME/booking-dotcom/BookingDotcomAdminPanel.yaml" },
   { name = "postman", type = "path", required = false, description = "Postman Collection JSON output path (derived from output if not specified)" },
-  { name = "dotenv", type = "path", required = false, description = "Path to .env file containing BOOKING_DOTCOM_URL, BOOKING_DOTCOM_USER, BOOKING_DOTCOM_PASS" },
+  { name = "dotenv", type = "path", required = false, description = "Path to .env file containing BOOKING_DOTCOM_USER and BOOKING_DOTCOM_PASS" },
   { name = "success_selector", type = "string", required = false, description = "CSS selector to detect successful authentication" },
   { name = "max_depth", type = "integer", required = false, default = "2", description = "Maximum crawl depth for recursive page scraping" },
   { name = "max_pages", type = "integer", required = false, default = "12", description = "Maximum number of pages to scrape" },
+  { name = "max_api_depth", type = "integer", required = false, default = "2", description = "Maximum recursive depth for JSON API endpoint resolution" },
+  { name = "max_api_requests", type = "integer", required = false, default = "128", description = "Maximum API endpoint requests made while resolving JSON chains" },
   { name = "html", type = "string", required = false, secret = false, description = "HTML content for offline testing (bypasses network and authentication)" }
 ]

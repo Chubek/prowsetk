@@ -20,7 +20,10 @@ TEST(PostmanIntegration, OfflineAndEmptySessionsDoNotRequestNetwork) {
     options.base_url = "https://example.test/";
     auto result = postman::scrape(*session, options);
     EXPECT_EQ(result.endpoints.size(), 1u);
-    EXPECT_TRUE(observed->requests().empty());
+    // Offline scraping never resolves JSON chains: the only network attempt is
+    // the page script's own fetch, executed by the engine at document load
+    // (and refused by the memory client, which has no response registered).
+    EXPECT_EQ(observed->requests().size(), 1u);
 }
 
 TEST(PostmanIntegration, ResolvesJsonLinksThroughSessionWithBudget) {
@@ -38,11 +41,14 @@ TEST(PostmanIntegration, ResolvesJsonLinksThroughSessionWithBudget) {
     browser.set_network_client(std::move(network));
     auto session = browser.create_session();
     session->load_html("<script>fetch('/api/start')</script>", "https://example.test/");
+    // The engine just executed the page script's own fetch; measure the
+    // plugin's resolution budget from this baseline.
+    const auto page_requests = observed->requests().size();
     postman::Scrape2PostmanOptions options;
     options.resolve_chain = true;
     options.max_resolve_requests = 2;
     auto result = postman::scrape_from_session(*session, options);
-    EXPECT_EQ(observed->requests().size(), 2u);
+    EXPECT_EQ(observed->requests().size() - page_requests, 2u);
     EXPECT_NE(result.postman_json.find("/api/next"), std::string::npos);
     EXPECT_EQ(result.postman_json.find("private-body"), std::string::npos);
     EXPECT_NE(result.postman_json.find("Observed HTTP status: 200"), std::string::npos);
@@ -136,6 +142,100 @@ TEST(PostmanIntegration, LuaRedactsAndSortsWithoutMutatingSpec) {
         assert(not postman.render_postman_json({a},spec):find("Source:",1,true))
         spec.redact_secrets = false
         assert(postman.render_postman_json({a},spec):find("private-token",1,true))
+    )LUA");
+    EXPECT_TRUE(result.ok) << lua.last_error();
+}
+
+TEST(PostmanIntegration, LuaPostmanRecursiveScrapeFollowsJsonLinks) {
+    if (!prowsetk::LuaRuntime::available()) GTEST_SKIP() << "Lua unavailable";
+    prowsetk::LuaRuntime lua;
+    ASSERT_TRUE(lua.run("package.path = '" PROWSETK_SOURCE_DIR "/?.lua;' .. package.path").ok);
+    const auto result = lua.run(R"LUA(
+        local postman = require("plugins.scrape2postman.lua.scrape2postman")
+        local browser = require("lprowse").browser.new()
+        local real = browser:create_session()
+        local calls = {}
+        local session = {}
+        function session:load_html(...) return real:load_html(...) end
+        function session:document() return real:document() end
+        function session:current_url() return real:current_url() end
+        function session:request(method, url)
+            calls[#calls + 1] = url
+            if url == "https://example.test/api/start" then
+                return {status=200, final_url=url, headers={["Content-Type"]="application/json"},
+                    body='{"next":"/api/next","gateway":"/gateway/rates"}'}
+            elseif url == "https://example.test/api/next" then
+                return {status=200, final_url=url, headers={["Content-Type"]="application/json"},
+                    body='{"ok":true}'}
+            elseif url == "https://example.test/gateway/rates" then
+                return {status=200, final_url=url, headers={["Content-Type"]="application/javascript"},
+                    body='fetch("/service/pricing")'}
+            elseif url == "https://example.test/service/pricing" then
+                return {status=200, final_url=url, headers={["Content-Type"]="application/json"},
+                    body='{"ok":true}'}
+            end
+            error("unexpected request " .. url)
+        end
+        local result = postman.scrape(session, {
+            html = '<script>fetch("/api/start")</script>',
+            base_url = "https://example.test/",
+            recursive = true,
+            max_depth = 2,
+            max_resolve_requests = 4
+        })
+        assert(#calls == 4, "expected recursive requests")
+        assert(result.endpoint_count == 4, "expected recursive endpoint")
+        assert(result.postman_json:find("/api/start", 1, true))
+        assert(result.postman_json:find("/api/next", 1, true))
+        assert(result.postman_json:find("/gateway/rates", 1, true))
+        assert(result.postman_json:find("/service/pricing", 1, true))
+    )LUA");
+    EXPECT_TRUE(result.ok) << lua.last_error();
+}
+
+TEST(PostmanIntegration, LuaOpenApiRecursiveYamlIncludesResolvedEndpointsWithoutFiltering) {
+    if (!prowsetk::LuaRuntime::available()) GTEST_SKIP() << "Lua unavailable";
+    prowsetk::LuaRuntime lua;
+    ASSERT_TRUE(lua.run("package.path = '" PROWSETK_SOURCE_DIR "/?.lua;' .. package.path").ok);
+    const auto result = lua.run(R"LUA(
+        local oapi = require("plugins.scrape2oapi.lua.scrape2oapi")
+        local browser = require("lprowse").browser.new()
+        local real = browser:create_session()
+        local session = {}
+        function session:load_html(...) return real:load_html(...) end
+        function session:document() return real:document() end
+        function session:current_url() return real:current_url() end
+        function session:request(method, url)
+            if url == "https://example.test/api/start" then
+                return {status=200, final_url=url, headers={["Content-Type"]="application/json"},
+                    body='{"next":"/api/next","gateway":"/gateway/rates"}'}
+            elseif url == "https://example.test/api/next" then
+                return {status=200, final_url=url, headers={["Content-Type"]="application/json"},
+                    body='{"ok":true}'}
+            elseif url == "https://example.test/gateway/rates" then
+                return {status=200, final_url=url, headers={["Content-Type"]="application/javascript"},
+                    body='fetch("/service/pricing")'}
+            elseif url == "https://example.test/service/pricing" then
+                return {status=200, final_url=url, headers={["Content-Type"]="application/json"},
+                    body='{"ok":true}'}
+            end
+            error("unexpected request " .. url)
+        end
+        local result = oapi.scrape(session, {
+            html = '<a href="/dashboard">Dashboard</a><script>fetch("/api/start")</script>',
+            base_url = "https://example.test/",
+            require_api_pattern = false,
+            scrape_all_paths = true,
+            resolve_chain = true,
+            follow_json_links = true,
+            max_depth = 2,
+            max_resolve_requests = 5
+        })
+        assert(result.endpoint_count == 5, "expected page endpoint plus recursive endpoints")
+        assert(result.openapi_yaml:find("/api/start", 1, true), "missing initial API endpoint")
+        assert(result.openapi_yaml:find("/api/next", 1, true), "missing recursive API endpoint")
+        assert(result.openapi_yaml:find("/gateway/rates", 1, true), "missing recursive gateway endpoint")
+        assert(result.openapi_yaml:find("/service/pricing", 1, true), "missing recursive service endpoint")
     )LUA");
     EXPECT_TRUE(result.ok) << lua.last_error();
 }

@@ -5,6 +5,7 @@ local browser = prowse.browser.new({javascript=true})
 local dom_session = browser:create_session()
 local calls = {}
 local closed = false
+local authenticated = false
 
 -- Login page HTML
 local login = [[<form method="post" action="/auth"><input name="_csrf" type="hidden" value="fixture-csrf">
@@ -35,17 +36,23 @@ function wrapper:load_html(...) return dom_session:load_html(...) end
 function wrapper:document() return dom_session:document() end
 function wrapper:current_url() return dom_session:current_url() end
 function wrapper:close() closed = true; dom_session:close() end
+function wrapper:set_header(name, value)
+    if name == 'Cookie' and value and value:find('session=fixture%-session%-token') then
+        authenticated = true
+    end
+end
 
 function wrapper:request(method, url, options)
     options = options or {}
     calls[#calls+1] = {method=method, url=url, body=options.body}
     
-    if url == 'https://booking.example/' then
+    if url == 'https://admin.booking.com/' then
+        if authenticated then return {status=200, body=dashboard, headers={}} end
         return {status=200, body=login, headers={}}
-    elseif url == 'https://booking.example/identify' then
+    elseif url == 'https://admin.booking.com/identify' then
         assert(options.body == 'username=fixture%40example.com')
         return {status=200, body=[[<form method="post" action="/auth"><input type="password" name="password"></form>]], headers={}}
-    elseif url == 'https://booking.example/auth' then
+    elseif url == 'https://admin.booking.com/auth' then
         assert(method == 'POST')
         assert(options.body:find('password=fixture%23pass%26word', 1, true))
         if scenario ~= 'two-step' then
@@ -57,17 +64,35 @@ function wrapper:request(method, url, options)
             return {status=307, body='', headers={Location='https://untrusted.example/auth'}}
         end
         return {status=303, body='', headers={Location='/dashboard', ['Set-Cookie']='session=fixture-session-token; Path=/; HttpOnly'}}
-    elseif url == 'https://booking.example/dashboard' then
-        assert(method == 'GET' and options.body == '')
+    elseif url == 'https://admin.booking.com/dashboard' then
+        assert(method == 'GET' and (options.body == nil or options.body == ''))
         return {status=200, body=dashboard, headers={}}
-    elseif url == 'https://booking.example/app.js' then
-        return {status=200, body=[[fetch('/api/external')]], headers={}}
-    elseif url == 'https://booking.example/reservations' then
+    elseif url == 'https://admin.booking.com/app.js' then
+        return {status=200, body=[[fetch('/api/external'); import('/static/chunk.js')]], headers={['Content-Type']='application/javascript'}}
+    elseif url == 'https://admin.booking.com/static/chunk.js' then
+        return {status=200, body=[[fetch('/gateway/rates')]], headers={['Content-Type']='application/javascript'}}
+    elseif url == 'https://admin.booking.com/reservations' then
         -- For recursive crawl - only reached in success/two-step scenarios
         return {status=200, body=reservations, headers={}}
-    elseif url == 'https://booking.example/api/bookings' then
+    elseif url == 'https://admin.booking.com/api/hotels?token=fixture-token' then
+        return {status=200, body='{"hotels":[],"next":"/api/hotel-details"}', headers={['Content-Type']='application/json'}}
+    elseif url == 'https://admin.booking.com/api/inline' then
+        return {status=200, body='{"inline":true}', headers={['Content-Type']='application/json'}}
+    elseif url == 'https://admin.booking.com/api/external' then
+        return {status=200, body='{"external":true}', headers={['Content-Type']='application/json'}}
+    elseif url == 'https://admin.booking.com/api/bookings' then
         -- Endpoint referenced in reservations page script
-        return {status=200, body='{"bookings":[]}', headers={['Content-Type']='application/json'}}
+        return {status=200, body='{"bookings":[],"next":"/api/bookings/details","related":["/api/availability"]}', headers={['Content-Type']='application/json'}}
+    elseif url == 'https://admin.booking.com/api/hotel-details' then
+        return {status=200, body='{"details":[]}', headers={['Content-Type']='application/json'}}
+    elseif url == 'https://admin.booking.com/api/bookings/details' then
+        return {status=200, body='{"details":[]}', headers={['Content-Type']='application/json'}}
+    elseif url == 'https://admin.booking.com/api/availability' then
+        return {status=200, body='{"availability":[]}', headers={['Content-Type']='application/json'}}
+    elseif url == 'https://admin.booking.com/gateway/rates' then
+        return {status=200, body='{"rates":[],"next":"/service/pricing"}', headers={['Content-Type']='application/json'}}
+    elseif url == 'https://admin.booking.com/service/pricing' then
+        return {status=200, body='{"pricing":[]}', headers={['Content-Type']='application/json'}}
     end
     error('unexpected request: ' .. method .. ' ' .. url)
 end
@@ -87,10 +112,9 @@ end
 -- Write dotenv file
 local f = assert(io.open(dotenv_file,'w'))
 if scenario == 'malformed-dotenv' then
-    f:write('BOOKING_DOTCOM_URL="unclosed\n')
+    f:write('BOOKING_DOTCOM_USER="unclosed\n')
 else
-    f:write("export BOOKING_DOTCOM_URL='https://booking.example/' # test\n",
-            'BOOKING_DOTCOM_USER="fixture@example.com"\n',
+    f:write('BOOKING_DOTCOM_USER="fixture@example.com"\n',
             "BOOKING_DOTCOM_PASS='fixture#pass&word'\n")
 end
 f:close()
@@ -113,7 +137,9 @@ if scenario == 'success' or scenario == 'two-step' then
     -- Verify OpenAPI YAML
     f = assert(io.open(output_file, 'r'))
     local yaml = f:read('*a'); f:close()
-    for _, path in ipairs({'/reservations','/api/hotels','/api/inline','/api/external'}) do
+    for _, path in ipairs({'/reservations','/api/hotels','/api/inline','/api/external',
+                           '/api/bookings','/api/bookings/details','/api/availability',
+                           '/api/hotel-details','/gateway/rates','/service/pricing'}) do
         assert(yaml:find(path, 1, true), 'missing endpoint ' .. path)
     end
     assert(yaml:find('authenticated: true', 1, true))
@@ -126,16 +152,15 @@ if scenario == 'success' or scenario == 'two-step' then
     f = assert(io.open(postman_file, 'r'))
     local postman = f:read('*a'); f:close()
     assert(postman:find('/api/hotels', 1, true), 'Postman missing /api/hotels')
+    assert(postman:find('/api/bookings/details', 1, true), 'Postman missing recursive /api/bookings/details')
+    assert(postman:find('/service/pricing', 1, true), 'Postman missing recursive /service/pricing')
     assert(postman:find('Discovered API', 1, true), 'Postman missing info')
     for _, secret in ipairs({'fixture-token','fixture#pass&word','fixture@example.com'}) do
         assert(not postman:find(secret, 1, true), 'secret leaked in Postman: ' .. secret)
     end
     
-    -- Verify HTTP call count:
-    -- success: GET /, POST /auth, GET /dashboard, GET /app.js, GET /reservations = 5 calls
-    -- two-step: GET /, POST /identify, POST /auth, GET /dashboard, GET /app.js, GET /reservations = 6 calls
-    local expected_calls = (scenario == 'two-step') and 6 or 5
-    assert(#calls == expected_calls, 'unexpected call count: ' .. #calls .. ' (expected ' .. expected_calls .. ')')
+    local minimum_calls = (scenario == 'two-step') and 14 or 13
+    assert(#calls >= minimum_calls, 'recursive API crawl made too few calls: ' .. #calls)
     
 elseif scenario == 'challenge' then
     assert(not succeeded, 'expected a challenge failure')

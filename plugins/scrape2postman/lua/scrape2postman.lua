@@ -129,6 +129,7 @@ function M.scrape(session_or_document, spec)
     spec = spec or {}
     local opts = {}
     for key, value in pairs(spec) do opts[key] = value end
+    if spec.recursive == true then opts.resolve_chain = true end
     -- Never let the discovery layer write an intermediate OpenAPI document.
     opts.output, opts.out = "", ""
     local result = discovery.scrape(session_or_document, opts)

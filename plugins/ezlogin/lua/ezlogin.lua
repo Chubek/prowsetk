@@ -56,6 +56,65 @@ local function extract_csrf_token(html, field_name)
     return token or ""
 end
 
+-- Reads a header value regardless of the sender's capitalization choice.
+local function header(response, name)
+    for key, value in pairs((response or {}).headers or {}) do
+        if key:lower() == name then return value end
+    end
+end
+
+-- Resolves a redirect Location (possibly relative) against the URL that
+-- produced the redirect. Targets outside the redirecting URL's origin yield
+-- nil so callers never send credentials or cookies to foreign hosts. An
+-- optional trusted predicate (e.g. a same-site policy) can widen acceptance.
+local function resolve_location(base, location, trusted)
+    if not location or location == "" then return nil end
+    local origin = base:match("^(https?://[^/?#]+)")
+    if not origin then return nil end
+    if location:sub(1, 2) == "//" then location = origin:match("^https?") .. ":" .. location end
+    if not location:match("^https?://") then
+        if location:sub(1, 1) == "/" then return origin .. location end
+        local dir = base:gsub("[?#].*$", ""):match("^(.*/)[^/]*$") or (origin .. "/")
+        return dir .. location
+    end
+    local target = location:match("^(https?://[^/?#]+)")
+    if not target then return nil end
+    if target == origin or (trusted and trusted(location)) then return location end
+    return nil
+end
+
+-- Back-compatible exact-origin variant used where no policy is supplied.
+local function resolve_same_origin(base, location)
+    return resolve_location(base, location, nil)
+end
+
+-- Requests a page while following same-origin redirects. Foreign redirect
+-- targets abort so credentials never leave the trust boundary. Returns the
+-- terminal response and the URL that produced it.
+local function follow_fetch(session, method, url, body, trusted)
+    for _ = 1, 10 do
+        local response = session:request(method, url, {body = body or ""})
+        local status = response.status
+        if status >= 300 and status < 400 then
+            local raw = header(response, "location")
+            local location = resolve_location(url, raw, trusted)
+            if not location then
+                if raw then
+                    error("ezlogin: redirect target is outside trusted origin")
+                end
+                return response, url
+            end
+            url = location
+            if status == 303 or ((status == 301 or status == 302) and method == "POST") then
+                method, body = "GET", nil
+            end
+        else
+            return response, url
+        end
+    end
+    error("ezlogin: redirect limit reached")
+end
+
 -- Extracts session cookie from Set-Cookie header  
 local function extract_session_cookie(headers)
     local cookies = {}
@@ -128,7 +187,7 @@ function M.oauth_login(session, options)
         -- Without as_token, AWS WAF blocks the request
         -- Return partial success if we got a redirect anyway
         if post_response.status >= 300 and post_response.status < 400 then
-            local location = (post_response.headers or {})["location"]
+            local location = resolve_same_origin(login_url, header(post_response, "location"))
             if location then
                 local final_response = session:request("GET", location)
                 local session_cookie = extract_session_cookie(final_response.headers)
@@ -144,7 +203,7 @@ function M.oauth_login(session, options)
     -- Step 3: Extract session cookies from redirect response
     local session_cookie = extract_session_cookie(post_response.headers)
     if session_cookie == "" and post_response.status >= 300 and post_response.status < 400 then
-        local location = (post_response.headers or {})["location"]
+        local location = resolve_same_origin(login_url, header(post_response, "location"))
         if location then
             local final_response = session:request("GET", location)
             session_cookie = extract_session_cookie(final_response.headers)
@@ -180,30 +239,38 @@ function M.form_login(session, options)
     local sent_password = false
     local max_steps = 5
     local step = 0
+    local pending  -- POST response body to process without re-fetching
     
     while step < max_steps do
         step = step + 1
         
-        -- GET the current page
-        local response = session:request("GET", current_url)
-        if response.status < 200 or response.status >= 300 then
-            error("ezlogin: failed to fetch page (status " .. tostring(response.status) .. ")")
+        -- Use the previous POST response body when present, otherwise GET the page
+        local response
+        if pending then
+            response = pending
+            pending = nil
+        else
+            local fetched
+            fetched, current_url = follow_fetch(session, "GET", current_url, nil, options.trusted)
+            if fetched.status < 200 or fetched.status >= 300 then
+                error("ezlogin: failed to fetch page (status " .. tostring(fetched.status) .. ")")
+            end
+            response = fetched
         end
+        local page_body = response.body or ""
+        local body_lower = page_body:lower()
         
-        local body_lower = (response.body or ""):lower()
-        
-        -- Check for JavaScript requirement
-        if body_lower:find("please enable javascript") or body_lower:find("enable javascript in your browser") then
-            error("ezlogin: login page requires JavaScript that is not available")
-        end
-        if response.body:match('<html[^>]-class=["\'][^"\']-*no%-js') or response.body:match('<noscript>') then
-            if not response.body:match('<form') then
+        -- Raw noscript/no-js fallbacks can remain in server HTML even when
+        -- Flatworm has JavaScript enabled. Treat them as fatal only when no
+        -- usable form exists in the same response.
+        if page_body:match('<html[^>]-class=["\'][^"\']-*no%-js') or page_body:match('<noscript>') then
+            if not page_body:match('<form') then
                 error("ezlogin: login page requires JavaScript or has no form")
             end
         end
         
         -- Find the login form (form with password field or username/email field)
-        local form_match = response.body:match('<form([^>]*)>')
+        local form_match = page_body:match('<form([^>]*)>')
         if not form_match then
             if body_lower:find("logout") or body_lower:find("sign out") or body_lower:find("log out") then
                 return true, ""  -- Already authenticated
@@ -230,10 +297,12 @@ function M.form_login(session, options)
                 local base = current_url:match('^(https://[^/]+/[^?#]*)') or current_url:match('^(https://[^/]+/)')
                 post_url = (base or current_url) .. action
             end
-            -- Validate same-origin
+            -- Validate same-origin (or the caller's broader trust policy)
             local post_origin = post_url:match('^(https?://[^/]+)')
             local current_origin = current_url:match('^(https?://[^/]+)')
-            if post_origin and current_origin and post_origin ~= current_origin then
+            local action_ok = post_origin == current_origin or
+                (options.trusted ~= nil and options.trusted(post_url) == true)
+            if post_origin and current_origin and not action_ok then
                 error("ezlogin: form action is outside trusted origin (" .. post_origin .. " vs " .. current_origin .. ")")
             end
         end
@@ -241,7 +310,7 @@ function M.form_login(session, options)
         -- Collect all form fields
         local fields = {}
         local field_order = {}
-        for input in response.body:gmatch('<input([^>]*)>') do
+        for input in page_body:gmatch('<input([^>]*)>') do
             local input_type = input:match('type=["\']([^"\']*)["\']') or "text"
             local input_name = input:match('name=["\']([^"\']*)["\']')
             local input_value = input:match('value=["\']([^"\']*)["\']') or ""
@@ -266,7 +335,7 @@ function M.form_login(session, options)
         end
         
         -- Also collect textarea and select fields
-        for textarea in response.body:gmatch('<textarea([^>]*)name=["\']([^"\']*)["\'][^>]*>([^<]*)</textarea>') do
+        for textarea in page_body:gmatch('<textarea([^>]*)name=["\']([^"\']*)["\'][^>]*>([^<]*)</textarea>') do
             local name = textarea:match('name=["\']([^"\']*)["\']')
             if name and name ~= "" then
                 table.insert(fields, {name = name, value = ""})  -- Textarea value is between tags, handle separately
@@ -300,7 +369,7 @@ function M.form_login(session, options)
         end
         
         -- Add CSRF token if found but not already in form
-        local csrf_token = extract_csrf_token(response.body, csrf_field)
+        local csrf_token = extract_csrf_token(page_body, csrf_field)
         if csrf_token and csrf_token ~= "" then
             local has_csrf = false
             for _, f in ipairs(fields) do if f.name == csrf_field then has_csrf = true; break end end
@@ -322,8 +391,12 @@ function M.form_login(session, options)
         
         -- Handle response
         if post_response.status >= 300 and post_response.status < 400 then
-            local location = (post_response.headers or {})["location"]
+            local location = resolve_location(post_url, header(post_response, "location"), options.trusted)
             if location then
+                local redirect_cookie = extract_session_cookie(post_response.headers)
+                if redirect_cookie ~= "" then
+                    session:set_header("Cookie", redirect_cookie)
+                end
                 local final_response = session:request("GET", location)
                 local session_cookie = extract_session_cookie(final_response.headers)
                 if session_cookie ~= "" then
@@ -338,6 +411,8 @@ function M.form_login(session, options)
                     return false, "login not confirmed after password submitted"
                 end
                 current_url = location
+            elseif header(post_response, "location") then
+                return false, "redirect target is outside trusted origin"
             else
                 current_url = post_url
             end
@@ -351,6 +426,7 @@ function M.form_login(session, options)
                     return false, "login not confirmed - still seeing login form"
                 end
                 current_url = post_url
+                pending = post_response
             else
                 local session_cookie = extract_session_cookie(post_response.headers)
                 if session_cookie ~= "" then

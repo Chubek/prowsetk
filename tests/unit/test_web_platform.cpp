@@ -22,16 +22,23 @@ TEST(WebPlatform, ReportsEngineCapabilitiesHonestly) {
               prowsetk::ImplementationClass::Unsupported);
 }
 
-TEST(WebPlatform, DoesNotClaimUninstalledJavaScriptBindings) {
-    // Page-script host bindings that are not installed must be reported
-    // honestly (README "Compatibility Policy").
+TEST(WebPlatform, ClaimsInstalledJavaScriptBindings) {
+    // The Flatworm web platform shim installs these page globals over the
+    // host-mediated primitives (README "JavaScript Execution").
     const auto platform = prowsetk::default_web_platform();
     for (const char* api : {"window", "document-js", "location", "navigator",
                             "URL", "URLSearchParams", "fetch", "XMLHttpRequest",
                             "timers", "cookies", "localStorage",
                             "sessionStorage"}) {
-        EXPECT_FALSE(platform.supports(api)) << "must not claim " << api;
+        EXPECT_TRUE(platform.supports(api)) << "must claim " << api;
+        EXPECT_NE(platform.classification(api),
+                  prowsetk::ImplementationClass::Unsupported)
+            << api;
     }
+    // Still honestly absent.
+    EXPECT_FALSE(platform.supports("WebGL"));
+    EXPECT_EQ(platform.classification("WebGL"),
+              prowsetk::ImplementationClass::Unsupported);
 }
 
 TEST(WebPlatform, ConsoleBindingIsAvailable) {

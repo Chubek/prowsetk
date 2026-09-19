@@ -317,10 +317,44 @@ lprowseir.xax:AddListener("//tag/td", function() ... end)
 All the listeners and walkers use XPath. We use Pugixml's XPath engine.
 
 
+## The Flatworm Web Platform (Page JS Bindings)
+
+Page JavaScript executes against the **web platform shim**
+(`src/core/web_platform_shim.hpp`), a JavaScript bootstrap installed by the
+QuickJS runtime over handle-based, host-mediated primitives
+(`DocumentScriptHost` in `javascript_runtime.hpp`, implemented by
+`FlatwormScriptHost` in `flatworm_host.hpp`, owned per `Session`). It provides
+`document` (queries, traversal, mutation, `innerHTML`/`outerHTML`,
+`classList`, `dataset`, `style`), element wrappers with listeners and
+synthetic events, synchronous and asynchronous `XMLHttpRequest`, `fetch` with
+`Headers`/`Response`, timers, `navigator`, `location` (assignment and link
+clicks and `form.submit()` queue a bounded host navigation),
+`localStorage`/`sessionStorage`, `document.cookie` through the session cookie
+jar, `URL`/`URLSearchParams`, and inert stubs for observers.
+
+Rules:
+
+- Page scripts never receive engine internals: DOM nodes cross the boundary
+  only as opaque `ElementHandle` values owned by the host, invalidated when
+  the document is reinstalled.
+- Every script network call goes through the owning `Session` (`cookies`,
+  redirects, `BeforeRequest`/`AfterResponse` events, plugins, and redaction
+  apply); bindings never touch a socket directly.
+- Lifecycle and timers run in bounded flush passes (`__prowsetkFlush`) after a
+  document's scripts; host-mediated network time extends the script deadline
+  and never consumes the JS budget.
+- Support levels are declared honestly in `web_platform.cpp` and
+  `quickjs_runtime.cpp` capabilities; do not present the shim as full
+  browser compatibility (no layout, progress events, streaming bodies, or
+  CORS enforcement).
+- The plugin ABI and the Lua layer are unaffected: this is page scripting
+  only (README "JavaScript Execution").
+
 ## Booking.com example and HTTPS
 
-`examples/scrape_booking_dotcom.lua` is an example driver registered by
-`examples/booking_dotcom.toml`. It follows the `main(args)` and offline `html`
+`examples/booking-dotcom/scrape_booking_dotcom.lua` is an example driver
+registered by `examples/booking_dotcom.toml`. It follows the `main(args)` and
+offline `html`
 contracts despite living in `examples/`. Load dotenv before looking up its
 Booking.com credentials; never log those values. Require positive login
 evidence before exporting a live page, and retain the documented limitation

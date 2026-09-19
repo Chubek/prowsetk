@@ -42,37 +42,40 @@ WebPlatform default_web_platform() {
     platform.declare("javascript", ImplementationClass::PartiallyImplemented,
                      "QuickJS page-scripting runtime when linked");
 
-    // Browser JavaScript host bindings. These are the Web API objects that
-    // page scripts may reach for. None of them are installed on the page global
-    // yet: page scripts execute against a bare QuickJS global. Classifications
-    // are deliberately honest about the current state (README "Compatibility
-    // Policy"); they become implemented as the bindings are installed.
-    platform.declare("window", ImplementationClass::Unsupported,
-                     "no JS host binding installed yet");
-    platform.declare("document-js", ImplementationClass::Unsupported,
-                     "DOM is available through the C++/Lua API, not page JS");
-    platform.declare("location", ImplementationClass::Unsupported,
-                     "no JS host binding installed yet");
-    platform.declare("navigator", ImplementationClass::Unsupported,
-                     "no JS host binding installed yet");
+    // Browser JavaScript host bindings. These are the Web API objects page
+    // scripts reach for; they are installed on the page global by the
+    // Flatworm web platform shim (src/core/web_platform_shim.hpp) over the
+    // host-mediated `DocumentScriptHost` primitives. Classifications are
+    // deliberately honest about the current state (README "Compatibility
+    // Policy").
+    platform.declare("window", ImplementationClass::PartiallyImplemented,
+                     "window/self/top/parent aliases, listeners, timers, storage");
+    platform.declare("document-js", ImplementationClass::PartiallyImplemented,
+                     "handle-based DOM bridge: query(Selector|SelectorAll), "
+                     "createElement, attributes, textContent, innerHTML, mutation");
+    platform.declare("location", ImplementationClass::PartiallyImplemented,
+                     "reads resolve against the live document; assignment and "
+                     "form submit trigger a host navigation after the script pass");
+    platform.declare("navigator", ImplementationClass::PartiallyImplemented,
+                     "static fields from the session configuration");
     platform.declare("console", ImplementationClass::FullyImplemented,
                      "console.* forwarded as console events");
-    platform.declare("URL", ImplementationClass::Unsupported,
-                     "no JS host binding installed yet");
-    platform.declare("URLSearchParams", ImplementationClass::Unsupported,
-                     "no JS host binding installed yet");
-    platform.declare("fetch", ImplementationClass::Unsupported,
-                     "no JS host binding installed yet");
-    platform.declare("XMLHttpRequest", ImplementationClass::Unsupported,
-                     "no JS host binding installed yet");
-    platform.declare("timers", ImplementationClass::Unsupported,
-                     "no JS host binding installed yet");
-    platform.declare("cookies", ImplementationClass::Unsupported,
-                     "cookie storage exists in C++; not exposed to page JS");
-    platform.declare("localStorage", ImplementationClass::Unsupported,
-                     "storage exists in C++; not exposed to page JS");
-    platform.declare("sessionStorage", ImplementationClass::Unsupported,
-                     "storage exists in C++; not exposed to page JS");
+    platform.declare("URL", ImplementationClass::PartiallyImplemented,
+                     "polyfill over the engine URL parser; no blob/data handling");
+    platform.declare("URLSearchParams", ImplementationClass::PartiallyImplemented,
+                     "polyfill; string-backed pairs");
+    platform.declare("fetch", ImplementationClass::ImplementedWithRestrictions,
+                     "host-mediated NetworkClient; microtask delivery; no streaming bodies");
+    platform.declare("XMLHttpRequest", ImplementationClass::ImplementedWithRestrictions,
+                     "host-mediated NetworkClient; sync and async; no progress, upload, or CORS policy");
+    platform.declare("timers", ImplementationClass::PartiallyImplemented,
+                     "setTimeout/setInterval/rAF drained by bounded flush passes after document scripts");
+    platform.declare("cookies", ImplementationClass::PartiallyImplemented,
+                     "document.cookie through the session cookie jar");
+    platform.declare("localStorage", ImplementationClass::PartiallyImplemented,
+                     "string API over the session storage backend");
+    platform.declare("sessionStorage", ImplementationClass::PartiallyImplemented,
+                     "string API over the session storage backend");
     platform.declare("canvas", ImplementationClass::DummyImplementation,
                      "no pixel rendering");
     platform.declare("WebGL", ImplementationClass::Unsupported);

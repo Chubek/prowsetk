@@ -1,6 +1,10 @@
 prowsetk_gtest(prowsetk_integration_navigation "prowsetk.integration.network."
     "integration;network" test_navigation.cpp)
 
+prowsetk_gtest(prowsetk_integration_script_platform
+    "prowsetk.integration.script_platform."
+    "integration;javascript;document" test_script_platform.cpp)
+
 prowsetk_gtest(prowsetk_integration_scrape2postman "prowsetk.integration.scrape2postman."
     "integration;plugin;endpoint-extraction;lua" test_scrape2postman.cpp)
 target_link_libraries(prowsetk_integration_scrape2postman PRIVATE
