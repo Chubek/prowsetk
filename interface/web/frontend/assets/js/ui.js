@@ -4,23 +4,36 @@ import { activeRun, state } from "./state.js";
 const byId = (id) => document.getElementById(id);
 
 export function flash(text = "") {
-  byId("flash").textContent = text;
+  const el = byId("flash");
+  if (el) el.textContent = String(text || "").slice(0, 2000);
 }
 
 export function setSystemState(ok, label) {
   const pill = byId("system-state");
-  pill.textContent = label;
+  if (!pill) return;
+  pill.textContent = String(label || (ok ? "System healthy" : "System degraded")).slice(0, 128);
   pill.classList.toggle("status-ok", ok);
   pill.classList.toggle("status-bad", !ok);
+  pill.setAttribute("aria-label", pill.textContent);
 }
 
 export function formPayload() {
+  const urlEl = byId("run-url");
+  const followEl = byId("follow-links");
+  const observeEl = byId("observe-network");
+  const inferEl = byId("infer-schemas");
+  const rawUrl = urlEl ? urlEl.value.trim().slice(0, 2048) : "";
+  // Basic client-side URL validation; server will re-validate.
+  let url = rawUrl;
+  if (url && !/^https?:\/\//i.test(url)) {
+    // Let server return 422; don't auto-prefix to avoid SSRF surprises.
+  }
   return {
-    url: byId("run-url").value.trim(),
+    url,
     discover_options: {
-      follow_links: byId("follow-links").checked,
-      observe_network: byId("observe-network").checked,
-      infer_schemas: byId("infer-schemas").checked,
+      follow_links: !!(followEl && followEl.checked),
+      observe_network: !!(observeEl && observeEl.checked),
+      infer_schemas: !!(inferEl && inferEl.checked),
     },
   };
 }
@@ -35,6 +48,7 @@ function statusTag(status) {
 
 export function drawRuns({ onSelect, onCancel, onResult }) {
   const host = byId("runs");
+  if (!host) return;
   host.replaceChildren();
 
   if (!state.runs.length) {
@@ -50,13 +64,25 @@ export function drawRuns({ onSelect, onCancel, onResult }) {
     card.className = "run-card";
 
     const head = document.createElement("strong");
-    head.innerHTML = `<code>${run.id}</code><span>${statusTag(run.status)}</span>`;
+
+    const code = document.createElement("code");
+    code.textContent = String(run.id).slice(0, 68);
+
+    const tag = document.createElement("span");
+    tag.textContent = statusTag(run.status);
+    tag.setAttribute("aria-label", String(run.status));
+
+    head.append(code, tag);
 
     const line = document.createElement("small");
-    line.textContent = run.url;
+    line.textContent = String(run.url).slice(0, 2048);
 
     const updated = document.createElement("small");
-    updated.textContent = `Updated ${new Date(run.updated_at).toLocaleString()}`;
+    try {
+      updated.textContent = `Updated ${new Date(run.updated_at).toLocaleString()}`;
+    } catch {
+      updated.textContent = `Updated ${String(run.updated_at || "")}`;
+    }
 
     const actions = document.createElement("div");
     actions.className = "run-actions";
@@ -80,6 +106,12 @@ export function drawRuns({ onSelect, onCancel, onResult }) {
 
     actions.append(view, result, cancel);
     card.append(head, line, updated, actions);
+
+    if (run.id === state.selectedRunId) {
+      card.style.outline = "2px solid var(--brand)";
+      card.style.outlineOffset = "2px";
+    }
+
     host.append(card);
   }
 }
@@ -87,6 +119,7 @@ export function drawRuns({ onSelect, onCancel, onResult }) {
 export function drawArtifact(payload) {
   const pre = byId("artifact-preview");
   const link = byId("artifact-link");
+  if (!pre || !link) return;
   const current = activeRun();
 
   if (!payload) {
@@ -96,16 +129,23 @@ export function drawArtifact(payload) {
     return;
   }
 
-  if (payload.run.status !== "succeeded") {
-    pre.textContent = payload.run.error || `Run ended: ${payload.run.status}`;
+  const status = payload.run?.status;
+  if (status !== "succeeded") {
+    const err = payload.run?.error || `Run ended: ${status || "unknown"}`;
+    pre.textContent = String(err).slice(0, 5000);
     link.classList.add("disabled");
     link.removeAttribute("href");
     return;
   }
 
-  pre.textContent = payload.openapi_yaml || "No OpenAPI output in response.";
+  const yaml = payload.openapi_yaml;
+  pre.textContent = yaml ? String(yaml).slice(0, 500000) : "No OpenAPI output in response.";
   if (current) {
     link.href = openapiLink(current.id);
     link.classList.remove("disabled");
+    link.setAttribute("download", `${current.id}.yaml`);
+  } else {
+    link.classList.add("disabled");
+    link.removeAttribute("href");
   }
 }

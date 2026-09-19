@@ -3,20 +3,29 @@ import { activeRun, setRuns, state } from "./state.js";
 import { drawArtifact, drawRuns, flash, formPayload, setSystemState } from "./ui.js";
 
 const byId = (id) => document.getElementById(id);
+const POLL_MS = 1500;
+let polling = 0;
+let inFlight = false;
 
 async function refreshHealth() {
   try {
     const health = await api.health();
-    setSystemState(health.status === "ok", health.status === "ok" ? "System healthy" : "System degraded");
+    const ok = health.status === "ok";
+    setSystemState(ok, ok ? "System healthy" : "System degraded");
+    // Surface upstream status in title if degraded
+    if (health.upstream_status && health.upstream_status !== "ok") {
+      setSystemState(false, `Upstream ${health.upstream_status}`);
+    }
   } catch (error) {
     setSystemState(false, "Service unreachable");
-    flash(error.message);
+    // Don't spam flash on poll; only on explicit refresh we might flash.
   }
 }
 
 async function refreshRuns() {
   try {
     const runs = await api.listRuns();
+    if (!Array.isArray(runs)) throw new Error("Invalid runs payload");
     setRuns(runs);
     if (!state.selectedRunId && runs.length) {
       state.selectedRunId = runs[0].id;
@@ -24,24 +33,34 @@ async function refreshRuns() {
     drawRuns({
       onSelect: (runId) => {
         state.selectedRunId = runId;
+        drawRuns({
+          onSelect: (id) => { state.selectedRunId = id; },
+          onCancel: handleCancel,
+          onResult: handleResult,
+        });
+        refreshArtifact().catch(() => {});
       },
-      onCancel: async (runId) => {
-        try {
-          await api.cancelRun(runId);
-          flash(`Cancelled ${runId}`);
-          await refreshRuns();
-        } catch (error) {
-          flash(error.message);
-        }
-      },
-      onResult: async (runId) => {
-        state.selectedRunId = runId;
-        await refreshArtifact();
-      },
+      onCancel: handleCancel,
+      onResult: handleResult,
     });
   } catch (error) {
-    flash(error.message);
+    flash(error.message || String(error));
   }
+}
+
+async function handleCancel(runId) {
+  try {
+    await api.cancelRun(runId);
+    flash(`Cancelled ${runId}`);
+    await refreshRuns();
+  } catch (error) {
+    flash(error.message || String(error));
+  }
+}
+
+async function handleResult(runId) {
+  state.selectedRunId = runId;
+  await refreshArtifact();
 }
 
 async function refreshArtifact() {
@@ -60,7 +79,12 @@ async function refreshArtifact() {
     const payload = await api.runResult(run.id);
     drawArtifact(payload);
   } catch (error) {
-    flash(error.message);
+    // 409 means still in progress; show progress card instead of error flash
+    if (error.status === 409) {
+      drawArtifact({ run, openapi_yaml: null });
+      return;
+    }
+    flash(error.message || String(error));
   }
 }
 
@@ -74,30 +98,58 @@ async function submitRun(event) {
       flash("Please provide a URL.");
       return;
     }
+    // Quick client-side URL sanity
+    try {
+      const parsed = new URL(payload.url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        flash("URL must be http or https.");
+        return;
+      }
+    } catch {
+      flash("Please provide a valid http(s) URL.");
+      return;
+    }
+    const submitBtn = byId("run-submit");
+    if (submitBtn) submitBtn.disabled = true;
     const run = await api.createRun(payload);
     state.selectedRunId = run.id;
     flash(`Queued ${run.id}`);
     await refreshRuns();
     await refreshArtifact();
+    if (submitBtn) submitBtn.disabled = false;
   } catch (error) {
-    flash(error.message);
+    const submitBtn = byId("run-submit");
+    if (submitBtn) submitBtn.disabled = false;
+    flash(error.message || String(error));
   }
 }
 
 function startPolling() {
-  if (state.polling) {
-    clearInterval(state.polling);
+  if (polling) {
+    clearInterval(polling);
   }
-  state.polling = window.setInterval(async () => {
-    await refreshHealth();
-    await refreshRuns();
-    await refreshArtifact();
-  }, 1500);
+  polling = window.setInterval(async () => {
+    if (inFlight) return;
+    inFlight = true;
+    try {
+      await refreshHealth();
+      await refreshRuns();
+      // Only refresh artifact if selected run is not terminal? Always try but avoid spam
+      const run = activeRun();
+      if (run && (run.status === "queued" || run.status === "running")) {
+        await refreshArtifact();
+      }
+    } finally {
+      inFlight = false;
+    }
+  }, POLL_MS);
 }
 
 function wire() {
-  byId("run-form").addEventListener("submit", submitRun);
-  byId("refresh-runs").addEventListener("click", async () => {
+  const form = byId("run-form");
+  if (form) form.addEventListener("submit", submitRun);
+  const btn = byId("refresh-runs");
+  if (btn) btn.addEventListener("click", async () => {
     await refreshRuns();
     await refreshArtifact();
   });
@@ -111,4 +163,4 @@ async function bootstrap() {
   startPolling();
 }
 
-bootstrap().catch((error) => flash(error.message));
+bootstrap().catch((error) => flash(error.message || String(error)));

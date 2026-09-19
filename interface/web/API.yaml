@@ -51,12 +51,22 @@ paths:
             schema:
               $ref: "#/components/schemas/SessionCreateRequest"
       responses:
-        "200":
+        "201":
           description: Created session
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SessionSummary"
+        "400":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          $ref: "#/components/responses/UpstreamFailure"
 
   /api/v1/sessions/{session_id}:
     get:
@@ -140,12 +150,18 @@ paths:
             schema:
               $ref: "#/components/schemas/RunCreateRequest"
       responses:
-        "200":
+        "201":
           description: Queued run
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunSummary"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/runs/{run_id}:
     get:
@@ -227,12 +243,16 @@ components:
       required: true
       schema:
         type: string
+        pattern: "^[A-Za-z0-9_-]{1,64}$"
+        maxLength: 64
     RunId:
       name: run_id
       in: path
       required: true
       schema:
         type: string
+        pattern: "^run-[A-Za-z0-9_-]{1,64}$"
+        maxLength: 68
 
   responses:
     NotFound:
@@ -290,10 +310,14 @@ components:
       properties:
         id:
           type: string
+          pattern: "^[A-Za-z0-9_-]{1,64}$"
+          maxLength: 64
         title:
           type: string
+          maxLength: 512
         url:
           type: string
+          maxLength: 2048
         created_at:
           type: string
           format: date-time
@@ -306,6 +330,8 @@ components:
       properties:
         preferred_id:
           type: string
+          pattern: "^[A-Za-z0-9_-]{1,64}$"
+          maxLength: 64
 
     SessionNavigateRequest:
       type: object
@@ -335,11 +361,55 @@ components:
         url:
           type: string
           format: uri
+          maxLength: 2048
         session_id:
           type: string
+          pattern: "^[A-Za-z0-9_-]{1,64}$"
+          maxLength: 64
         discover_options:
-          type: object
-          additionalProperties: true
+          $ref: "#/components/schemas/DiscoverOptions"
+
+    DiscoverOptions:
+      type: object
+      properties:
+        follow_links:
+          type: boolean
+          default: false
+        observe_network:
+          type: boolean
+          default: true
+        inspect_scripts:
+          type: boolean
+          default: true
+        infer_schemas:
+          type: boolean
+          default: true
+        include_provenance:
+          type: boolean
+          default: true
+        redact_secrets:
+          type: boolean
+          default: true
+        max_depth:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 1
+        max_pages:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+        minimum_confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.45
+        openapi_version:
+          type: string
+          enum: ["3.0.0", "3.0.3", "3.1.0"]
+          default: "3.1.0"
+      additionalProperties: false
 
     RunSummary:
       type: object
@@ -347,11 +417,15 @@ components:
       properties:
         id:
           type: string
+          pattern: "^run-[A-Za-z0-9_-]{1,64}$"
+          maxLength: 68
         status:
           type: string
           enum: [queued, running, succeeded, failed, cancelled]
         session_id:
           type: string
+          pattern: "^[A-Za-z0-9_-]{0,64}$"
+          maxLength: 64
         created_at:
           type: string
           format: date-time
@@ -361,8 +435,10 @@ components:
         url:
           type: string
           format: uri
+          maxLength: 2048
         error:
           type: string
+          maxLength: 2048
           nullable: true
 
     RunResult:

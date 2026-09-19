@@ -1,27 +1,43 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.cors import CORSMiddleware
 
 from .api import router
 from .deps import create_container
+from .prowsetk_client import UpstreamError
 from .settings import settings
 
-
 ROOT_DIR = Path(__file__).resolve().parent.parent
+
+log = logging.getLogger("prowsetk.web")
+
+try:
+    import uvicorn.logging as uvicorn_logging  # type: ignore[import-not-found]
+except Exception:
+    uvicorn_logging = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     app.state.container = create_container()
+    log.info("Gateway starting upstream=%s max_runs=%s", settings.prowsetk_upstream, settings.max_runs)
     try:
         yield
     finally:
-        await app.state.container.client.close()
+        try:
+            await app.state.container.client.close()
+        except Exception:
+            log.debug("Error closing upstream client on shutdown", exc_info=True)
+        log.info("Gateway stopped")
 
 
 def create_app() -> FastAPI:
@@ -31,12 +47,52 @@ def create_app() -> FastAPI:
         version="0.3.0",
         lifespan=lifespan,
     )
-    app.include_router(router)
-    app.mount("/assets", StaticFiles(directory=ROOT_DIR / "frontend" / "assets"), name="assets")
 
-    @app.get("/")
+    # CORS: tighten to same-origin by default; allow all in dev via settings.environment.
+    allow_origins = ["*"] if settings.environment == "development" else []
+    if allow_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allow_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=["*"],
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        return JSONResponse(status_code=422, content={"detail": str(exc.errors()[0].get("msg", "Validation error")) if exc.errors() else "Validation error"})
+
+    @app.exception_handler(UpstreamError)
+    async def upstream_exception_handler(request: Request, exc: UpstreamError):
+        status = 502
+        if exc.status_code == 404:
+            status = 404
+        return JSONResponse(status_code=status, content={"detail": str(exc)[:2048]})
+
+    @app.exception_handler(Exception)
+    async def generic_exception_handler(request: Request, exc: Exception):
+        log.exception("Unhandled error: %s", exc)
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+    app.include_router(router)
+
+    assets_dir = ROOT_DIR / "frontend" / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+    else:
+        log.warning("Assets directory not found: %s", assets_dir)
+
+    @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
-        return FileResponse(ROOT_DIR / "index.html")
+        target = ROOT_DIR / "index.html"
+        if not target.is_file():
+            return JSONResponse(status_code=500, content={"detail": "index.html not found"})
+        return FileResponse(str(target), media_type="text/html; charset=utf-8")
+
+    @app.get("/health", include_in_schema=False)
+    async def root_health():
+        return {"ok": True}
 
     return app
 
@@ -52,4 +108,5 @@ if __name__ == "__main__":
         host=settings.host,
         port=settings.port,
         reload=False,
+        log_level="info",
     )
