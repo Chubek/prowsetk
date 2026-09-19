@@ -1,6 +1,15 @@
 prowsetk_gtest(prowsetk_integration_navigation "prowsetk.integration.network."
     "integration;network" test_navigation.cpp)
 
+prowsetk_gtest(prowsetk_integration_scrape2postman "prowsetk.integration.scrape2postman."
+    "integration;plugin;endpoint-extraction;lua" test_scrape2postman.cpp)
+target_link_libraries(prowsetk_integration_scrape2postman PRIVATE
+    prowsetk_scrape2postman_static prowsetk_scrape2postman)
+target_compile_definitions(prowsetk_integration_scrape2postman PRIVATE
+    TEST_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    PROWSETK_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    POSTMAN_PLUGIN_PATH="$<TARGET_FILE:prowsetk_scrape2postman>")
+
 prowsetk_gtest(prowsetk_integration_lua "prowsetk.integration.lua."
     "integration;lua" test_lua_binding.cpp)
 

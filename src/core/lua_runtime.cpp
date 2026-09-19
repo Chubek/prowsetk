@@ -206,6 +206,12 @@ void push_endpoint_result_table(lua_State* L,
     lua_pushlstring(L, endpoint.discovery_method.c_str(),
                     endpoint.discovery_method.size());
     lua_setfield(L, -2, "discovery_method");
+    lua_pushlstring(L, endpoint.request_content_type.c_str(),
+                    endpoint.request_content_type.size());
+    lua_setfield(L, -2, "request_content_type");
+    lua_pushlstring(L, endpoint.response_content_type.c_str(),
+                    endpoint.response_content_type.size());
+    lua_setfield(L, -2, "response_content_type");
     lua_pushnumber(L, endpoint.confidence);
     lua_setfield(L, -2, "confidence");
 

@@ -1,6 +1,11 @@
 prowsetk_gtest(prowsetk_unit_version "prowsetk.unit.version."
     "unit;core" test_version.cpp)
 
+prowsetk_gtest(prowsetk_unit_scrape2postman "prowsetk.unit.scrape2postman."
+    "unit;plugin;endpoint-extraction" test_scrape2postman.cpp)
+target_link_libraries(prowsetk_unit_scrape2postman PRIVATE prowsetk_scrape2postman_static)
+target_compile_definitions(prowsetk_unit_scrape2postman PRIVATE TEST_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+
 prowsetk_gtest(prowsetk_unit_url "prowsetk.unit.url."
     "unit;core" test_url.cpp)
 

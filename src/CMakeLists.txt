@@ -81,6 +81,8 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/plugins/ezlogin/CMakeLists.txt")
     add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/ezlogin" "${CMAKE_BINARY_DIR}/plugins/ezlogin")
 endif()
 
+add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/scrape2postman" "${CMAKE_BINARY_DIR}/plugins/scrape2postman")
+
 if(PROWSETK_BUILD_CLI)
     add_subdirectory(cli)
 endif()

@@ -40,7 +40,8 @@ install(FILES lua/scrape2oapi.lua
 add_library(prowsetk_scrape2oapi_static STATIC src/scrape2oapi.cpp)
 target_include_directories(prowsetk_scrape2oapi_static PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(prowsetk_scrape2oapi_static PUBLIC ProwseTk::core)
-set_target_properties(prowsetk_scrape2oapi_static PROPERTIES OUTPUT_NAME "prowsetk_scrape2oapi_static")
+set_target_properties(prowsetk_scrape2oapi_static PROPERTIES
+    OUTPUT_NAME "prowsetk_scrape2oapi_static" POSITION_INDEPENDENT_CODE ON)
 prowsetk_set_warnings(prowsetk_scrape2oapi_static)
 
 if(PROWSETK_BUILD_TESTS AND TARGET GTest::gtest_main)
