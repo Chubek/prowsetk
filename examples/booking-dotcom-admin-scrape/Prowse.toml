@@ -1,0 +1,49 @@
+[project]
+name = "booking-dotcom-admin-scrape"
+version = "0.1.0"
+description = "Scrape heuristic endpoint specifications from admin.booking.com"
+root = "."
+
+[engine]
+javascript = true
+headless = true
+follow_redirects = false
+observe_network = false
+
+[lua]
+version = "5.4"
+libraries = ["lprowse", "lprowsext"]
+allow_extensions = true
+execution_timeout_ms = 60000
+
+[logging]
+level = "info"
+format = "text"
+redact_sensitive_data = true
+
+[output]
+directory = "_scraped/booking-dotcom-admin"
+create_directories = true
+overwrite = true
+formats = ["yaml", "json"]
+
+[[drivers]]
+name = "booking-dotcom-admin"
+description = "Login to admin.booking.com and recursively scrape heuristic endpoints"
+script = "scrape-booking-dotcom-admin.lua"
+entrypoint = "main"
+enabled = true
+
+arguments = [
+    { name = "url", type = "url", required = false, default = "https://admin.booking.com/" },
+    { name = "dotenv", type = "path", required = false, default = ".env" },
+    { name = "output_dir", type = "path", required = false, default = "_scraped/booking-dotcom-admin" },
+    { name = "output", type = "path", required = false, default = "_scraped/booking-dotcom-admin/BookingDotcomAdminPanel.yaml" },
+    { name = "postman", type = "path", required = false, default = "_scraped/booking-dotcom-admin/BookingDotcomAdminPanel.postman_collection.json" },
+    { name = "max_depth", type = "integer", required = false, default = 2 },
+    { name = "max_pages", type = "integer", required = false, default = 100 },
+    { name = "max_api_depth", type = "integer", required = false, default = 2 },
+    { name = "max_api_requests", type = "integer", required = false, default = 64 },
+    { name = "success_selector", type = "string", required = false, default = "" },
+    { name = "html", type = "string", required = false, default = "" }
+]

@@ -1,0 +1,25 @@
+[project]
+name = "booking-dotcom"
+version = "0.1.0"
+description = "Compatibility config for the Booking.com admin scraper"
+root = "."
+
+[[drivers]]
+name = "booking-dotcom"
+description = "Login to admin.booking.com and recursively scrape heuristic endpoints"
+script = "booking-dotcom/scrape_booking_dotcom.lua"
+entrypoint = "main"
+enabled = true
+
+arguments = [
+    { name = "url", type = "url", required = false, default = "https://admin.booking.com/" },
+    { name = "dotenv", type = "path", required = false, default = ".env" },
+    { name = "output", type = "path", required = false, default = "_scraped/booking-dotcom-admin/BookingDotcomAdminPanel.yaml" },
+    { name = "postman", type = "path", required = false, default = "_scraped/booking-dotcom-admin/BookingDotcomAdminPanel.postman_collection.json" },
+    { name = "max_depth", type = "integer", required = false, default = 2 },
+    { name = "max_pages", type = "integer", required = false, default = 100 },
+    { name = "max_api_depth", type = "integer", required = false, default = 2 },
+    { name = "max_api_requests", type = "integer", required = false, default = 64 },
+    { name = "success_selector", type = "string", required = false, default = "" },
+    { name = "html", type = "string", required = false, default = "" }
+]
