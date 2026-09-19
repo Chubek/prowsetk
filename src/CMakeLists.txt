@@ -17,6 +17,7 @@ set(PROWSETK_CORE_SOURCES
     core/project_config.cpp
     core/ir.cpp
     core/web_interface.cpp
+    core/playwright.cpp
     flatworm/html_parser.cpp
     flatworm/css_selector.cpp
     flatworm/dom.cpp

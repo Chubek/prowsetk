@@ -24,3 +24,30 @@ endfunction()
 add_subdirectory(plugins)
 add_subdirectory(unit)
 add_subdirectory(integration)
+
+# Python client compliance suites use the built CLI and are kept as CTest
+# cases so Selenium and Playwright regressions are visible in the same test
+# dashboard. Optional client packages produce collected, skipped tests when
+# they are not installed.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND AND TARGET prowsetk_cli)
+    add_test(
+        NAME prowsetk.integration.selenium.python
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q
+            "${PROJECT_SOURCE_DIR}/tests/selenium/test_webdriver_protocol.py"
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
+    set_tests_properties(prowsetk.integration.selenium.python PROPERTIES
+        LABELS "integration;web-interface"
+        TIMEOUT 120
+        ENVIRONMENT "PROWSETK_CLI=$<TARGET_FILE:prowsetk_cli>")
+
+    add_test(
+        NAME prowsetk.integration.playwright.python
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q
+            "${PROJECT_SOURCE_DIR}/tests/selenium/test_playwright.py"
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
+    set_tests_properties(prowsetk.integration.playwright.python PROPERTIES
+        LABELS "integration;web-interface"
+        TIMEOUT 120
+        ENVIRONMENT "PROWSETK_CLI=$<TARGET_FILE:prowsetk_cli>")
+endif()

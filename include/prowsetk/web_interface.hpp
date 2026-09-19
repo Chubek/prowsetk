@@ -47,6 +47,10 @@ struct WebInterfaceConfig {
     // Directory holding the static web UI (`index.html`, `app.js`, `style.css`).
     // When empty, static-file routes return 404 and only the JSON API is served.
     std::filesystem::path web_root;
+    // Expose the native Chrome DevTools Protocol bridge used by Playwright's
+    // `connect_over_cdp`. Disabled by default so a normal REST/WebDriver
+    // endpoint does not expose an additional control plane.
+    bool enable_playwright = false;
 };
 
 // The ProwseTk web interface: a headless JSON REST API and a static web UI
@@ -77,6 +81,8 @@ public:
     const std::filesystem::path& web_root() const noexcept { return web_root_; }
 
 private:
+    friend class HttpServer;
+
     struct Impl;
     // `browser_` is declared before `impl_` so it is destroyed after the
     // session map: Session destructors report storage release back to the
@@ -89,6 +95,7 @@ private:
     // JSON handling live in that translation unit and never surface here.
     WebResponse route(const WebRequest& request);
     WebResponse serve_static(const std::string& name);
+    void handle_websocket(int fd, const WebRequest& request);
 };
 
 // A minimal blocking HTTP/1.1 server that adapts a `WebInterface` to a POSIX

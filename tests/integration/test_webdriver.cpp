@@ -17,10 +17,118 @@ TEST(WebDriver, CreateSession) {
     EXPECT_NE(response.body.find("sessionId"), std::string::npos);
 }
 
+TEST(WebDriver, ReportsReadyStatus) {
+    auto api = make_interface();
+    const auto response =
+        api.handle(WebRequest{"GET", "/status", {}, {}, {}});
+    EXPECT_EQ(response.status, 200);
+    EXPECT_NE(response.body.find("\"ready\":true"), std::string::npos);
+    EXPECT_NE(response.body.find("\"message\":\"\""), std::string::npos);
+}
+
 TEST(WebDriver, InvalidSession) {
     auto api = make_interface();
     WebRequest r{"GET", "/session/missing/url", {}, {}, {}};
     EXPECT_EQ(api.handle(r).status, 404);
+}
+
+TEST(WebDriver, SupportsStandardElementCommands) {
+    WebInterfaceConfig config;
+    config.browser.javascript = true;
+    auto api = WebInterface(std::move(config));
+    WebRequest create{"POST", "/session", {}, {},
+                      R"({"capabilities":{"alwaysMatch":{"browserName":"prowsetk"}}})"};
+    const auto created = api.handle(create);
+    ASSERT_EQ(created.status, 200);
+    const auto marker = created.body.find("\"sessionId\":\"");
+    ASSERT_NE(marker, std::string::npos);
+    const auto start = marker + std::string("\"sessionId\":\"").size();
+    const auto end = created.body.find('"', start);
+    ASSERT_NE(end, std::string::npos);
+    const std::string id = created.body.substr(start, end - start);
+
+    EXPECT_EQ(api.handle(WebRequest{
+                           "POST", "/session/" + id + "/url", {}, {},
+                           R"({"url":"data:text/html,<html><head><title>Commands</title></head><body><input id='name' value='old'><button id='button'>Go</button><p class='item'>one</p><p class='item'>two</p></body></html>"})"})
+                  .status,
+              200);
+
+    const auto elements = api.handle(WebRequest{
+        "POST", "/session/" + id + "/elements", {}, {},
+        R"({"using":"css selector","value":".item"})"});
+    EXPECT_EQ(elements.status, 200);
+    EXPECT_NE(elements.body.find("element-6066-11e4-a52e-4f735466cecf"),
+              std::string::npos);
+
+    const auto element = api.handle(WebRequest{
+        "POST", "/session/" + id + "/element", {}, {},
+        R"({"using":"id","value":"name"})"});
+    ASSERT_EQ(element.status, 200);
+    const auto token_start = element.body.rfind("element-");
+    ASSERT_NE(token_start, std::string::npos);
+    const auto token_end = element.body.find('"', token_start);
+    const std::string token =
+        element.body.substr(token_start, token_end - token_start);
+
+    EXPECT_EQ(api.handle(WebRequest{
+                             "POST", "/session/" + id + "/element/" + token +
+                                         "/value",
+                             {}, {}, R"({"text":["new"]})"})
+                  .status,
+              200);
+    const auto value = api.handle(WebRequest{
+        "GET", "/session/" + id + "/element/" + token + "/property/value",
+        {}, {}, {}});
+    EXPECT_NE(value.body.find("\"value\":\"oldnew\""), std::string::npos);
+
+    const auto script = api.handle(WebRequest{
+        "POST", "/session/" + id + "/execute/sync", {}, {},
+        R"({"script":"return document.title","args":[]})"});
+    EXPECT_EQ(script.status, 200);
+    EXPECT_NE(script.body.find("\"value\":\"Commands\""), std::string::npos);
+}
+
+TEST(WebDriver, ReportsStaleElementAfterNavigation) {
+    auto api = make_interface();
+    const auto created = api.handle(
+        WebRequest{"POST", "/session", {}, {}, R"({"capabilities":{}})"});
+    const auto marker = created.body.find("\"sessionId\":\"");
+    ASSERT_NE(marker, std::string::npos);
+    const auto start = marker + std::string("\"sessionId\":\"").size();
+    const std::string id =
+        created.body.substr(start, created.body.find('"', start) - start);
+    ASSERT_EQ(api.handle(WebRequest{
+                           "POST", "/session/" + id + "/url", {}, {},
+                           R"({"url":"data:text/html,<p id='x'>x</p>"})"})
+                  .status,
+              200);
+    const auto element = api.handle(WebRequest{
+        "POST", "/session/" + id + "/element", {}, {},
+        R"({"using":"id","value":"x"})"});
+    const auto token_start = element.body.rfind("element-");
+    const auto token = element.body.substr(
+        token_start, element.body.find('"', token_start) - token_start);
+    ASSERT_EQ(api.handle(WebRequest{
+                           "POST", "/session/" + id + "/url", {}, {},
+                           R"({"url":"data:text/html,<p>new</p>"})"})
+                  .status,
+              200);
+    const auto stale = api.handle(WebRequest{
+        "GET", "/session/" + id + "/element/" + token + "/text", {}, {}, {}});
+    EXPECT_EQ(stale.status, 404);
+    EXPECT_NE(stale.body.find("stale element reference"), std::string::npos);
+}
+
+TEST(WebDriver, PlaywrightDiscoveryEndpointsAreOptIn) {
+    WebInterfaceConfig config;
+    config.enable_playwright = true;
+    auto api = WebInterface(std::move(config));
+    const auto version = api.handle(WebRequest{"GET", "/json/version", {}, {}, {}});
+    EXPECT_EQ(version.status, 200);
+    EXPECT_NE(version.body.find("webSocketDebuggerUrl"), std::string::npos);
+    const auto list = api.handle(WebRequest{"GET", "/json/list", {}, {}, {}});
+    EXPECT_EQ(list.status, 200);
+    EXPECT_NE(list.body.find("\"type\":\"page\""), std::string::npos);
 }
 
 #define WD_CASE(n) \

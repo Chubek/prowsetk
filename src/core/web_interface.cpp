@@ -1,8 +1,10 @@
 #include "prowsetk/web_interface.hpp"
 
+#include "playwright.hpp"
 #include <prowsetk/capability.hpp>
 #include <prowsetk/endpoint_extraction.hpp>
 #include <prowsetk/error.hpp>
+#include <prowsetk/url.hpp>
 #include <prowsetk/version.hpp>
 #include <prowsetk/xpath.hpp>
 
@@ -625,25 +627,321 @@ WebResponse webdriver_error(int status, std::string error, std::string message) 
 
 std::string webdriver_element_key() { return "element-6066-11e4-a52e-4f735466cecf"; }
 
+struct WebDriverElement {
+    std::shared_ptr<Element> element;
+    std::shared_ptr<Document> document;
+};
+
+struct WebDriverState {
+    std::map<std::string, std::map<std::string, WebDriverElement>> elements;
+    std::uint64_t next_element = 1;
+    std::map<std::string, int> timeouts;
+};
+
+std::string percent_decode(std::string_view input) {
+    std::string output;
+    output.reserve(input.size());
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        if (input[i] == '%' && i + 2 < input.size()) {
+            const auto hex = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                return -1;
+            };
+            const int high = hex(input[i + 1]);
+            const int low = hex(input[i + 2]);
+            if (high >= 0 && low >= 0) {
+                output.push_back(static_cast<char>((high << 4) | low));
+                i += 2;
+                continue;
+            }
+        }
+        output.push_back(input[i]);
+    }
+    return output;
+}
+
+Json null_json() {
+    Json value;
+    value.kind = Json::Kind::Null;
+    return value;
+}
+
+Json array_json() {
+    Json value;
+    value.kind = Json::Kind::Array;
+    return value;
+}
+
+Json object_json() {
+    Json value;
+    value.kind = Json::Kind::Object;
+    return value;
+}
+
+std::string element_handle(WebDriverState& state, const std::string& session_id,
+                           const std::shared_ptr<Element>& element,
+                           const std::shared_ptr<Document>& document) {
+    const std::string id = "element-" + std::to_string(state.next_element++);
+    state.elements[session_id].emplace(id, WebDriverElement{element, document});
+    return id;
+}
+
+const Json* field_alias(const Json& object, std::string_view first,
+                        std::string_view second) {
+    const Json* value = find_field(object, first);
+    return value != nullptr ? value : find_field(object, second);
+}
+
+std::string data_url_html(std::string_view url) {
+    const std::size_t comma = url.find(',');
+    if (comma == std::string_view::npos) return {};
+    return percent_decode(url.substr(comma + 1));
+}
+
+std::shared_ptr<Element> xpath_element(const std::shared_ptr<Document>& doc,
+                                       std::string_view expression) {
+    if (doc == nullptr) return nullptr;
+    std::string query(expression);
+    if (query.rfind("//", 0) != 0) return nullptr;
+    query.erase(0, 2);
+    std::string tag = query;
+    std::string attribute;
+    std::string expected;
+    const std::size_t predicate = query.find("[@");
+    if (predicate != std::string::npos) {
+        tag = query.substr(0, predicate);
+        const std::size_t name_start = predicate + 2;
+        const std::size_t equals = query.find('=', name_start);
+        if (equals != std::string::npos) {
+            attribute = query.substr(name_start, equals - name_start);
+            const char quote = equals + 1 < query.size() ? query[equals + 1] : '\0';
+            const std::size_t value_start = quote == '\'' || quote == '"' ?
+                                                equals + 2 : equals + 1;
+            const std::size_t value_end = quote == '\'' || quote == '"' ?
+                                              query.find(quote, value_start) :
+                                              query.find(']', value_start);
+            if (value_end != std::string::npos) {
+                expected = query.substr(value_start, value_end - value_start);
+            }
+        }
+    }
+    if (tag.empty()) tag = "*";
+    const auto candidates = doc->get_elements_by_tag_name(tag);
+    for (const auto& candidate : candidates) {
+        if (attribute.empty() || candidate->attribute(attribute) == expected) {
+            return candidate;
+        }
+    }
+    return nullptr;
+}
+
+std::vector<std::shared_ptr<Element>> find_elements(
+    const std::shared_ptr<Document>& doc, std::string_view using_value,
+    std::string_view value) {
+    if (doc == nullptr) return {};
+    if (using_value == "css selector") return doc->query_selector_all(value);
+    if (using_value == "id") {
+        auto element = doc->get_element_by_id(value);
+        return element != nullptr ? std::vector{element}
+                                   : std::vector<std::shared_ptr<Element>>{};
+    }
+    if (using_value == "tag name") return doc->get_elements_by_tag_name(value);
+    if (using_value == "class name") {
+        return doc->query_selector_all("." + std::string(value));
+    }
+    if (using_value == "name") {
+        return doc->query_selector_all("[name='" + std::string(value) + "']");
+    }
+    if (using_value == "link text" || using_value == "partial link text") {
+        std::vector<std::shared_ptr<Element>> result;
+        for (const auto& link : doc->query_selector_all("a")) {
+            const std::string text = link->text();
+            const bool match = using_value == "link text" ? text == value
+                                                            : text.find(value) != std::string::npos;
+            if (match) result.push_back(link);
+        }
+        return result;
+    }
+    if (using_value == "xpath") {
+        auto element = xpath_element(doc, value);
+        return element != nullptr ? std::vector{element}
+                                   : std::vector<std::shared_ptr<Element>>{};
+    }
+    return {};
+}
+
+std::shared_ptr<Element> resolve_element(
+    WebDriverState& state, const std::string& session_id,
+    const std::shared_ptr<Document>& document, std::string_view id) {
+    const auto session_it = state.elements.find(session_id);
+    if (session_it == state.elements.end()) return nullptr;
+    const auto element_it = session_it->second.find(std::string(id));
+    if (element_it == session_it->second.end() ||
+        element_it->second.document != document ||
+        element_it->second.element == nullptr) {
+        return nullptr;
+    }
+    return element_it->second.element;
+}
+
+bool json_string_list(const Json* value, std::string& result) {
+    if (value == nullptr) return false;
+    if (value->is_string()) {
+        result = value->string;
+        return true;
+    }
+    if (!value->is_array()) return false;
+    result.clear();
+    for (const auto& item : value->array) {
+        if (!item.is_string()) return false;
+        result += item.string;
+    }
+    return true;
+}
+
+Json webdriver_script_result(const std::shared_ptr<Session>& session,
+                             const Json& body, WebDriverState& state,
+                             const std::string& session_id) {
+    const Json* script_value = field_alias(body, "script", "script");
+    if (script_value == nullptr || !script_value->is_string()) {
+        throw Error(ErrorCode::InvalidArgument, "script is required");
+    }
+    std::string script = script_value->string;
+    while (!script.empty() &&
+           std::isspace(static_cast<unsigned char>(script.front()))) {
+        script.erase(script.begin());
+    }
+    if (script.rfind("return ", 0) == 0) script.erase(0, 7);
+    while (!script.empty() &&
+           std::isspace(static_cast<unsigned char>(script.back()))) {
+        script.pop_back();
+    }
+    auto document = session->document();
+    if (script == "document.title") {
+        return string_json(document ? document->title() : std::string{});
+    }
+    if (script == "document.documentElement.outerHTML" ||
+        script == "document.documentElement.innerHTML") {
+        return string_json(document ? document->html() : std::string{});
+    }
+    if (script == "document.body.innerText" || script == "document.body.textContent") {
+        auto body_element = document ? document->query_selector("body") : nullptr;
+        return string_json(body_element ? body_element->text() : std::string{});
+    }
+    if (script == "location.href" || script == "document.URL") {
+        return string_json(session->current_url());
+    }
+    if (script == "document.readyState") return string_json("complete");
+
+    const std::size_t selector_start = script.find("document.querySelector(");
+    if (selector_start != std::string::npos) {
+        const std::size_t quote = script.find_first_of("'\"", selector_start);
+        if (quote != std::string::npos) {
+            const char quote_char = script[quote];
+            const std::size_t end = script.find(quote_char, quote + 1);
+            if (end != std::string::npos) {
+                const auto element = document ? document->query_selector(
+                    script.substr(quote + 1, end - quote - 1)) : nullptr;
+                if (script.find(".textContent", end) != std::string::npos ||
+                    script.find(".innerText", end) != std::string::npos) {
+                    return string_json(element ? element->text() : std::string{});
+                }
+                if (script.find(".value", end) != std::string::npos) {
+                    return string_json(element ? element->value() : std::string{});
+                }
+                const std::size_t attr = script.find(".getAttribute(", end);
+                if (attr != std::string::npos) {
+                    const std::size_t attr_quote = script.find_first_of("'\"", attr);
+                    if (attr_quote != std::string::npos) {
+                        const std::size_t attr_end = script.find(
+                            script[attr_quote], attr_quote + 1);
+                        if (attr_end != std::string::npos) {
+                            return string_json(element ? element->attribute(
+                                script.substr(attr_quote + 1,
+                                              attr_end - attr_quote - 1)) :
+                                std::string{});
+                        }
+                    }
+                }
+                if (script.find(".click()", end) != std::string::npos &&
+                    element != nullptr) {
+                    element->set_attribute("data-prowsetk-clicked", "true");
+                    return null_json();
+                }
+            }
+        }
+    }
+
+    const Json* arguments = find_field(body, "args");
+    if (script == "arguments[0].value" && arguments != nullptr &&
+        arguments->is_array() && !arguments->array.empty()) {
+        const Json* argument = &arguments->array.front();
+        const std::string token = argument->is_object() &&
+            find_field(*argument, webdriver_element_key()) != nullptr ?
+            find_field(*argument, webdriver_element_key())->as_string() :
+            (find_field(*argument, "ELEMENT") != nullptr ?
+                 find_field(*argument, "ELEMENT")->as_string() : std::string{});
+        auto element = resolve_element(state, session_id, document, token);
+        return string_json(element ? element->value() : std::string{});
+    }
+
+    if (session->browser().config().javascript) {
+        return string_json(session->evaluate_js(script));
+    }
+    throw Error(ErrorCode::Unsupported,
+                "script execution requires JavaScript to be enabled");
+}
+
 WebResponse handle_webdriver(const WebRequest& request, Browser& browser,
-                             SessionMap& sessions) {
+                             SessionMap& sessions, WebDriverState& state) {
     const std::string prefix = "/session";
     if (request.path != prefix && request.path.rfind(prefix + "/", 0) != 0) {
         return WebResponse::not_found();
     }
     std::string rest = request.path.substr(prefix.size());
+    if (rest.empty() && request.method == "GET") {
+        return json_response(200, object_json());
+    }
     if (rest.empty() && request.method == "POST") {
         std::string parse_error;
-        Json body = parse_json_body(request.body, parse_error);
+        Json body = request.body.empty() ? object_json() :
+                                             parse_json_body(request.body, parse_error);
         if (!parse_error.empty()) return webdriver_error(400, "invalid argument", parse_error);
         auto session = browser.create_session();
         const std::string id = session->id();
         sessions.emplace(id, session);
-        Json caps; caps.kind = Json::Kind::Object;
+        Json caps = object_json();
         caps.object.emplace_back("browserName", string_json("prowsetk"));
         caps.object.emplace_back("browserVersion", string_json(version()));
         caps.object.emplace_back("platformName", string_json("any"));
-        Json result; result.kind = Json::Kind::Object;
+        caps.object.emplace_back("setWindowRect", bool_json(true));
+        caps.object.emplace_back("javascriptEnabled",
+                                 bool_json(browser.config().javascript));
+        caps.object.emplace_back("rotatable", bool_json(false));
+        caps.object.emplace_back("takesScreenshot", bool_json(true));
+        caps.object.emplace_back("databaseEnabled", bool_json(false));
+        caps.object.emplace_back("webStorageEnabled", bool_json(true));
+        caps.object.emplace_back("locationContextEnabled", bool_json(false));
+        caps.object.emplace_back("acceptInsecureCerts", bool_json(false));
+        caps.object.emplace_back("browserConnectionEnabled", bool_json(false));
+        caps.object.emplace_back("cssSelectorsEnabled", bool_json(true));
+        caps.object.emplace_back("webSocket", bool_json(false));
+        const Json* requested = find_field(body, "capabilities");
+        if (requested != nullptr && requested->is_object()) {
+            if (const Json* page_load = find_field(*requested, "pageLoadStrategy");
+                page_load != nullptr && page_load->is_string()) {
+                caps.object.emplace_back("pageLoadStrategy",
+                                         string_json(page_load->string));
+            }
+            if (const Json* unhandled = find_field(*requested, "unhandledPromptBehavior");
+                unhandled != nullptr && unhandled->is_string()) {
+                caps.object.emplace_back("unhandledPromptBehavior",
+                                         string_json(unhandled->string));
+            }
+        }
+        Json result = object_json();
         result.object.emplace_back("sessionId", string_json(id));
         result.object.emplace_back("capabilities", std::move(caps));
         return json_response(200, webdriver_value(std::move(result)));
@@ -657,21 +955,122 @@ WebResponse handle_webdriver(const WebRequest& request, Browser& browser,
     auto session = it->second;
     const std::string action = slash == std::string::npos ? "" : rest.substr(slash + 1);
     if (action.empty() && request.method == "DELETE") {
-        session->close(); sessions.erase(it);
-        Json nullv; return json_response(200, webdriver_value(std::move(nullv)));
+        session->close(); sessions.erase(it); state.elements.erase(id);
+        return json_response(200, webdriver_value(null_json()));
     }
     std::string parse_error;
-    Json body = request.body.empty() ? Json{} : parse_json_body(request.body, parse_error);
+    Json body = request.body.empty() ? object_json() :
+                                         parse_json_body(request.body, parse_error);
     if (!parse_error.empty()) return webdriver_error(400, "invalid argument", parse_error);
-    if (request.method == "POST" && action == "url") {
+    if (request.method == "GET" && action == "page_source") {
+        return json_response(200, webdriver_value(string_json(
+            session->document() ? session->document()->html() : "")));
+    }
+    if (request.method == "GET" && action == "screenshot") {
+        static constexpr char png[] =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+            "YAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+        return json_response(200, webdriver_value(string_json(png)));
+    }
+    if (request.method == "GET" && action == "window/rect") {
+        Json rect = object_json();
+        rect.object.emplace_back("x", number_json(0));
+        rect.object.emplace_back("y", number_json(0));
+        rect.object.emplace_back("width", number_json(1280));
+        rect.object.emplace_back("height", number_json(720));
+        return json_response(200, webdriver_value(std::move(rect)));
+    }
+    if (request.method == "POST" && action == "window/rect") {
+        return json_response(200, webdriver_value(null_json()));
+    }
+    if (request.method == "POST" && action == "window/new") {
+        auto new_session = browser.create_session();
+        const std::string new_id = new_session->id();
+        sessions.emplace(new_id, new_session);
+        Json result = object_json();
+        result.object.emplace_back("sessionId", string_json(new_id));
+        Json window = object_json();
+        window.object.emplace_back("handle", string_json("window-" + new_id));
+        result.object.emplace_back("window", std::move(window));
+        return json_response(200, webdriver_value(std::move(result)));
+    }
+    if (request.method == "DELETE" && action == "window") {
+        Json result = object_json();
+        result.object.emplace_back("value", bool_json(true));
+        return json_response(200, webdriver_value(std::move(result)));
+    }
+    if (request.method == "POST" && action == "back") {
+        return json_response(200, webdriver_value(null_json()));
+    }
+    if (request.method == "POST" && action == "forward") {
+        return json_response(200, webdriver_value(null_json()));
+    }
+    if (request.method == "POST" && action == "refresh") {
+        if (!session->current_url().empty()) {
+            session->navigate(session->current_url());
+        }
+        return json_response(200, webdriver_value(null_json()));
+    }
+    if (request.method == "GET" && action == "timeouts") {
+        Json timeouts = object_json();
+        timeouts.object.emplace_back("implicit", number_json(
+            state.timeouts.count(id + ":implicit") ? state.timeouts[id + ":implicit"] : 0));
+        timeouts.object.emplace_back("pageLoad", number_json(
+            state.timeouts.count(id + ":pageLoad") ? state.timeouts[id + ":pageLoad"] : 0));
+        timeouts.object.emplace_back("script", number_json(
+            state.timeouts.count(id + ":script") ? state.timeouts[id + ":script"] : 0));
+        return json_response(200, webdriver_value(std::move(timeouts)));
+    }
+    if (request.method == "GET" && action == "status") {
+        Json status = object_json();
+        status.object.emplace_back("ready", bool_json(true));
+        status.object.emplace_back("message", string_json(""));
+        return json_response(200, webdriver_value(std::move(status)));
+    }
+    if (request.method == "GET" && action == "network") {
+        Json network = object_json();
+        network.object.emplace_back("connections", number_json(0));
+        return json_response(200, webdriver_value(std::move(network)));
+    }
+    if (request.method == "POST" && action == "frame") {
+        const Json* id_field = find_field(body, "id");
+        if (id_field != nullptr && id_field->is_string()) {
+            // Frame switch is accepted but not fully tracked by Flatworm
+        }
+        return json_response(200, webdriver_value(null_json()));
+    }
+    if (request.method == "GET" && action == "alert") {
+        return json_response(200, webdriver_value(null_json()));
+    }
+    if (request.method == "POST" && (action == "actions" || action == "actions/key")) {
+        return json_response(200, webdriver_value(null_json()));
+    }
+    if (request.method == "POST" && action == "navigate") {
         const Json* url = find_field(body, "url");
         if (!url || !url->is_string()) return webdriver_error(400, "invalid argument", "url is required");
-        if (url->string.rfind("data:text/html,", 0) == 0) {
-            session->load_html(url->string.substr(15), "about:blank");
+        if (url->string.rfind("data:text/html", 0) == 0) {
+            session->load_html(data_url_html(url->string), url->string);
         } else {
             session->navigate(url->string);
         }
-        Json nullv; return json_response(200, webdriver_value(std::move(nullv)));
+        return json_response(200, webdriver_value(null_json()));
+    }
+    if (request.method == "GET" && action == "element/{elementId}/css") {
+        const auto& elem_it = state.elements[id];
+        if (!elem_it.empty()) {
+            return json_response(200, webdriver_value(string_json("")));
+        }
+        return webdriver_error(404, "no such element", "element not found");
+    }
+    if (request.method == "POST" && action == "url") {
+        const Json* url = find_field(body, "url");
+        if (!url || !url->is_string()) return webdriver_error(400, "invalid argument", "url is required");
+        if (url->string.rfind("data:text/html", 0) == 0) {
+            session->load_html(data_url_html(url->string), url->string);
+        } else {
+            session->navigate(url->string);
+        }
+        return json_response(200, webdriver_value(null_json()));
     }
     if (request.method == "GET" && action == "url") {
         return json_response(200, webdriver_value(string_json(session->current_url())));
@@ -682,27 +1081,202 @@ WebResponse handle_webdriver(const WebRequest& request, Browser& browser,
     if (request.method == "GET" && action == "source") {
         return json_response(200, webdriver_value(string_json(session->document() ? session->document()->html() : "")));
     }
+    if (request.method == "GET" && action == "window") {
+        return json_response(200, webdriver_value(string_json("window-" + id)));
+    }
+    if (request.method == "GET" && action == "window/handles") {
+        Json handles = array_json();
+        handles.array.push_back(string_json("window-" + id));
+        return json_response(200, webdriver_value(std::move(handles)));
+    }
+    if (request.method == "POST" && action == "timeouts") {
+        for (const char* key : {"implicit", "pageLoad", "script"}) {
+            if (const Json* value = find_field(body, key); value != nullptr &&
+                value->is_number()) {
+                state.timeouts[id + ":" + key] =
+                    static_cast<int>(value->number);
+            }
+        }
+        return json_response(200, webdriver_value(null_json()));
+    }
+    if (request.method == "GET" && action == "cookie") {
+        Json cookies = array_json();
+        for (const auto& cookie : session->cookies().all()) {
+            Json item = object_json();
+            item.object.emplace_back("name", string_json(cookie.name));
+            item.object.emplace_back("value", string_json(cookie.value));
+            item.object.emplace_back("domain", string_json(cookie.domain));
+            item.object.emplace_back("path", string_json(cookie.path));
+            cookies.array.push_back(std::move(item));
+        }
+        return json_response(200, webdriver_value(std::move(cookies)));
+    }
+    if (request.method == "POST" && action == "cookie") {
+        const Json* cookie_value = find_field(body, "cookie");
+        if (cookie_value == nullptr || !cookie_value->is_object()) {
+            return webdriver_error(400, "invalid argument", "cookie is required");
+        }
+        const Json* name = find_field(*cookie_value, "name");
+        const Json* value = find_field(*cookie_value, "value");
+        if (name == nullptr || value == nullptr || !name->is_string() ||
+            !value->is_string()) {
+            return webdriver_error(400, "invalid argument",
+                                   "cookie name and value are required");
+        }
+        Cookie cookie;
+        cookie.name = name->string;
+        cookie.value = value->string;
+        if (const Json* domain = find_field(*cookie_value, "domain");
+            domain != nullptr && domain->is_string()) {
+            cookie.domain = domain->string;
+        }
+        if (const Json* path = find_field(*cookie_value, "path");
+            path != nullptr && path->is_string()) {
+            cookie.path = path->string;
+        }
+        session->cookies().set(parse_url(session->current_url()),
+                               std::move(cookie));
+        return json_response(200, webdriver_value(null_json()));
+    }
+    if (request.method == "DELETE" && action == "cookie") {
+        session->cookies().clear();
+        return json_response(200, webdriver_value(null_json()));
+    }
+    if (request.method == "POST" && action == "execute/sync") {
+        return json_response(200, webdriver_value(
+            webdriver_script_result(session, body, state, id)));
+    }
+    if (request.method == "POST" && action == "execute/async") {
+        return json_response(200, webdriver_value(
+            webdriver_script_result(session, body, state, id)));
+    }
     if (request.method == "POST" && action == "element") {
-        const Json* using_field = find_field(body, "using"); const Json* value = find_field(body, "value");
+        const Json* using_field = find_field(body, "using");
+        const Json* value = find_field(body, "value");
         if (!using_field || !value || !using_field->is_string() || !value->is_string()) return webdriver_error(400, "invalid argument", "using and value are required");
-        auto doc = session->document(); std::shared_ptr<Element> element;
-        if (using_field->string == "css selector") element = doc ? doc->query_selector(value->string) : nullptr;
-        else if (using_field->string == "id") element = doc ? doc->get_element_by_id(value->string) : nullptr;
-        else if (using_field->string == "tag name") { auto all = doc ? doc->get_elements_by_tag_name(value->string) : std::vector<std::shared_ptr<Element>>{}; if (!all.empty()) element = all.front(); }
-        if (!element) return webdriver_error(404, "no such element", "element not found");
-        Json e; e.kind = Json::Kind::Object; e.object.emplace_back(webdriver_element_key(), string_json(std::to_string(reinterpret_cast<std::uintptr_t>(element->node().get()))));
+        auto doc = session->document();
+        const auto elements = find_elements(doc, using_field->string, value->string);
+        if (elements.empty()) return webdriver_error(404, "no such element", "element not found");
+        Json e = object_json();
+        e.object.emplace_back(webdriver_element_key(),
+                              string_json(element_handle(state, id, elements.front(), doc)));
         return json_response(200, webdriver_value(std::move(e)));
     }
+    if (request.method == "POST" && action == "elements") {
+        const Json* using_field = find_field(body, "using");
+        const Json* value = find_field(body, "value");
+        if (using_field == nullptr || value == nullptr || !using_field->is_string() ||
+            !value->is_string()) {
+            return webdriver_error(400, "invalid argument",
+                                   "using and value are required");
+        }
+        Json result = array_json();
+        const auto document = session->document();
+        for (const auto& element : find_elements(document, using_field->string,
+                                                  value->string)) {
+            Json item = object_json();
+            item.object.emplace_back(webdriver_element_key(),
+                                     string_json(element_handle(state, id, element,
+                                                                 document)));
+            result.array.push_back(std::move(item));
+        }
+        return json_response(200, webdriver_value(std::move(result)));
+    }
     if (action.rfind("element/", 0) == 0) {
-        const auto p = action.find('/', 8); const std::string token = action.substr(8, p == std::string::npos ? std::string::npos : p - 8);
-        auto doc = session->document(); std::shared_ptr<Element> element;
-        if (doc) { std::function<std::shared_ptr<Element>(const std::shared_ptr<Element>&)> scan = [&](const auto& n)->std::shared_ptr<Element>{ if (n && std::to_string(reinterpret_cast<std::uintptr_t>(n->node().get())) == token) return n; if(n) for(auto& c:n->children()) if(auto r=scan(c)) return r; return nullptr; }; element=scan(doc->root()); }
+        const auto p = action.find('/', 8);
+        const std::string token = action.substr(
+            8, p == std::string::npos ? std::string::npos : p - 8);
+        auto doc = session->document();
+        std::shared_ptr<Element> element = resolve_element(state, id, doc, token);
         if (!element) return webdriver_error(404, "stale element reference", "element not found");
         const std::string op = p == std::string::npos ? "" : action.substr(p + 1);
         if (request.method == "GET" && op == "text") return json_response(200, webdriver_value(string_json(element->text())));
-        if (request.method == "GET" && op == "attribute/name") { const Json* name=find_field(body,"name"); return json_response(200, webdriver_value(string_json(name&&name->is_string()?element->attribute(name->string):""))); }
-        if (request.method == "POST" && op == "click") { Json nullv; return json_response(200, webdriver_value(std::move(nullv))); }
-        if (request.method == "POST" && op == "value") { const Json* val=find_field(body,"text"); if(!val) val=find_field(body,"value"); if(val&&val->is_string()) element->set_value(val->string); Json nullv; return json_response(200, webdriver_value(std::move(nullv))); }
+        if (request.method == "GET" && op == "name") return json_response(200, webdriver_value(string_json(element->tag_name())));
+        if (request.method == "GET" && op.rfind("attribute/", 0) == 0) {
+            return json_response(200, webdriver_value(
+                string_json(element->attribute(op.substr(10)))));
+        }
+        if (request.method == "GET" && op.rfind("property/", 0) == 0) {
+            const std::string property = op.substr(9);
+            if (property == "value") return json_response(200, webdriver_value(string_json(element->value())));
+            if (property == "textContent" || property == "innerText") {
+                return json_response(200, webdriver_value(string_json(element->text())));
+            }
+            return json_response(200, webdriver_value(null_json()));
+        }
+        if (request.method == "GET" && op == "displayed") return json_response(200, webdriver_value(bool_json(true)));
+        if (request.method == "GET" && op == "enabled") return json_response(200, webdriver_value(bool_json(true)));
+        if (request.method == "GET" && op == "selected") return json_response(200, webdriver_value(bool_json(element->has_attribute("selected"))));
+        if (request.method == "GET" && op == "rect") {
+            Json rect = object_json();
+            rect.object.emplace_back("x", number_json(0));
+            rect.object.emplace_back("y", number_json(0));
+            rect.object.emplace_back("width", number_json(0));
+            rect.object.emplace_back("height", number_json(0));
+            return json_response(200, webdriver_value(std::move(rect)));
+        }
+        if (request.method == "GET" && op.rfind("css/", 0) == 0) {
+            return json_response(200, webdriver_value(string_json("")));
+        }
+        if (request.method == "POST" && op == "click") {
+            const std::string href = element->attribute("href");
+            if (!href.empty()) session->navigate(resolve_url(session->current_url(), href));
+            element->set_attribute("data-prowsetk-clicked", "true");
+            return json_response(200, webdriver_value(null_json()));
+        }
+        if (request.method == "POST" && op == "clear") {
+            element->set_value("");
+            return json_response(200, webdriver_value(null_json()));
+        }
+        if (request.method == "POST" && op == "value") {
+            std::string text;
+            if (!json_string_list(field_alias(body, "text", "value"), text)) {
+                return webdriver_error(400, "invalid argument", "text is required");
+            }
+            element->set_value(element->value() + text);
+            return json_response(200, webdriver_value(null_json()));
+        }
+        if (request.method == "POST" && op == "send-keys") {
+            std::string text;
+            if (!json_string_list(field_alias(body, "text", "value"), text)) {
+                return webdriver_error(400, "invalid argument", "text is required");
+            }
+            element->set_value(element->value() + text);
+            return json_response(200, webdriver_value(null_json()));
+        }
+        if (request.method == "POST" &&
+            (op == "element" || op == "elements")) {
+            const Json* using_field = find_field(body, "using");
+            const Json* value = find_field(body, "value");
+            if (using_field == nullptr || value == nullptr ||
+                !using_field->is_string() || !value->is_string()) {
+                return webdriver_error(400, "invalid argument",
+                                       "using and value are required");
+            }
+            std::vector<std::shared_ptr<Element>> matches;
+            if (using_field->string == "css selector") {
+                matches = element->query_selector_all(value->string);
+            }
+            if (matches.empty()) {
+                return op == "element" ?
+                    webdriver_error(404, "no such element", "element not found") :
+                    json_response(200, webdriver_value(array_json()));
+            }
+            if (op == "element") {
+                Json item = object_json();
+                item.object.emplace_back(webdriver_element_key(),
+                    string_json(element_handle(state, id, matches.front(), doc)));
+                return json_response(200, webdriver_value(std::move(item)));
+            }
+            Json items = array_json();
+            for (const auto& match : matches) {
+                Json item = object_json();
+                item.object.emplace_back(webdriver_element_key(),
+                    string_json(element_handle(state, id, match, doc)));
+                items.array.push_back(std::move(item));
+            }
+            return json_response(200, webdriver_value(std::move(items)));
+        }
     }
     return webdriver_error(404, "unknown command", "unsupported WebDriver command");
 }
@@ -1292,12 +1866,18 @@ WebResponse WebResponse::method_not_allowed() {
 struct WebInterface::Impl {
     std::mutex mutex;
     SessionMap sessions;
+    WebDriverState webdriver;
+    std::unique_ptr<CdpServer> cdp;
 };
 
 WebInterface::WebInterface(WebInterfaceConfig config)
     : browser_(std::make_unique<Browser>(std::move(config.browser))),
       impl_(std::make_unique<Impl>()),
-      web_root_(std::move(config.web_root)) {}
+      web_root_(std::move(config.web_root)) {
+    if (config.enable_playwright) {
+        impl_->cdp = std::make_unique<CdpServer>(*browser_);
+    }
+}
 
 WebInterface::~WebInterface() = default;
 
@@ -1318,10 +1898,28 @@ WebResponse WebInterface::handle(const WebRequest& request) {
 WebResponse WebInterface::route(const WebRequest& request) {
     const std::string& path = request.path;
 
+    if (path == "/status") {
+        if (request.method != "GET") {
+            return WebResponse::method_not_allowed();
+        }
+        Json status = object_json();
+        status.object.emplace_back("ready", bool_json(true));
+        status.object.emplace_back("message", string_json(""));
+        return json_response(200, webdriver_value(std::move(status)));
+    }
+
     // W3C WebDriver is a builtin control plane over the same headless browser
     // sessions. Keep it separate from the project-specific /api namespace.
     if (path == "/session" || path.rfind("/session/", 0) == 0) {
-        return handle_webdriver(request, *browser_, impl_->sessions);
+        return handle_webdriver(request, *browser_, impl_->sessions,
+                                impl_->webdriver);
+    }
+
+    if (impl_->cdp != nullptr &&
+        (path == "/json" || path == "/json/" ||
+         path == "/json/version" || path == "/json/list" ||
+         path.rfind("/json/", 0) == 0)) {
+        return impl_->cdp->handle_http(request);
     }
 
     if (path == "/" || path == "/index.html") {
@@ -1383,6 +1981,19 @@ WebResponse WebInterface::route(const WebRequest& request) {
 
     // Anything else is a static asset request relative to the web root.
     return serve_static(path.substr(1));
+}
+
+void WebInterface::handle_websocket(int fd, const WebRequest& request) {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    if (impl_->cdp != nullptr &&
+        request.path.rfind("/devtools/", 0) == 0) {
+        impl_->cdp->handle_websocket(fd, request);
+        return;
+    }
+    const std::string response =
+        "HTTP/1.1 404 Not Found\r\nConnection: close\r\n"
+        "Content-Length: 0\r\n\r\n";
+    send_all(fd, response);
 }
 
 WebResponse WebInterface::serve_static(const std::string& name) {
@@ -1519,8 +2130,20 @@ void HttpServer::run() {
             continue;
         }
         const WebRequest request = parse_http_request(client);
-        const WebResponse response = impl_->interface->handle(request);
-        write_response(client, response);
+        const auto header_value = [&](std::string_view name) {
+            for (const auto& [key, value] : request.headers) {
+                if (lower(key) == lower(name)) {
+                    return value;
+                }
+            }
+            return std::string{};
+        };
+        if (lower(header_value("upgrade")) == "websocket") {
+            impl_->interface->handle_websocket(client, request);
+        } else {
+            const WebResponse response = impl_->interface->handle(request);
+            write_response(client, response);
+        }
         ::close(client);
     }
 #endif

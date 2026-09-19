@@ -26,6 +26,12 @@ target_link_libraries(prowsetk_integration_web_interface PRIVATE
 prowsetk_gtest(prowsetk_integration_webdriver "prowsetk.integration.webdriver."
     "integration;web-interface" test_webdriver.cpp)
 
+prowsetk_gtest(prowsetk_integration_cdp "prowsetk.integration.cdp."
+    "integration;web-interface;playwright" test_cdp.cpp)
+target_include_directories(prowsetk_integration_cdp PRIVATE
+    "${PROJECT_SOURCE_DIR}/src/core")
+target_link_libraries(prowsetk_integration_cdp PRIVATE Threads::Threads)
+
 prowsetk_gtest(prowsetk_integration_drivers "prowsetk.integration.driver."
     "integration;lua" test_drivers.cpp)
 target_compile_definitions(prowsetk_integration_drivers PRIVATE

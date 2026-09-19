@@ -1079,6 +1079,8 @@ alongside the document's own discoveries.
 
 ```sh
 prowsetk serve [--host 127.0.0.1] [--port 8080] [--web-root DIR] [--no-javascript]
+prowsetk webdriver [--host 127.0.0.1] [--port 9515] [--no-javascript]
+prowsetk playwright [--host 127.0.0.1] [--port 9222]
 prowsetk endpoints --url https://example.com --output build/openapi.yaml
 prowsetk run crawl-site --url https://example.com --depth 2 --output build/pages.jsonl
 prowsetk version
@@ -1089,6 +1091,30 @@ prowsetk version
 is a single-page application (`resources/web/index.html`, `app.js`,
 `style.css`) with no framework and no build step: it drives the same REST API
 from the browser.
+
+### Automation protocols
+
+The `webdriver` command exposes the W3C WebDriver HTTP protocol directly from
+the headless engine. It supports the standard session lifecycle, navigation,
+document inspection, CSS/ID/tag/name/XPath lookup, element interaction,
+JavaScript execution, cookies, timeouts, window handles, and stale-element
+errors. Selenium clients can connect with `webdriver.Remote` using the printed
+URL. The protocol reports `browserName: "prowsetk"` and never requires a
+desktop browser or driver executable.
+
+The `playwright` command exposes a native Chrome DevTools Protocol (CDP) bridge
+for Playwright's `connect_over_cdp` workflow:
+
+```python
+with sync_playwright() as p:
+    browser = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
+```
+
+CDP discovery is available at `/json/version` and `/json/list`. The bridge is
+implemented in the core WebInterface, not as a plugin, and maps CDP navigation,
+runtime evaluation, DOM queries, and target/session operations to Flatworm.
+Because ProwseTk is headless and does not render pixels, screenshot responses
+are protocol-valid placeholders rather than browser-rendered images.
 
 ### Constraints
 

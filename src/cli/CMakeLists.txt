@@ -1,5 +1,6 @@
 prowsetk_add_executable(prowsetk_cli prowsetk_main.cpp)
 target_link_libraries(prowsetk_cli PRIVATE ProwseTk::core)
+target_include_directories(prowsetk_cli PRIVATE "${PROJECT_SOURCE_DIR}/src/core")
 
 # Point the CLI at the repository's static web UI so `prowsetk serve` finds
 # index.html/app.js/style.css when run from a build tree. The --web-root flag

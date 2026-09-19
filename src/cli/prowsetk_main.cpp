@@ -124,6 +124,7 @@ void print_usage(std::ostream& out) {
         << "  prowsetk serve [--host 127.0.0.1] [--port 8080] [--web-root DIR] "
            "[--no-javascript]\n"
         << "  prowsetk webdriver [--host 127.0.0.1] [--port 0] [--no-javascript]\n"
+        << "  prowsetk cdp [--host 127.0.0.1] [--port 0] [--no-javascript]\n"
         << "  prowsetk endpoints --url URL [--output FILE] [--javascript]\n"
         << "  prowsetk run <driver> [--arg VALUE ...] [--config Prowse.toml]\n";
 }
@@ -164,6 +165,22 @@ int run_webdriver(const Arguments& args) {
     return 0;
 }
 
+int run_playwright(const Arguments& args) {
+    prowsetk::WebInterfaceConfig config;
+    config.browser.javascript = args.javascript;
+    config.enable_playwright = true;
+    // CDP is a protocol endpoint, not a static UI.
+    config.web_root.clear();
+    prowsetk::WebInterface interface(std::move(config));
+    prowsetk::HttpServer server(interface, args.host,
+                                static_cast<std::uint16_t>(args.port));
+    std::cout << "ProwseTk " << prowsetk::version()
+              << " Playwright/CDP listening on http://" << args.host << ":"
+              << server.port() << "\n";
+    std::cout.flush();
+    server.run();
+    return 0;
+}
 int run_endpoints(const Arguments& args) {
     if (args.url.empty()) {
         std::cerr << "prowsetk endpoints: missing --url\n";
@@ -322,12 +339,15 @@ int main(int argc, char** argv) {
             std::cout << prowsetk::version() << '\n';
             return 0;
         }
-    if (args.command == "serve") {
-        return run_serve(args);
-    }
-    if (args.command == "webdriver") {
-        return run_webdriver(args);
-    }
+        if (args.command == "serve") {
+            return run_serve(args);
+        }
+        if (args.command == "webdriver") {
+            return run_webdriver(args);
+        }
+        if (args.command == "playwright" || args.command == "cdp") {
+            return run_playwright(args);
+        }
         if (args.command == "endpoints") {
             return run_endpoints(args);
         }
