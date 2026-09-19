@@ -115,7 +115,7 @@ function main(args)
     local api_pattern = args.api_pattern
     local api_patterns = parse_patterns(api_pattern, args.api_patterns)
 
-    local browser = prowse.browser.new({ javascript = false, follow_redirects = true, observe_network = false })
+    local browser = prowse.browser.new({ javascript = true, follow_redirects = true, observe_network = false })
     local session = browser:create_session()
 
     -- Load document

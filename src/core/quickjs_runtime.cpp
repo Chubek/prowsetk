@@ -122,6 +122,10 @@ JSValue queue_microtask(JSContext* context, JSValueConst, int argc,
     return JS_UNDEFINED;
 }
 
+JSValue noop_event_listener(JSContext*, JSValueConst, int, JSValueConst*) {
+    return JS_UNDEFINED;
+}
+
 class QuickJavaScriptRuntime final : public JavaScriptRuntime {
 public:
     QuickJavaScriptRuntime()
@@ -218,6 +222,15 @@ public:
         console_handler_ = std::move(handler);
     }
 
+    void set_document_host(DocumentScriptHost* host) override {
+        document_host_ = host;
+        install_dom_binding();
+    }
+
+    DocumentScriptHost* document_host() const noexcept {
+        return document_host_;
+    }
+
     std::string name() const override { return "quickjs"; }
 
     CapabilitySet capabilities() const override {
@@ -257,8 +270,85 @@ private:
     RuntimePtr runtime_;
     ContextPtr context_;
     ConsoleHandler console_handler_;
+    DocumentScriptHost* document_host_ = nullptr;
     bool active_ = false;
+
+    void install_dom_binding();
 };
+
+JSValue document_element_class_get(JSContext* context, JSValueConst) {
+    auto* runtime =
+        static_cast<QuickJavaScriptRuntime*>(JS_GetContextOpaque(context));
+    if (runtime == nullptr || runtime->document_host() == nullptr) {
+        return JS_NewString(context, "");
+    }
+    const auto class_name = runtime->document_host()->document_element_class_name();
+    return JS_NewStringLen(context, class_name.data(), class_name.size());
+}
+
+JSValue document_element_class_set(JSContext* context, JSValueConst,
+                                   JSValueConst value) {
+    auto* runtime =
+        static_cast<QuickJavaScriptRuntime*>(JS_GetContextOpaque(context));
+    if (runtime == nullptr || runtime->document_host() == nullptr) {
+        return JS_UNDEFINED;
+    }
+    std::string class_name = value_to_string(context, value);
+    if (JS_HasException(context)) return JS_EXCEPTION;
+    runtime->document_host()->set_document_element_class_name(class_name);
+    return JS_UNDEFINED;
+}
+
+JSValue new_getter(JSContext* context, JSValue (*function)(JSContext*, JSValueConst),
+                   const char* name) {
+    JSCFunctionType function_type;
+    function_type.getter = function;
+    return JS_NewCFunction2(context, function_type.generic, name, 0,
+                            JS_CFUNC_getter, 0);
+}
+
+JSValue new_setter(JSContext* context,
+                   JSValue (*function)(JSContext*, JSValueConst, JSValueConst),
+                   const char* name) {
+    JSCFunctionType function_type;
+    function_type.setter = function;
+    return JS_NewCFunction2(context, function_type.generic, name, 1,
+                            JS_CFUNC_setter, 0);
+}
+
+void QuickJavaScriptRuntime::install_dom_binding() {
+    if (active_) return;
+    ExecutionScope scope(runtime_.get(), active_, ScriptOptions{});
+    JSContext* context = context_.get();
+    JSValue global = JS_GetGlobalObject(context);
+    JSValue document = JS_NewObject(context);
+    JSValue document_element = JS_NewObject(context);
+    const JSAtom class_name = JS_NewAtom(context, "className");
+    if (class_name == JS_ATOM_NULL) throw std::bad_alloc();
+    JS_DefinePropertyGetSet(
+        context, document_element, class_name,
+        new_getter(context, document_element_class_get, "get className"),
+        new_setter(context, document_element_class_set, "set className"),
+        JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(context, class_name);
+    JS_SetPropertyStr(context, document, "documentElement", document_element);
+    JS_SetPropertyStr(context, document, "addEventListener",
+                      JS_NewCFunction(context, noop_event_listener,
+                                      "addEventListener", 2));
+    if (document_host_ != nullptr) {
+        const auto url = document_host_->document_url();
+        JS_SetPropertyStr(context, document, "URL",
+                          JS_NewStringLen(context, url.data(), url.size()));
+    }
+    JS_SetPropertyStr(context, global, "document", document);
+    JS_SetPropertyStr(context, global, "window", JS_DupValue(context, global));
+    JS_SetPropertyStr(context, global, "self", JS_DupValue(context, global));
+    JS_SetPropertyStr(context, global, "addEventListener",
+                      JS_NewCFunction(context, noop_event_listener,
+                                      "addEventListener", 2));
+    if (JS_HasException(context)) (void)take_exception(context);
+    JS_FreeValue(context, global);
+}
 
 // Called by the `console.log/info/warn/error/debug` host bindings. Reads the
 // runtime pointer from the context opaque slot and forwards to its handler.

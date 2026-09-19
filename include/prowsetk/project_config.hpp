@@ -130,7 +130,7 @@ struct ProjectConfig {
     std::string root = ".";
 
     std::string user_agent;
-    bool javascript = false;
+    bool javascript = true;
     bool follow_redirects = true;
     int max_redirects = 10;
     int timeout_ms = 30000;

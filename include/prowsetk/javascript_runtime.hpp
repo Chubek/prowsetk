@@ -32,6 +32,18 @@ struct ConsoleMessage {
 
 using ConsoleHandler = std::function<void(const ConsoleMessage&)>;
 
+// Minimal document host exposed to page JavaScript. This is deliberately small:
+// JavaScript remains page scripting only, while DOM access is mediated through
+// Session-owned callbacks instead of exposing engine internals or C++ objects.
+class DocumentScriptHost {
+public:
+    virtual ~DocumentScriptHost() = default;
+
+    virtual std::string document_element_class_name() const = 0;
+    virtual void set_document_element_class_name(std::string_view value) = 0;
+    virtual std::string document_url() const = 0;
+};
+
 // Executes page JavaScript. JavaScript is the page-scripting runtime only; it
 // is never an extension mechanism (README "JavaScript Execution").
 class JavaScriptRuntime {
@@ -47,6 +59,7 @@ public:
     // Installs the handler invoked for every console.* call made by page
     // scripts. A session wires it to emit EventType::Console events.
     virtual void set_console_handler(ConsoleHandler handler) = 0;
+    virtual void set_document_host(DocumentScriptHost* host);
 
     virtual std::string name() const = 0;
     virtual CapabilitySet capabilities() const = 0;

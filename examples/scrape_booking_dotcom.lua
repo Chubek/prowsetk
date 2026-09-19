@@ -106,7 +106,7 @@ function main(args)
         if not home or home == '' then fail('HOME is unset; supply --output') end
         output = home .. output:sub(2)
     end
-    local browser = prowse.browser.new({javascript=false, follow_redirects=false, timeout_ms=30000,
+    local browser = prowse.browser.new({javascript=true, follow_redirects=false, timeout_ms=30000,
                                        observe_network=false})
     local session = browser:create_session()
     local stage = 'initialization'
@@ -164,6 +164,12 @@ function main(args)
         return #doc:query_selector_all(args.success_selector or
             'a[href*="logout"], a[href*="signout"], form[action*="logout"], [data-testid="account-menu"]') > 0
     end
+    local function login_requires_browser_js()
+        local text = (session:document():text() or ''):lower()
+        if text:find('please enable javascript', 1, true) or
+           text:find('enable javascript in your browser', 1, true) then return true end
+        return #session:document():query_selector_all('html.no-js, noscript') > 0
+    end
     local ok, message = pcall(function()
         local is_authenticated = false
         if offline then session:load_html(args.html, url)
@@ -187,10 +193,10 @@ function main(args)
                     if p or u then selected, user_input, pass_input = form, u, p; break end
                 end
                 if not selected then
-                    -- No server-rendered login form; this is likely a JS SPA.
-                    -- Continue to extraction without authenticating.
-                    print('booking-dotcom: no server-rendered login form; extracting unauthenticated endpoints')
-                    break
+                    if login_requires_browser_js() then
+                        fail('login page requires browser JavaScript or captcha support that Flatworm does not yet provide; no OpenAPI file written')
+                    end
+                    fail('login form not available or authentication not confirmed; no OpenAPI file written')
                 end
                 if sent_password then fail('login was not confirmed; refusing to retry the password') end
                 if (selected:attribute('method') or ''):lower() ~= 'post' then fail('login form must use POST') end
@@ -218,6 +224,8 @@ function main(args)
                 print('booking-dotcom: login confirmed')
             elseif login_attempted and not authenticated() then
                 fail('login not confirmed; no OpenAPI file written')
+            elseif not is_authenticated then
+                fail('login form not available or authentication not confirmed; no OpenAPI file written')
             end
         end
         stage = 'extracting endpoints'
@@ -231,14 +239,14 @@ function main(args)
                 if valid then sources[#sources+1] = target else skipped = skipped + 1 end
             end
             for _, source in ipairs(sources) do
-                if origin(source) == origin(page_url) and not seen[source] and attempted < 32 then
+                if trusted(source) and not seen[source] and attempted < 32 then
                     seen[source] = true
                     attempted = attempted + 1
                     local fetched, body = pcall(request, 'GET', source)
-                    if fetched and #body <= 2 * 1024 * 1024 and script_bytes + #body <= 16 * 1024 * 1024 then
+                    if fetched and type(body) == 'string' and #body <= 2 * 1024 * 1024 and
+                       script_bytes + #body <= 16 * 1024 * 1024 then
                         script_bytes = script_bytes + #body
                         local script = session:document():create_element('script')
-           'script')
                         script:set_text(body)
                         session:document():root():append_child(script)
                         script_count = script_count + 1
@@ -250,7 +258,7 @@ function main(args)
             scrape_all_paths=true,
             follow_links=true, inspect_scripts=true, redact_secrets=true, include_provenance=true,
             minimum_confidence=0, output=''})
-        if result.endpoint_count == 0 and authenticated then fail('no endpoints discovered; no OpenAPI file written') end
+        if result.endpoint_count == 0 and is_authenticated then fail('no endpoints discovered; no OpenAPI file written') end
         local yaml = result.openapi_yaml
         -- Defense in depth for credentials repeated under arbitrary field names.
         for _, secret in ipairs({username, password, encode(username), encode(password)}) do

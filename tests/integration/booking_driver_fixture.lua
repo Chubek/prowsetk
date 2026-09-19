@@ -1,6 +1,6 @@
 -- Real DOM + endpoint extractor with an in-memory HTTP boundary.
 local prowse = require('lprowse')
-local browser = prowse.browser.new({javascript=false})
+local browser = prowse.browser.new({javascript=true})
 local dom_session = browser:create_session()
 local calls = {}
 local closed = false
@@ -14,6 +14,8 @@ elseif scenario == 'get-form' then
     login = login:gsub('method="post"', 'method="get"')
 elseif scenario == 'challenge' then
     login = '<html><title>Verification required</title><div id="captcha"></div><a href="/sign-in">Sign in</a><script>fetch(\'/api/status\')</script></html>'
+elseif scenario == 'js-required' then
+    login = '<html class="no-js"><noscript>Please enable JavaScript in your browser to proceed</noscript><script src="https://cf.bstatic.com/app.js"></script></html>'
 end
 local wrapper = {}
 function wrapper:load_html(...) return dom_session:load_html(...) end
@@ -50,7 +52,7 @@ function wrapper:request(method, url, options)
     error('unexpected request')
 end
 prowse.browser.new = function(config)
-    assert(config.follow_redirects == false and config.javascript == false)
+    assert(config.follow_redirects == false and config.javascript == true)
     return {create_session=function() return wrapper end}
 end
 local original_getenv = os.getenv
@@ -85,18 +87,19 @@ if scenario == 'success' or scenario == 'two-step' then
     end
     assert(#calls == (scenario == 'two-step' and 5 or 4))
 elseif scenario == 'challenge' then
-    -- No server-rendered login form (JS SPA); extraction proceeds unauthenticated.
-    assert(succeeded, message)
-    assert(message == 0)
-    f = assert(io.open(output_file, 'r'))
-    local yaml = f:read('*a'); f:close()
-    assert(yaml:find('authenticated: false', 1, true))
-    assert(yaml:find('complete: false', 1, true))
-    assert(yaml:find('/sign-in', 1, true), 'missing unauthenticated endpoint /sign-in')
-    assert(yaml:find('/api/status', 1, true), 'missing unauthenticated endpoint /api/status')
-    -- Credentials were never sent.
+    assert(not succeeded, 'expected a challenge failure')
+    assert(not io.open(output_file, 'r'), 'challenge produced output')
+    assert(message:find('login form not available', 1, true), message)
     for _, secret in ipairs({'fixture#pass&word','fixture@example.com','fixture-csrf'}) do
-        assert(not yaml:find(secret, 1, true), 'secret leaked in output: ' .. secret)
+        assert(not message:find(secret, 1, true), 'error leaked a secret')
+    end
+    assert(#calls == 1, 'unexpected HTTP calls')
+elseif scenario == 'js-required' then
+    assert(not succeeded, 'expected a JavaScript-required failure')
+    assert(not io.open(output_file, 'r'), 'JavaScript-required page produced output')
+    assert(message:find('requires browser JavaScript or captcha support', 1, true), message)
+    for _, secret in ipairs({'fixture#pass&word','fixture@example.com','fixture-csrf'}) do
+        assert(not message:find(secret, 1, true), 'error leaked a secret')
     end
     assert(#calls == 1, 'unexpected HTTP calls')
 else

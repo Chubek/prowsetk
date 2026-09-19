@@ -1701,18 +1701,20 @@ the marker with `--success_selector SELECTOR` for a known authenticated-only
 element. Form actions and redirects must remain on the configured HTTPS
 origin, or on Booking.com subdomains when the starting host is Booking.com.
 
-**Live compatibility limitation:** the tested `admin.booking.com` response is
-a JavaScript account-portal shell with no form/input elements and a message
-requiring JavaScript. Flatworm's current QuickJS runtime lacks the browser DOM
-and fetch bindings needed by that portal. The live attempt therefore stops
-before sending credentials and writes no authenticated specification. This
-example does not yet establish working Booking.com authentication; it does
-not solve interactive challenges or MFA.
+**Live compatibility limitation:** Flatworm enables QuickJS page scripting and
+provides a minimal browser DOM bridge for common JavaScript-enabled-page
+checks such as `document.documentElement.className`, so ordinary `<noscript>`
+fallbacks are not treated as rendered page text when JavaScript runs. The
+tested `admin.booking.com` response is still a JavaScript account-portal shell
+with no form/input elements and portal APIs that exceed the current DOM/fetch
+surface. The live attempt therefore stops before sending credentials and writes
+no authenticated specification. This example does not yet establish working
+Booking.com authentication; it does not solve interactive challenges or MFA.
 
 After confirmed login, the driver inspects the current page plus at most 32
-same-origin external script requests, without executing scripts or calling
-discovered API endpoints. Script inspection is capped at 2 MiB per script and
-16 MiB total. It forwards `scrape_all_paths=true` through the Lua plugin and
+same-origin external script requests without calling discovered API endpoints.
+Script inspection is capped at 2 MiB per script and 16 MiB total. It forwards
+`scrape_all_paths=true` through the Lua plugin and
 extractor, so ordinary links/resources are included alongside API patterns,
 forms, and literal fetch/XHR calls. Imported scripts are analyzed in the page
 context. Provenance/confidence and redaction are retained; output explicitly

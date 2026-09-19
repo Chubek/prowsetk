@@ -334,6 +334,33 @@ TEST(Navigation, ExecutesPageJavaScriptOrReportsUnavailableEngine) {
     }
 }
 
+TEST(Navigation, JavaScriptEnabledPagesDoNotExposeNoScriptFallbacks) {
+    BrowserConfig config;
+    config.javascript = true;
+    Browser browser(config);
+    auto network = std::make_unique<MemoryNetworkClient>();
+    network->set_response(
+        "https://example.com/",
+        html_response(200,
+                      "<html class='no-js'><head><script>"
+                      "document.documentElement.className = "
+                      "document.documentElement.className.replace(/\\bno-js\\b/, 'js');"
+                      "</script></head><body><noscript>Please enable JavaScript"
+                      "</noscript><main>Application</main></body></html>"));
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->navigate("https://example.com/");
+
+    if (browser.capabilities().has("javascript")) {
+        ASSERT_NE(session->document(), nullptr);
+        ASSERT_NE(session->document()->query_selector("html"), nullptr);
+        EXPECT_EQ(session->document()->query_selector("html")->class_name(), "js");
+        EXPECT_EQ(session->document()->text().find("Please enable JavaScript"),
+                  std::string::npos);
+    }
+}
+
 TEST(Navigation, CapabilitiesReflectUnavailableWasm) {
     Browser browser;
     const auto capabilities = browser.capabilities();
@@ -380,6 +407,7 @@ TEST(Navigation, BeforeRequestHookCanModifyHeaders) {
 
     browser.events().subscribe(EventType::BeforeRequest,
         [](prowsetk::Event& event) {
+            (void)event;
             // Note: current implementation doesn't allow header modification in event
             // but we can verify the event is emitted
         });

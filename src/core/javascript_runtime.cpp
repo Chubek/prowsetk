@@ -46,6 +46,8 @@ bool JavaScriptRuntime::has_pending_microtasks() const {
     return false;
 }
 
+void JavaScriptRuntime::set_document_host(DocumentScriptHost*) {}
+
 std::unique_ptr<JavaScriptRuntime> make_null_javascript_runtime() {
     return std::make_unique<NullJavaScriptRuntime>();
 }

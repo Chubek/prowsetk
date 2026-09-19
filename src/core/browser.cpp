@@ -327,6 +327,7 @@ Session::Session(Browser* browser, SessionConfig config, std::string id)
     : browser_(browser), config_(std::move(config)), id_(std::move(id)) {
     if (browser_->config().javascript) {
         javascript_ = browser_->create_javascript_runtime();
+        javascript_->set_document_host(this);
         javascript_->set_console_handler([this](const ConsoleMessage& message) {
             Event event;
             event.type = EventType::Console;
@@ -347,6 +348,35 @@ Session::~Session() {
 void Session::emit_event(Event event) {
     event.session_id = id_;
     browser_->events().emit(event);
+}
+
+std::string Session::document_element_class_name() const {
+    if (document_ == nullptr) {
+        return {};
+    }
+    auto document_element = document_->query_selector("html");
+    if (document_element == nullptr) {
+        document_element = document_->root();
+    }
+    return document_element != nullptr ? document_element->class_name()
+                                       : std::string();
+}
+
+void Session::set_document_element_class_name(std::string_view value) {
+    if (document_ == nullptr) {
+        return;
+    }
+    auto document_element = document_->query_selector("html");
+    if (document_element == nullptr) {
+        document_element = document_->root();
+    }
+    if (document_element != nullptr) {
+        document_element->set_attribute("class", value);
+    }
+}
+
+std::string Session::document_url() const {
+    return current_url_;
 }
 
 HttpRequest Session::build_request(std::string_view url) {
@@ -523,6 +553,12 @@ void Session::install_document(std::string_view html, std::string url,
         browser_->handle_unsupported_api(
             "javascript", "page scripts were not executed: no JavaScript engine");
         return;
+    }
+    for (const auto& noscript : document_->query_selector_all("noscript")) {
+        auto parent = noscript->parent();
+        if (parent != nullptr) {
+            parent->remove_child(noscript);
+        }
     }
     for (const auto& script : document_->scripts()) {
         const std::string script_text = [&]() -> std::string {

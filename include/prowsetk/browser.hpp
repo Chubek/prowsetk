@@ -27,7 +27,7 @@ class LuaRuntime;
 
 struct BrowserConfig {
     std::string user_agent = "ProwseTk/0.1";
-    bool javascript = false;
+    bool javascript = true;
     bool follow_redirects = true;
     int max_redirects = 10;
     int timeout_ms = 30000;
@@ -94,7 +94,7 @@ private:
 
 // Represents an isolated browsing context: URL, cookies, storage, headers, and
 // the currently loaded document.
-class Session {
+class Session : private DocumentScriptHost {
 public:
     ~Session();
 
@@ -151,6 +151,9 @@ private:
     // Emits `event` through the browser dispatcher, stamped with this
     // session's id so Lua `session:on` subscriptions stay scoped.
     void emit_event(Event event);
+    std::string document_element_class_name() const override;
+    void set_document_element_class_name(std::string_view value) override;
+    std::string document_url() const override;
 
     Browser* browser_;
     SessionConfig config_;
