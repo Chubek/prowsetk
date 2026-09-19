@@ -429,6 +429,13 @@ the engine's event loop, timers, request hooks, and session lifecycle events.
 
 ## Plugin System
 
+The repository includes `plugins/ezlogin`, a native host-mediated
+authentication plugin. It supports Basic, Bearer, API-key, and custom-header
+request credentials without exposing secrets to plugin logs. Form-based login
+is handled by the shipped `drivers/login.lua`; once that session is
+authenticated, scrapers can be activated with the same session. See
+`plugins/ezlogin/README.md` for configuration.
+
 ProwseTk provides a native plugin interface through `ProwseTk-Plugin.h`. The
 interface allows native components to extend the browser without modifying the
 Flatworm core.
