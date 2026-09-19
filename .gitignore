@@ -61,6 +61,7 @@ coverage/
 /.venv/
 __pycache__/
 *.py[cod]
+.env
 
 # ---------------------------------------------------------------------------
 # Editors and OS metadata
