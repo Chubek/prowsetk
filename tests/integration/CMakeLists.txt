@@ -23,6 +23,9 @@ prowsetk_gtest(prowsetk_integration_web_interface
 target_link_libraries(prowsetk_integration_web_interface PRIVATE
     Threads::Threads)
 
+prowsetk_gtest(prowsetk_integration_webdriver "prowsetk.integration.webdriver."
+    "integration;web-interface" test_webdriver.cpp)
+
 prowsetk_gtest(prowsetk_integration_drivers "prowsetk.integration.driver."
     "integration;lua" test_drivers.cpp)
 target_compile_definitions(prowsetk_integration_drivers PRIVATE

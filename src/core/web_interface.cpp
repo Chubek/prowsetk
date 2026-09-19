@@ -606,6 +606,107 @@ Json capability_to_json(const Capability& capability) {
 
 using SessionMap = std::map<std::string, std::shared_ptr<Session>>;
 
+WebResponse json_response(int status, const Json& body);
+
+Json webdriver_value(Json value) {
+    Json body;
+    body.kind = Json::Kind::Object;
+    body.object.emplace_back("value", std::move(value));
+    return body;
+}
+
+WebResponse webdriver_error(int status, std::string error, std::string message) {
+    Json value;
+    value.kind = Json::Kind::Object;
+    value.object.emplace_back("error", string_json(std::move(error)));
+    value.object.emplace_back("message", string_json(std::move(message)));
+    return json_response(status, webdriver_value(std::move(value)));
+}
+
+std::string webdriver_element_key() { return "element-6066-11e4-a52e-4f735466cecf"; }
+
+WebResponse handle_webdriver(const WebRequest& request, Browser& browser,
+                             SessionMap& sessions) {
+    const std::string prefix = "/session";
+    if (request.path != prefix && request.path.rfind(prefix + "/", 0) != 0) {
+        return WebResponse::not_found();
+    }
+    std::string rest = request.path.substr(prefix.size());
+    if (rest.empty() && request.method == "POST") {
+        std::string parse_error;
+        Json body = parse_json_body(request.body, parse_error);
+        if (!parse_error.empty()) return webdriver_error(400, "invalid argument", parse_error);
+        auto session = browser.create_session();
+        const std::string id = session->id();
+        sessions.emplace(id, session);
+        Json caps; caps.kind = Json::Kind::Object;
+        caps.object.emplace_back("browserName", string_json("prowsetk"));
+        caps.object.emplace_back("browserVersion", string_json(version()));
+        caps.object.emplace_back("platformName", string_json("any"));
+        Json result; result.kind = Json::Kind::Object;
+        result.object.emplace_back("sessionId", string_json(id));
+        result.object.emplace_back("capabilities", std::move(caps));
+        return json_response(200, webdriver_value(std::move(result)));
+    }
+    if (rest == "/" || rest.empty()) return webdriver_error(405, "unknown command", "method not allowed");
+    if (rest.front() == '/') rest.erase(rest.begin());
+    const auto slash = rest.find('/');
+    const std::string id = rest.substr(0, slash);
+    const auto it = sessions.find(id);
+    if (it == sessions.end()) return webdriver_error(404, "invalid session id", "session not found");
+    auto session = it->second;
+    const std::string action = slash == std::string::npos ? "" : rest.substr(slash + 1);
+    if (action.empty() && request.method == "DELETE") {
+        session->close(); sessions.erase(it);
+        Json nullv; return json_response(200, webdriver_value(std::move(nullv)));
+    }
+    std::string parse_error;
+    Json body = request.body.empty() ? Json{} : parse_json_body(request.body, parse_error);
+    if (!parse_error.empty()) return webdriver_error(400, "invalid argument", parse_error);
+    if (request.method == "POST" && action == "url") {
+        const Json* url = find_field(body, "url");
+        if (!url || !url->is_string()) return webdriver_error(400, "invalid argument", "url is required");
+        if (url->string.rfind("data:text/html,", 0) == 0) {
+            session->load_html(url->string.substr(15), "about:blank");
+        } else {
+            session->navigate(url->string);
+        }
+        Json nullv; return json_response(200, webdriver_value(std::move(nullv)));
+    }
+    if (request.method == "GET" && action == "url") {
+        return json_response(200, webdriver_value(string_json(session->current_url())));
+    }
+    if (request.method == "GET" && action == "title") {
+        return json_response(200, webdriver_value(string_json(session->document() ? session->document()->title() : "")));
+    }
+    if (request.method == "GET" && action == "source") {
+        return json_response(200, webdriver_value(string_json(session->document() ? session->document()->html() : "")));
+    }
+    if (request.method == "POST" && action == "element") {
+        const Json* using_field = find_field(body, "using"); const Json* value = find_field(body, "value");
+        if (!using_field || !value || !using_field->is_string() || !value->is_string()) return webdriver_error(400, "invalid argument", "using and value are required");
+        auto doc = session->document(); std::shared_ptr<Element> element;
+        if (using_field->string == "css selector") element = doc ? doc->query_selector(value->string) : nullptr;
+        else if (using_field->string == "id") element = doc ? doc->get_element_by_id(value->string) : nullptr;
+        else if (using_field->string == "tag name") { auto all = doc ? doc->get_elements_by_tag_name(value->string) : std::vector<std::shared_ptr<Element>>{}; if (!all.empty()) element = all.front(); }
+        if (!element) return webdriver_error(404, "no such element", "element not found");
+        Json e; e.kind = Json::Kind::Object; e.object.emplace_back(webdriver_element_key(), string_json(std::to_string(reinterpret_cast<std::uintptr_t>(element->node().get()))));
+        return json_response(200, webdriver_value(std::move(e)));
+    }
+    if (action.rfind("element/", 0) == 0) {
+        const auto p = action.find('/', 8); const std::string token = action.substr(8, p == std::string::npos ? std::string::npos : p - 8);
+        auto doc = session->document(); std::shared_ptr<Element> element;
+        if (doc) { std::function<std::shared_ptr<Element>(const std::shared_ptr<Element>&)> scan = [&](const auto& n)->std::shared_ptr<Element>{ if (n && std::to_string(reinterpret_cast<std::uintptr_t>(n->node().get())) == token) return n; if(n) for(auto& c:n->children()) if(auto r=scan(c)) return r; return nullptr; }; element=scan(doc->root()); }
+        if (!element) return webdriver_error(404, "stale element reference", "element not found");
+        const std::string op = p == std::string::npos ? "" : action.substr(p + 1);
+        if (request.method == "GET" && op == "text") return json_response(200, webdriver_value(string_json(element->text())));
+        if (request.method == "GET" && op == "attribute/name") { const Json* name=find_field(body,"name"); return json_response(200, webdriver_value(string_json(name&&name->is_string()?element->attribute(name->string):""))); }
+        if (request.method == "POST" && op == "click") { Json nullv; return json_response(200, webdriver_value(std::move(nullv))); }
+        if (request.method == "POST" && op == "value") { const Json* val=find_field(body,"text"); if(!val) val=find_field(body,"value"); if(val&&val->is_string()) element->set_value(val->string); Json nullv; return json_response(200, webdriver_value(std::move(nullv))); }
+    }
+    return webdriver_error(404, "unknown command", "unsupported WebDriver command");
+}
+
 // Navigates the session to `url` when it is non-empty, otherwise returns the
 // already-loaded document. Throws on navigation failure.
 std::shared_ptr<Document> document_for(const std::shared_ptr<Session>& session,
@@ -1216,6 +1317,12 @@ WebResponse WebInterface::handle(const WebRequest& request) {
 
 WebResponse WebInterface::route(const WebRequest& request) {
     const std::string& path = request.path;
+
+    // W3C WebDriver is a builtin control plane over the same headless browser
+    // sessions. Keep it separate from the project-specific /api namespace.
+    if (path == "/session" || path.rfind("/session/", 0) == 0) {
+        return handle_webdriver(request, *browser_, impl_->sessions);
+    }
 
     if (path == "/" || path == "/index.html") {
         return serve_static("index.html");
