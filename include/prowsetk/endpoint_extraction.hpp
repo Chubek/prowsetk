@@ -23,6 +23,13 @@ struct EndpointExtractionOptions {
     std::uint32_t max_pages = 100;
     double minimum_confidence = 0.50;
     std::string openapi_version = "3.1.0";
+    // When true, scrape *all* link/resource endpoints within the page
+    // regardless of API-like path markers. Anchor hrefs that do not look
+    // like /api, /v1, etc. are emitted with confidence 0.60 so they pass
+    // the default minimum_confidence filter. Resource URLs (script/img etc.)
+    // are also emitted. Default false preserves the historic
+    // API-focused filtering (see test_endpoint_extraction.IgnoresNonApiLinks).
+    bool scrape_all_paths = false;
 };
 
 // One discovered endpoint plus the provenance required by README

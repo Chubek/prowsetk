@@ -448,7 +448,8 @@ NB_MODULE(_core, m) {
         .def_rw("max_depth", &EndpointExtractionOptions::max_depth)
         .def_rw("max_pages", &EndpointExtractionOptions::max_pages)
         .def_rw("minimum_confidence", &EndpointExtractionOptions::minimum_confidence)
-        .def_rw("openapi_version", &EndpointExtractionOptions::openapi_version);
+        .def_rw("openapi_version", &EndpointExtractionOptions::openapi_version)
+        .def_rw("scrape_all_paths", &EndpointExtractionOptions::scrape_all_paths);
 
     nb::class_<DiscoveredEndpoint>(m, "DiscoveredEndpoint")
         .def(nb::init<>())

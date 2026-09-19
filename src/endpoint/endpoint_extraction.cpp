@@ -389,7 +389,8 @@ EndpointExtractionResult EndpointExtractor::extract(
             } catch (...) {
                 continue;
             }
-            if (!looks_like_api_path(parsed.path)) {
+            const bool is_api = looks_like_api_path(parsed.path);
+            if (!options_.scrape_all_paths && !is_api) {
                 continue;
             }
             DiscoveredEndpoint endpoint;
@@ -398,10 +399,73 @@ EndpointExtractionResult EndpointExtractor::extract(
             endpoint.method = "get";
             endpoint.source = document.url();
             endpoint.discovery_method = "html-link";
-            endpoint.confidence = 0.40;
+            // API-like links keep the historic low confidence (0.40) so they
+            // are filtered by the default minimum_confidence unless the
+            // caller explicitly lowers it; comprehensive mode uses a higher
+            // confidence so every href appears in the output.
+            if (options_.scrape_all_paths) {
+                endpoint.confidence = is_api ? 0.75 : 0.60;
+                endpoint.notes.push_back(is_api
+                    ? "inferred from an anchor href (api)"
+                    : "inferred from an anchor href (comprehensive)");
+            } else {
+                endpoint.confidence = 0.40;
+                endpoint.notes.push_back("inferred from an anchor href");
+            }
             endpoint.parameters = query_parameters(parsed.query);
-            endpoint.notes.push_back("inferred from an anchor href");
             add(std::move(endpoint));
+        }
+        // Comprehensive mode: also emit resource URLs (script src, link href,
+        // img/src, iframe/src, etc.) as low-confidence endpoints so a page
+        // scrape captures every reachable URL, not just anchors/forms/scripts.
+        if (options_.scrape_all_paths) {
+            for (const auto& ref : document.resource_urls()) {
+                if (ref.empty() || ref[0] == '#') continue;
+                // Avoid duplicating already-seen anchors (same method+path).
+                // resolve handles relative references via base_url().
+                const std::string url = ref; // already resolved by Document::resource_urls
+                Url parsed;
+                try {
+                    parsed = parse_url(url);
+                } catch (...) { continue; }
+                const std::string key = "get " + parsed.path;
+                if (seen.find(key) != seen.end()) continue;
+                DiscoveredEndpoint endpoint;
+                endpoint.url = url;
+                endpoint.path = parsed.path.empty() ? "/" : parsed.path;
+                endpoint.method = "get";
+                endpoint.source = document.url();
+                endpoint.discovery_method = "resource-url";
+                endpoint.confidence = 0.55;
+                endpoint.parameters = query_parameters(parsed.query);
+                endpoint.notes.push_back("inferred from a resource url (img/script/link/iframe)");
+                add(std::move(endpoint));
+            }
+            // Also scan raw attributes for href/src generically to catch
+            // custom data attributes or non-standard tags. This complements
+            // resource_urls() which only covers a fixed selector.
+            for (const auto& el : document.query_selector_all("[href]")) {
+                const std::string href = el->attribute("href");
+                if (href.empty() || href[0] == '#') continue;
+                // Skip anchors already counted via links() and link[href] resources
+                // by checking if it was an <a> element — those are already emitted.
+                if (el->tag_name() == "a") continue;
+                const std::string url = resolve(href);
+                Url parsed;
+                try { parsed = parse_url(url); } catch (...) { continue; }
+                const std::string key = "get " + parsed.path;
+                if (seen.find(key) != seen.end()) continue;
+                DiscoveredEndpoint endpoint;
+                endpoint.url = url;
+                endpoint.path = parsed.path.empty() ? "/" : parsed.path;
+                endpoint.method = "get";
+                endpoint.source = document.url();
+                endpoint.discovery_method = "attribute-href";
+                endpoint.confidence = 0.50;
+                endpoint.parameters = query_parameters(parsed.query);
+                endpoint.notes.push_back("inferred from an href attribute");
+                add(std::move(endpoint));
+            }
         }
     }
 
