@@ -153,6 +153,9 @@ function wire() {
     await refreshRuns();
     await refreshArtifact();
   });
+  // lucide is loaded as a local, deferred vendor script; tolerate a slow or
+  // intentionally omitted vendor bundle so the core dashboard still works.
+  if (window.lucide?.createIcons) window.lucide.createIcons();
 }
 
 async function bootstrap() {

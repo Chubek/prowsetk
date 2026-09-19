@@ -83,6 +83,14 @@ def create_app() -> FastAPI:
     else:
         log.warning("Assets directory not found: %s", assets_dir)
 
+    # Vendor assets are kept beside the web app so the dashboard remains
+    # self-contained and does not depend on a CDN at runtime.
+    for route, directory, name in (("/libjs", ROOT_DIR / "libjs", "libjs"), ("/libcss", ROOT_DIR / "libcss", "libcss")):
+        if directory.is_dir():
+            app.mount(route, StaticFiles(directory=str(directory)), name=name)
+        else:
+            log.warning("Library directory not found: %s", directory)
+
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
         target = ROOT_DIR / "index.html"

@@ -9,7 +9,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/libcss/pico.min.css">
+  <link rel="stylesheet" href="/libcss/bootstrap.min.css">
+  <link rel="stylesheet" href="/libcss/animate.min.css">
   <link rel="stylesheet" href="/assets/css/main.css">
+  <script defer src="/libjs/htmx.min.js"></script>
+  <script defer src="/libjs/alpine.js"></script>
+  <script defer src="/libjs/lucide.min.js"></script>
   <script type="module" src="/assets/js/main.js"></script>
 </head>
 <body>
@@ -36,7 +42,7 @@
         <label for="run-url">Target URL</label>
         <div class="input-row">
           <input id="run-url" type="url" placeholder="https://example.com" required autocomplete="url" spellcheck="false">
-          <button id="run-submit" type="submit">Start Run</button>
+          <button id="run-submit" type="submit"><i data-lucide="play" aria-hidden="true"></i>Start Run</button>
         </div>
       </form>
 
@@ -52,7 +58,7 @@
     <section class="panel runs-panel">
       <div class="panel-head">
         <h2>Run Queue</h2>
-        <button class="ghost" id="refresh-runs" type="button">Refresh</button>
+        <button class="ghost" id="refresh-runs" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i>Refresh</button>
       </div>
       <div id="runs" class="run-list"><div class="empty">No runs yet.</div></div>
     </section>
@@ -60,7 +66,7 @@
     <section class="panel artifact-panel">
       <div class="panel-head">
         <h2>Artifact</h2>
-        <a id="artifact-link" class="ghost disabled" href="#">Download OpenAPI</a>
+        <a id="artifact-link" class="ghost disabled" href="#"><i data-lucide="download" aria-hidden="true"></i>Download OpenAPI</a>
       </div>
       <pre id="artifact-preview">Select a completed run to preview artifact output.</pre>
     </section>
