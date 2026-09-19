@@ -52,7 +52,9 @@ WebPlatform default_web_platform() {
                      "window/self/top/parent aliases, listeners, timers, storage");
     platform.declare("document-js", ImplementationClass::PartiallyImplemented,
                      "handle-based DOM bridge: query(Selector|SelectorAll), "
-                     "createElement, attributes, textContent, innerHTML, mutation");
+                     "createElement, attributes, textContent, innerHTML, mutation; "
+                     "anchor URL decomposition (protocol/host/pathname/...) on "
+                     "<a>/<area> hrefs");
     platform.declare("location", ImplementationClass::PartiallyImplemented,
                      "reads resolve against the live document; assignment and "
                      "form submit trigger a host navigation after the script pass");
@@ -64,6 +66,10 @@ WebPlatform default_web_platform() {
                      "polyfill over the engine URL parser; no blob/data handling");
     platform.declare("URLSearchParams", ImplementationClass::PartiallyImplemented,
                      "polyfill; string-backed pairs");
+    platform.declare("text-encoding", ImplementationClass::PartiallyImplemented,
+                     "TextEncoder/TextDecoder polyfill in the page shim; UTF-8 "
+                     "plus windows-1252 labels, fatal and streaming modes, no "
+                     "non-UTF-16 DOM integration");
     platform.declare("fetch", ImplementationClass::ImplementedWithRestrictions,
                      "host-mediated NetworkClient; microtask delivery; no streaming bodies");
     platform.declare("XMLHttpRequest", ImplementationClass::ImplementedWithRestrictions,

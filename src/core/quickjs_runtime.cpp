@@ -89,6 +89,8 @@ std::string take_exception(JSContext* context) {
 int install_console_binding(JSContext* context);
 JSValue queue_microtask(JSContext* context, JSValueConst, int argc,
                         JSValueConst* argv);
+void promise_rejection_tracker(JSContext* context, JSValueConst,
+                               JSValueConst reason, bool is_handled, void*);
 
 // ---- Binding argument helpers ----------------------------------------------
 
@@ -737,6 +739,8 @@ public:
           document_host_(host) {
         if (runtime_ == nullptr || context_ == nullptr) throw std::bad_alloc();
         JS_SetCanBlock(runtime_.get(), false);
+        JS_SetHostPromiseRejectionTracker(runtime_.get(),
+                                          promise_rejection_tracker, nullptr);
         JS_SetContextOpaque(context_.get(), this);
         install_platform();
     }
@@ -873,6 +877,9 @@ public:
                          "localStorage/sessionStorage and document.cookie backed by the session storage and cookie jar");
         capabilities.set("url", ImplementationClass::PartiallyImplemented,
                          "URL/URLSearchParams polyfills over the engine URL parser");
+        capabilities.set("text-encoding", ImplementationClass::PartiallyImplemented,
+                         "TextEncoder/TextDecoder in the web platform shim; UTF-8 and "
+                         "windows-1252 labels, encodeInto, fatal and streaming modes");
         capabilities.set("location", ImplementationClass::PartiallyImplemented,
                          "location reads resolve against the live document; assignment and form submit trigger a host navigation after the script pass");
         capabilities.set("navigator", ImplementationClass::PartiallyImplemented,
@@ -1046,6 +1053,40 @@ JSValue queue_microtask(JSContext* context, JSValueConst, int argc,
     }
     if (JS_EnqueueJob(context, microtask_job, 1, argv) < 0) return JS_EXCEPTION;
     return JS_UNDEFINED;
+}
+
+// QuickJS host promise rejection hook. Without it, a rejected promise with no
+// handler vanishes silently; browsers report those to the console, and page
+// applications routinely swallow their bootstrap failures exactly this way.
+// Forward the rejection through the console channel as an "error" message so
+// drivers and tests can observe it.
+void promise_rejection_tracker(JSContext* context, JSValueConst,
+                               JSValueConst reason, bool is_handled,
+                               void*) {
+    if (is_handled || context == nullptr) return;
+    auto* runtime = runtime_of(context);
+    if (runtime == nullptr) return;
+    std::string text = "Uncaught (in promise) ";
+    text += value_to_string(context, reason);
+    if (JS_IsError(reason)) {
+        JSValue stack = JS_GetPropertyStr(context, reason, "stack");
+        if (!JS_IsUndefined(stack)) {
+            const std::string stack_text = value_to_string(context, stack);
+            if (!stack_text.empty()) {
+                text.push_back('\n');
+                text += stack_text;
+            }
+        }
+        JS_FreeValue(context, stack);
+    }
+    if (JS_HasException(context)) {
+        JS_FreeValue(context, JS_GetException(context));
+    }
+    try {
+        runtime->forward_console(ConsoleMessage{"error", std::move(text)});
+    } catch (...) {
+        // Reporting must never break promise resolution.
+    }
 }
 
 // ---- Console ----------------------------------------------------------------

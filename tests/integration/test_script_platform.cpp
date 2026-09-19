@@ -93,6 +93,51 @@ TEST(ScriptPlatform, AsyncFetchAndTimersApplyBeforeNavigationReturns) {
     EXPECT_EQ(div->text(), "ready");
 }
 
+TEST(ScriptPlatform, DynamicallyAppendedExternalScriptsExecute) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    network->set_response("https://admin.example.test/", html(
+        "<html><head></head><body><script>"
+        "var clientlib = document.createElement('script');"
+        "clientlib.onload = function () {"
+        "  var challenge = document.createElement('script');"
+        "  challenge.onload = function () {"
+        "    document.body.setAttribute('data-token', window.as_token || '');"
+        "  };"
+        "  challenge.src = '/waf/challenge.js';"
+        "  document.head.appendChild(challenge);"
+        "};"
+        "clientlib.src = 'https://xx.bstatic.com/libs/acc-clientlib/1/clientlib.js';"
+        "document.head.appendChild(clientlib);"
+        "</script></body></html>", "https://admin.example.test/"));
+    HttpResponse clientlib;
+    clientlib.status = 200;
+    clientlib.final_url =
+        "https://xx.bstatic.com/libs/acc-clientlib/1/clientlib.js";
+    clientlib.body = "window.clientlib_loaded = true;";
+    clientlib.headers.emplace_back("Content-Type", "application/javascript");
+    network->set_response(
+        "https://xx.bstatic.com/libs/acc-clientlib/1/clientlib.js",
+        clientlib);
+    HttpResponse challenge;
+    challenge.status = 200;
+    challenge.final_url = "https://admin.example.test/waf/challenge.js";
+    challenge.body = "window.as_token = 'token-from-challenge';";
+    challenge.headers.emplace_back("Content-Type", "application/javascript");
+    network->set_response("https://admin.example.test/waf/challenge.js",
+                          challenge);
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->navigate("https://admin.example.test/");
+
+    auto body = session->document()->query_selector("body");
+    ASSERT_NE(body, nullptr);
+    EXPECT_EQ(body->attribute("data-token"), "token-from-challenge");
+    EXPECT_EQ(session->evaluate_js("clientlib_loaded && as_token"),
+              "token-from-challenge");
+}
+
 TEST(ScriptPlatform, LocationAssignNavigatesAndCarriesCookies) {
     Browser browser;
     auto network = std::make_unique<MemoryNetworkClient>();

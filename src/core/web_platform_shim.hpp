@@ -217,7 +217,9 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     if (existing && H.nodeType(existing.__h) !== 0) return existing;
     if (existing) { wrappers.delete(handle); elementStores.delete(existing.__h); }
     var kind = H.nodeType(handle);
-    var proto = kind === 3 ? TextNode.prototype : kind === 8 ? CommentNode.prototype : ElementNode.prototype;
+    var proto = kind === 3 ? TextNode.prototype
+      : kind === 8 ? CommentNode.prototype
+      : elementProtoFor(H.tagName(handle));
     var wrapper = Object.create(proto);
     wrapper.__h = handle;
     wrappers.set(handle, wrapper);
@@ -229,7 +231,53 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   function CommentNode() {}
 
   function attrString(el, name) { return H.attr(el.__h, name); }
-  function setAttrString(el, name, value) { H.setAttr(el.__h, name, String(value)); }
+  function setAttrString(el, name, value) {
+    H.setAttr(el.__h, name, String(value));
+    if (String(name).toLowerCase() === 'src') maybeExecuteScript(el);
+  }
+
+  function isConnectedHandle(handle) {
+    var root = H.root();
+    while (handle) {
+      if (handle === root) return true;
+      handle = H.parentNode(handle);
+    }
+    return false;
+  }
+
+  function fireElementCallback(el, type) {
+    var event = makeEvent(type);
+    fireStored(storeFor(el.__h), event, el);
+    var handler = el['on' + type];
+    if (typeof handler === 'function') {
+      try { handler.call(el, event); } catch (err) { reportError(err); }
+    }
+  }
+
+  function maybeExecuteScript(el) {
+    if (!el || !el.__h || H.tagName(el.__h) !== 'script') return;
+    if (el.__prowsetkScriptStarted || !isConnectedHandle(el.__h)) return;
+    var source = H.attr(el.__h, 'src');
+    if (source == null || source === '') return;
+    if (/^(?:javascript|data|blob):/i.test(source)) return;
+    el.__prowsetkScriptStarted = true;
+    try {
+      var resolved = H.resolveUrl(source, H.pageInfo().url || H.baseUrl()).href;
+      var response = H.request('GET', resolved, [], undefined);
+      if (!response.ok) {
+        el.__prowsetkScriptError = response.error || ('script load failed: ' + resolved);
+        fireElementCallback(el, 'error');
+        return;
+      }
+      el.__prowsetkScriptLoaded = true;
+      (0, eval)(String(response.body || '') + '\n//# sourceURL=' + resolved);
+      fireElementCallback(el, 'load');
+    } catch (err) {
+      el.__prowsetkScriptError = err && err.message ? String(err.message) : String(err);
+      reportError(err);
+      fireElementCallback(el, 'error');
+    }
+  }
 
   Object.defineProperties(ElementNode.prototype, {
     nodeType: { get: function () { return H.nodeType(this.__h); }, enumerable: true },
@@ -382,6 +430,78 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   }
   defineHrefProperty(ElementNode.prototype);
 
+  // HTMLAnchorElement URL decomposition attributes. Pages and libraries
+  // (axios in particular) parse URLs by creating an <a> element, setting
+  // href, and reading the components; the getters resolve against the live
+  // document URL like defineHrefProperty above. Absent href yields the empty
+  // string, matching the HTML standard's behavior for missing attributes.
+  function defineUrlDecomposition(proto) {
+    function partsFor(el) {
+      var tag = H.tagName(el.__h);
+      if (tag !== 'a' && tag !== 'area') return null;
+      var raw = H.attr(el.__h, 'href');
+      if (raw == null || raw === '') return null;
+      if (raw.indexOf('javascript:') === 0 || raw.indexOf('data:') === 0 ||
+          raw.indexOf('blob:') === 0 || raw.indexOf('#') === 0) return null;
+      try {
+        return H.resolveUrl(raw, H.pageInfo().url || H.baseUrl());
+      } catch (e) {
+        return null;
+      }
+    }
+    function rebuiltHref(parts, name, value) {
+      var protocol = String(parts.protocol || '').replace(/:$/, '');
+      var hostname = String(parts.hostname || '');
+      var port = String(parts.port || '');
+      var pathname = String(parts.pathname || '/');
+      var search = String(parts.search || '');
+      var hash = String(parts.hash || '');
+      if (name === 'protocol') {
+        protocol = String(value).replace(/:$/, '');
+      } else if (name === 'host') {
+        var split = String(value).split(':');
+        hostname = split[0];
+        port = split.length > 1 ? split.slice(1).join(':') : '';
+      } else if (name === 'hostname') {
+        hostname = String(value);
+      } else if (name === 'port') {
+        port = String(value);
+      } else if (name === 'pathname') {
+        pathname = String(value).charAt(0) === '/' ? String(value) : '/' + value;
+      } else if (name === 'search') {
+        var s = String(value);
+        search = s === '' || s.charAt(0) === '?' ? s : '?' + s;
+      } else if (name === 'hash') {
+        var h = String(value);
+        hash = h === '' || h.charAt(0) === '#' ? h : '#' + h;
+      }
+      var host = hostname + (port ? ':' + port : '');
+      return protocol + '://' + host + pathname + search + hash;
+    }
+    ['protocol', 'host', 'hostname', 'port', 'pathname', 'search', 'hash'].forEach(
+      function (name) {
+        Object.defineProperty(proto, name, {
+          get: function () {
+            var parts = partsFor(this);
+            if (!parts) return '';
+            return parts[name] == null ? '' : String(parts[name]);
+          },
+          set: function (v) {
+            var parts = partsFor(this);
+            if (!parts) return;
+            setAttrString(this, 'href', rebuiltHref(parts, name, v));
+          }, enumerable: true
+        });
+      });
+    Object.defineProperty(proto, 'origin', {
+      get: function () {
+        var parts = partsFor(this);
+        return parts && parts.origin ? String(parts.origin) : '';
+      }, enumerable: true
+    });
+  }
+  defineUrlDecomposition(ElementNode.prototype);
+
   ElementNode.prototype.getAttribute = function (name) {
     var v = H.attr(this.__h, String(name));
     return v == null ? null : v;
@@ -432,16 +552,27 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
       .map(function (h) { return wrap(h); });
   };
   ElementNode.prototype.appendChild = function (child) {
-    if (child && child.__h) { H.appendChild(this.__h, child.__h); return child; }
+    if (child && child.__h) {
+      H.appendChild(this.__h, child.__h);
+      maybeExecuteScript(child);
+      return child;
+    }
     if (child && child.__fragment) {
-      child.__nodes.forEach(function (h) { H.appendChild(this.__h, h); }, this);
+      child.__nodes.forEach(function (h) {
+        H.appendChild(this.__h, h);
+        maybeExecuteScript(wrap(h));
+      }, this);
       child.__nodes = [];
       return child;
     }
     return child;
   };
   ElementNode.prototype.insertBefore = function (node, ref) {
-    if (node && node.__h) { H.insertBefore(this.__h, node.__h, ref ? ref.__h : 0); return node; }
+    if (node && node.__h) {
+      H.insertBefore(this.__h, node.__h, ref ? ref.__h : 0);
+      maybeExecuteScript(node);
+      return node;
+    }
     return node;
   };
   ElementNode.prototype.removeChild = function (child) {
@@ -557,6 +688,112 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     get: function () { return H.text(this.__h); },
     set: function (v) { H.setText(this.__h, String(v)); }
   });
+
+  // ---------- DOM interface constructors ----------
+  // Pages and diagnostics libraries run `instanceof` checks against the
+  // standard DOM interfaces (error trackers walk window.HTMLIFrameElement,
+  // frameworks check HTMLInputElement, ...). The wrappers above stay a single
+  // implementation class; these interfaces graft the standard prototype
+  // chain onto it so instanceof resolves the way pages expect:
+  //   instance -> HTMLAnchorElement.prototype -> HTMLElement.prototype ->
+  //   ElementNode.prototype (the implementation) -> Element.prototype ->
+  //   Node.prototype.
+  // Like a browser, the interface constructors themselves are not
+  // constructible.
+  function interfaceCtor(name, parentProto) {
+    var ctor = function () { throw new TypeError('Illegal constructor'); };
+    try {
+      Object.defineProperty(ctor, 'name', { value: name, configurable: true });
+    } catch (e) {}
+    ctor.prototype = Object.create(parentProto);
+    Object.defineProperty(ctor.prototype, 'constructor',
+                          { value: ctor, writable: true, configurable: true });
+    return ctor;
+  }
+  var DOMInterfaces = {};
+  DOMInterfaces.Node = interfaceCtor('Node', Object.prototype);
+  DOMInterfaces.CharacterData =
+    interfaceCtor('CharacterData', DOMInterfaces.Node.prototype);
+  DOMInterfaces.Element = interfaceCtor('Element', DOMInterfaces.Node.prototype);
+  DOMInterfaces.HTMLElement =
+    interfaceCtor('HTMLElement', DOMInterfaces.Element.prototype);
+  DOMInterfaces.SVGElement =
+    interfaceCtor('SVGElement', DOMInterfaces.Element.prototype);
+  DOMInterfaces.HTMLMediaElement =
+    interfaceCtor('HTMLMediaElement', DOMInterfaces.HTMLElement.prototype);
+  DOMInterfaces.HTMLAudioElement =
+    interfaceCtor('HTMLAudioElement', DOMInterfaces.HTMLMediaElement.prototype);
+  DOMInterfaces.HTMLVideoElement =
+    interfaceCtor('HTMLVideoElement', DOMInterfaces.HTMLMediaElement.prototype);
+  ['HTMLAnchorElement', 'HTMLAreaElement', 'HTMLBRElement', 'HTMLBaseElement',
+   'HTMLBodyElement', 'HTMLButtonElement', 'HTMLCanvasElement', 'HTMLDListElement',
+   'HTMLDataListElement', 'HTMLDetailsElement', 'HTMLDialogElement',
+   'HTMLDirectoryElement', 'HTMLDivElement', 'HTMLEmbedElement',
+   'HTMLFieldSetElement', 'HTMLFontElement', 'HTMLFormElement',
+   'HTMLFrameElement', 'HTMLFrameSetElement', 'HTMLHRElement',
+   'HTMLHeadElement', 'HTMLHeadingElement', 'HTMLHtmlElement',
+   'HTMLIFrameElement', 'HTMLImageElement', 'HTMLInputElement', 'HTMLLIElement',
+   'HTMLLabelElement', 'HTMLLegendElement', 'HTMLLinkElement', 'HTMLMapElement',
+   'HTMLMarqueeElement', 'HTMLMenuElement', 'HTMLMetaElement', 'HTMLMeterElement',
+   'HTMLModElement', 'HTMLOListElement', 'HTMLObjectElement',
+   'HTMLOptGroupElement', 'HTMLOptionElement', 'HTMLOutputElement',
+   'HTMLParagraphElement', 'HTMLParamElement', 'HTMLPictureElement',
+   'HTMLPreElement', 'HTMLProgressElement', 'HTMLQuoteElement',
+   'HTMLScriptElement', 'HTMLSelectElement', 'HTMLSlotElement',
+   'HTMLSourceElement', 'HTMLSpanElement', 'HTMLStyleElement',
+   'HTMLTableCaptionElement', 'HTMLTableCellElement', 'HTMLTableColElement',
+   'HTMLTableElement', 'HTMLTableRowElement', 'HTMLTableSectionElement',
+   'HTMLTemplateElement', 'HTMLTextAreaElement', 'HTMLTimeElement',
+   'HTMLTitleElement', 'HTMLTrackElement', 'HTMLUListElement',
+   'HTMLUnknownElement'].forEach(function (name) {
+    DOMInterfaces[name] =
+      interfaceCtor(name, DOMInterfaces.HTMLElement.prototype);
+  });
+  var TAG_INTERFACES = {
+    a: 'HTMLAnchorElement', area: 'HTMLAreaElement', audio: 'HTMLAudioElement',
+    base: 'HTMLBaseElement', blockquote: 'HTMLQuoteElement',
+    body: 'HTMLBodyElement', br: 'HTMLBRElement', button: 'HTMLButtonElement',
+    canvas: 'HTMLCanvasElement', caption: 'HTMLTableCaptionElement',
+    cite: 'HTMLQuoteElement', col: 'HTMLTableColElement',
+    colgroup: 'HTMLTableColElement', datalist: 'HTMLDataListElement',
+    del: 'HTMLModElement', details: 'HTMLDetailsElement',
+    dialog: 'HTMLDialogElement', dir: 'HTMLDirectoryElement',
+    div: 'HTMLDivElement', dl: 'HTMLDListElement', embed: 'HTMLEmbedElement',
+    fieldset: 'HTMLFieldSetElement', font: 'HTMLFontElement',
+    form: 'HTMLFormElement', frame: 'HTMLFrameElement',
+    frameset: 'HTMLFrameSetElement', h1: 'HTMLHeadingElement',
+    h2: 'HTMLHeadingElement', h3: 'HTMLHeadingElement', h4: 'HTMLHeadingElement',
+    h5: 'HTMLHeadingElement', h6: 'HTMLHeadingElement', head: 'HTMLHeadElement',
+    hr: 'HTMLHRElement', html: 'HTMLHtmlElement', iframe: 'HTMLIFrameElement',
+    img: 'HTMLImageElement', input: 'HTMLInputElement', ins: 'HTMLModElement',
+    label: 'HTMLLabelElement', legend: 'HTMLLegendElement', li: 'HTMLLIElement',
+    link: 'HTMLLinkElement', map: 'HTMLMapElement', marquee: 'HTMLMarqueeElement',
+    menu: 'HTMLMenuElement', meta: 'HTMLMetaElement', meter: 'HTMLMeterElement',
+    object: 'HTMLObjectElement', ol: 'HTMLOListElement',
+    optgroup: 'HTMLOptGroupElement', option: 'HTMLOptionElement',
+    output: 'HTMLOutputElement', p: 'HTMLParagraphElement',
+    param: 'HTMLParamElement', picture: 'HTMLPictureElement',
+    pre: 'HTMLPreElement', progress: 'HTMLProgressElement',
+    q: 'HTMLQuoteElement', script: 'HTMLScriptElement', select: 'HTMLSelectElement',
+    slot: 'HTMLSlotElement', source: 'HTMLSourceElement', span: 'HTMLSpanElement',
+    style: 'HTMLStyleElement', svg: 'SVGElement', table: 'HTMLTableElement',
+    tbody: 'HTMLTableSectionElement', td: 'HTMLTableCellElement',
+    template: 'HTMLTemplateElement', textarea: 'HTMLTextAreaElement',
+    tfoot: 'HTMLTableSectionElement', th: 'HTMLTableCellElement',
+    thead: 'HTMLTableSectionElement', time: 'HTMLTimeElement',
+    title: 'HTMLTitleElement', tr: 'HTMLTableRowElement',
+    track: 'HTMLTrackElement', ul: 'HTMLUListElement', video: 'HTMLVideoElement'
+  };
+  function elementProtoFor(tag) {
+    var name = TAG_INTERFACES[tag];
+    var ctor = name ? DOMInterfaces[name] : null;
+    return ctor ? ctor.prototype : DOMInterfaces.HTMLUnknownElement.prototype;
+  }
+  Object.setPrototypeOf(ElementNode.prototype, DOMInterfaces.Element.prototype);
+  Object.setPrototypeOf(DOMInterfaces.HTMLElement.prototype, ElementNode.prototype);
+  Object.setPrototypeOf(DOMInterfaces.SVGElement.prototype, ElementNode.prototype);
+  Object.setPrototypeOf(TextNode.prototype, DOMInterfaces.CharacterData.prototype);
+  Object.setPrototypeOf(CommentNode.prototype, DOMInterfaces.CharacterData.prototype);
 
   // ---------- style / class / dataset views ----------
   function parseStyle(cssText) {
@@ -1165,7 +1402,41 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   };
   Headers.prototype.entries = function () { return this.__entries.map(function (kv) { return kv.slice(); }); };
 
-  function ResponseImpl(response) {
+  function ResponseImpl(response, init) {
+    // Host form: the shim's fetch passes the record returned by H.request,
+    // which always carries finalUrl. Anything else is treated as the
+    // web-standard `new Response(body, init)` construction, including the
+    // argumentless `new Response` probe axios (and other libraries) use for
+    // feature detection.
+    if (response == null || typeof response !== 'object' ||
+        !('finalUrl' in response)) {
+      var record = {
+        status: init && init.status != null ? init.status : 200,
+        statusText: init && init.statusText ? init.statusText : '',
+        finalUrl: init && init.url ? init.url : '',
+        headers: [],
+        body: response == null ? '' : String(response)
+      };
+      var raw = init && init.headers;
+      if (raw != null) {
+        if (raw instanceof Headers) {
+          record.headers = raw.__entries.map(function (kv) { return kv.slice(); });
+        } else if (Array.isArray(raw)) {
+          raw.forEach(function (kv) {
+            if (kv && kv.length >= 2) {
+              record.headers.push([String(kv[0]), String(kv[1])]);
+            }
+          });
+        } else if (typeof raw.forEach === 'function') {
+          raw.forEach(function (v, k) { record.headers.push([String(k), String(v)]); });
+        } else if (typeof raw === 'object') {
+          Object.keys(raw).forEach(function (k) {
+            record.headers.push([String(k), String(raw[k])]);
+          });
+        }
+      }
+      response = record;
+    }
     this.ok = response.status >= 200 && response.status < 300;
     this.status = response.status || 0;
     this.statusText = response.statusText || '';
@@ -1376,6 +1647,9 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   install('fetch', fetch, true);
   install('Headers', Headers, true);
   install('Response', ResponseImpl, true);
+  Object.keys(DOMInterfaces).forEach(function (name) {
+    install(name, DOMInterfaces[name], true);
+  });
   install('Request', function RequestCtor(url, opts) { this.url = url; this.method = (opts && opts.method) || 'GET'; }, true);
   install('URL', URLPolyfill, true);
   install('URLSearchParams', UrlSearchParams, true);
@@ -1573,6 +1847,203 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
       output += c < 0 ? '=' : B64.charAt(c & 63);
     }
     return output;
+  };
+
+  // ---------- Encoding Standard: TextEncoder / TextDecoder ----------
+  // UTF-8 (the standard's only required encoding) plus the common
+  // windows-1252/latin-1 labels as a courtesy. Unsupported labels throw
+  // RangeError, invalid input throws TypeError when fatal, and is otherwise
+  // replaced with U+FFFD. Streaming mode retains a bounded partial-sequence
+  // prefix across decode() calls.
+  function utf8EncodeCodePoint(out, code) {
+    if (code < 0x80) out.push(code);
+    else if (code < 0x800) out.push(0xC0 | (code >> 6), 0x80 | (code & 0x3F));
+    else if (code < 0x10000) {
+      out.push(0xE0 | (code >> 12), 0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F));
+    } else {
+      out.push(0xF0 | (code >> 18), 0x80 | ((code >> 12) & 0x3F),
+               0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F));
+    }
+  }
+  function stringCodePointAt(s, i) {
+    var code = s.charCodeAt(i);
+    if (code >= 0xD800 && code <= 0xDBFF && i + 1 < s.length) {
+      var next = s.charCodeAt(i + 1);
+      if (next >= 0xDC00 && next <= 0xDFFF) {
+        return [0x10000 + ((code - 0xD800) << 10) + (next - 0xDC00), i + 2];
+      }
+    }
+    return [code, i + 1];
+  }
+  G.TextEncoder = function TextEncoder() {
+    this.encoding = 'utf-8';
+  };
+  G.TextEncoder.prototype.encode = function (input) {
+    var s = String(input == null ? '' : input);
+    var out = [];
+    var i = 0;
+    while (i < s.length) {
+      var cp = stringCodePointAt(s, i);
+      var code = cp[0];
+      i = cp[1];
+      if (code >= 0xD800 && code <= 0xDFFF) code = 0xFFFD;
+      utf8EncodeCodePoint(out, code);
+    }
+    var bytes = new Uint8Array(out.length);
+    for (var j = 0; j < out.length; ++j) bytes[j] = out[j];
+    return bytes;
+  };
+  G.TextEncoder.prototype.encodeInto = function (source, destination) {
+    var s = String(source == null ? '' : source);
+    if (!destination || typeof destination !== 'object' ||
+        typeof destination.length !== 'number') {
+      throw new TypeError('TextEncoder.encodeInto requires a typed array');
+    }
+    var limit = destination.length;
+    var written = 0;
+    var read = 0;
+    var i = 0;
+    while (i < s.length) {
+      var cp = stringCodePointAt(s, i);
+      var code = cp[0];
+      i = cp[1];
+      if (code >= 0xD800 && code <= 0xDFFF) code = 0xFFFD;
+      var tmp = [];
+      utf8EncodeCodePoint(tmp, code);
+      if (written + tmp.length > limit) break;
+      for (var j = 0; j < tmp.length; ++j) destination[written + j] = tmp[j];
+      written += tmp.length;
+      read = i;
+    }
+    return { read: read, written: written };
+  };
+  var W1252 = [0x20AC, 0x81, 0x201A, 0x192, 0x201E, 0x2026, 0x2020, 0x2021,
+               0x2C6, 0x2030, 0x160, 0x2039, 0x152, 0x8D, 0x17D, 0x8F,
+               0x90, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+               0x2DC, 0x2122, 0x161, 0x203A, 0x153, 0x9D, 0x17E, 0x178];
+  function encodingFromLabel(label) {
+    var s = String(label == null ? 'utf-8' : label)
+      .toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (s === '' || s === 'utf8' || s === 'unicode11utf8' ||
+        s === 'unicode20utf8' || s === 'xunicode20utf8') {
+      return 'utf-8';
+    }
+    if (s === 'latin1' || s === 'iso88591' || s === 'windows1252' ||
+        s === 'cp1252' || s === 'xcp1252' || s === 'ascii' ||
+        s === 'usascii' || s === 'ansix341968') {
+      return 'windows-1252';
+    }
+    return null;
+  }
+  function utf8DecodeChunk(bytes, start, end, fatal) {
+    var out = '';
+    var i = start;
+    while (i < end) {
+      var b = bytes[i];
+      if (b < 0x80) { out += String.fromCharCode(b); i += 1; continue; }
+      var need, code;
+      if (b >= 0xC2 && b <= 0xDF) { need = 1; code = b & 0x1F; }
+      else if (b >= 0xE0 && b <= 0xEF) { need = 2; code = b & 0x0F; }
+      else if (b >= 0xF0 && b <= 0xF4) { need = 3; code = b & 0x07; }
+      else {
+        if (fatal) throw new TypeError('invalid UTF-8 sequence');
+        out += '\uFFFD';
+        i += 1;
+        continue;
+      }
+      if (i + need >= end) break;
+      var valid = true;
+      for (var j = 1; j <= need; ++j) {
+        var cont = bytes[i + j];
+        if (cont < 0x80 || cont > 0xBF) { valid = false; break; }
+        code = (code << 6) | (cont & 0x3F);
+      }
+      if (valid) {
+        if ((b === 0xE0 && bytes[i + 1] < 0xA0) ||
+            (b === 0xF0 && bytes[i + 1] < 0x90) ||
+            (b === 0xF4 && bytes[i + 1] > 0x8F) ||
+            (b === 0xED && bytes[i + 1] >= 0xA0)) {
+          valid = false;
+        }
+      }
+      if (!valid) {
+        if (fatal) throw new TypeError('invalid UTF-8 sequence');
+        out += '\uFFFD';
+        i += 1;
+        continue;
+      }
+      if (code < 0x10000) {
+        out += String.fromCharCode(code);
+      } else {
+        code -= 0x10000;
+        out += String.fromCharCode(0xD800 | (code >> 10), 0xDC00 | (code & 0x3FF));
+      }
+      i += need + 1;
+    }
+    return [out, i];
+  }
+  G.TextDecoder = function TextDecoder(label, options) {
+    var encoding = encodingFromLabel(label);
+    if (encoding === null) {
+      throw new RangeError('unsupported encoding label');
+    }
+    options = options || {};
+    this.encoding = encoding;
+    this.fatal = !!options.fatal;
+    this.ignoreBOM = !!options.ignoreBOM;
+    this._pending = [];
+    this._bomChecked = false;
+  };
+  G.TextDecoder.prototype.decode = function (input, options) {
+    options = options || {};
+    var stream = !!options.stream;
+    var bytes = [];
+    if (input !== undefined && input !== null) {
+      var view = null;
+      if (input instanceof ArrayBuffer) {
+        view = new Uint8Array(input);
+      } else if (typeof input === 'object' && input !== null &&
+                 input.buffer instanceof ArrayBuffer &&
+                 typeof input.byteOffset === 'number' &&
+                 typeof input.byteLength === 'number') {
+        view = new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+      } else {
+        throw new TypeError('TextDecoder.decode requires a buffer source');
+      }
+      for (var k = 0; k < view.length; ++k) bytes.push(view[k]);
+    }
+    if (this._pending.length) {
+      bytes = this._pending.concat(bytes);
+      this._pending = [];
+    }
+    if (!this._bomChecked && !this.ignoreBOM && this.encoding === 'utf-8' &&
+        bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+      bytes = bytes.slice(3);
+    }
+    this._bomChecked = true;
+    var out = '';
+    if (this.encoding === 'windows-1252') {
+      for (var m = 0; m < bytes.length; ++m) {
+        var b = bytes[m];
+        if (b < 0x80 || b > 0x9F) out += String.fromCharCode(b);
+        else out += String.fromCharCode(W1252[b - 0x80]);
+      }
+    } else {
+      var decoded = utf8DecodeChunk(bytes, 0, bytes.length, this.fatal);
+      out = decoded[0];
+      var consumed = decoded[1];
+      if (consumed < bytes.length) {
+        if (stream) {
+          this._pending = bytes.slice(consumed);
+        } else if (!this.fatal) {
+          for (var r = consumed; r < bytes.length; ++r) out += '\uFFFD';
+        } else {
+          throw new TypeError('invalid UTF-8 sequence');
+        }
+      }
+      if (!stream) this._bomChecked = false;
+    }
+    return out;
   };
 
   windowTarget.add('error', function () {});
