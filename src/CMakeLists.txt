@@ -3,6 +3,7 @@ set(PROWSETK_CORE_SOURCES
     core/error.cpp
     core/capability.cpp
     core/event.cpp
+    core/anti_bot_detection.cpp
     core/url.cpp
     core/redaction.cpp
     core/storage.cpp
@@ -83,6 +84,9 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/plugins/scrape2oapi/CMakeLists.txt")
 endif()
 if(EXISTS "${PROJECT_SOURCE_DIR}/plugins/ezlogin/CMakeLists.txt")
     add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/ezlogin" "${CMAKE_BINARY_DIR}/plugins/ezlogin")
+endif()
+if(EXISTS "${PROJECT_SOURCE_DIR}/plugins/captcha-handler/CMakeLists.txt")
+    add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/captcha-handler" "${CMAKE_BINARY_DIR}/plugins/captcha-handler")
 endif()
 
 add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/scrape2postman" "${CMAKE_BINARY_DIR}/plugins/scrape2postman")

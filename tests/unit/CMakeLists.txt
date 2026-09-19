@@ -15,6 +15,9 @@ prowsetk_gtest(prowsetk_unit_capability "prowsetk.unit.capability."
 prowsetk_gtest(prowsetk_unit_events "prowsetk.unit.event."
     "unit;core" test_events.cpp)
 
+prowsetk_gtest(prowsetk_unit_anti_bot_detection "prowsetk.unit.anti-bot."
+    "unit;core;captcha" test_anti_bot_detection.cpp)
+
 prowsetk_gtest(prowsetk_unit_redaction "prowsetk.unit.redaction."
     "unit;core" test_redaction.cpp)
 

@@ -445,6 +445,18 @@ is handled by the shipped `drivers/login.lua`; once that session is
 authenticated, scrapers can be activated with the same session. See
 `plugins/ezlogin/README.md` for configuration.
 
+The core includes an `AntiBotDetector` subsystem that inspects HTTP responses
+and parsed documents for heuristic anti-bot and CAPTCHA challenge signals. It
+emits `anti_bot_detected` events with provenance signals and confidence; results
+are advisory, not authoritative.
+
+The repository also includes `plugins/captcha-handler`, a native plugin built
+on the detector. It exposes eight host-mediated handling methods: manual user
+prompt, external solver API, webhook dispatch, Lua callback, pre-solved token,
+cookie/session reuse, wait-for-clearance, and abort-and-report. Methods that
+could expose secrets or call external services are unavailable until explicitly
+configured by the host.
+
 ProwseTk provides a native plugin interface through `ProwseTk-Plugin.h`. The
 interface allows native components to extend the browser without modifying the
 Flatworm core.
@@ -1218,6 +1230,7 @@ Important hooks:
 - Cookie change
 - Storage access
 - Unsupported API access
+- Anti-bot challenge detected
 - Plugin initialization
 - Plugin shutdown
 

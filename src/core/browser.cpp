@@ -350,6 +350,33 @@ void Session::emit_event(Event event) {
     browser_->events().emit(event);
 }
 
+void Session::report_anti_bot_detection(const AntiBotDetection& detection) {
+    if (!detection.activated) {
+        return;
+    }
+    anti_bot_detection_ = detection;
+    Event event;
+    event.type = EventType::AntiBotDetected;
+    event.url = detection.url.empty() ? current_url_ : detection.url;
+    event.name = detection.category;
+    event.message =
+        "anti-bot challenge detected heuristically; inspect signals";
+    event.attributes["confidence"] = std::to_string(detection.confidence);
+    event.attributes["signal-count"] =
+        std::to_string(detection.signals.size());
+    event.attributes["status"] = std::to_string(detection.status);
+    for (std::size_t i = 0; i < detection.signals.size(); ++i) {
+        const auto& signal = detection.signals[i];
+        const std::string prefix = "signal." + std::to_string(i) + ".";
+        event.attributes[prefix + "source"] = signal.source;
+        event.attributes[prefix + "name"] = signal.name;
+        event.attributes[prefix + "confidence"] =
+            std::to_string(signal.confidence);
+    }
+    event.payload = detection;
+    emit_event(event);
+}
+
 std::string Session::document_element_class_name() const {
     if (document_ == nullptr) {
         return {};
@@ -449,6 +476,9 @@ HttpResponse Session::request(HttpRequest request) {
         emit_event(after);
         browser_->plugins().dispatch_after_response(request, response);
 
+        AntiBotDetector detector;
+        report_anti_bot_detection(detector.inspect_response(request, response));
+
         const bool redirect = response.status == 301 || response.status == 302 ||
                               response.status == 303 ||
                               response.status == 307 ||
@@ -545,6 +575,16 @@ void Session::install_document(std::string_view html, std::string url,
     created.payload = document_;
     emit_event(created);
     browser_->plugins().dispatch_document(*document_);
+
+    AntiBotDetector detector;
+    const AntiBotDetection document_detection =
+        detector.inspect_document(*document_);
+    if (document_detection.activated && anti_bot_detection_.has_value()) {
+        report_anti_bot_detection(
+            detector.merge(*anti_bot_detection_, document_detection));
+    } else {
+        report_anti_bot_detection(document_detection);
+    }
 
     if (javascript_ == nullptr) {
         return;

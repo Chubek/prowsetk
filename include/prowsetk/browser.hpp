@@ -3,12 +3,14 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "prowsetk/capability.hpp"
+#include "prowsetk/anti_bot_detection.hpp"
 #include "prowsetk/document.hpp"
 #include "prowsetk/event.hpp"
 #include "prowsetk/javascript_runtime.hpp"
@@ -114,6 +116,9 @@ public:
 
     std::shared_ptr<Document> document() const noexcept { return document_; }
     const std::string& current_url() const noexcept { return current_url_; }
+    const std::optional<AntiBotDetection>& anti_bot_detection() const noexcept {
+        return anti_bot_detection_;
+    }
 
     void set_header(std::string name, std::string value);
     void clear_headers();
@@ -147,6 +152,7 @@ private:
 
     void install_document(std::string_view html, std::string url,
                           std::string base_url);
+    void report_anti_bot_detection(const AntiBotDetection& detection);
 
     // Emits `event` through the browser dispatcher, stamped with this
     // session's id so Lua `session:on` subscriptions stay scoped.
@@ -162,6 +168,7 @@ private:
     std::vector<std::pair<std::string, std::string>> headers_;
     std::shared_ptr<Document> document_;
     std::unique_ptr<JavaScriptRuntime> javascript_;
+    std::optional<AntiBotDetection> anti_bot_detection_;
     bool closed_ = false;
 };
 

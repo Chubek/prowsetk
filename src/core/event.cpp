@@ -25,6 +25,7 @@ const char* to_string(EventType type) noexcept {
         case EventType::UnsupportedApi: return "unsupported_api";
         case EventType::PluginInit: return "plugin_init";
         case EventType::PluginShutdown: return "plugin_shutdown";
+        case EventType::AntiBotDetected: return "anti_bot_detected";
         case EventType::EndpointDiscovered: return "endpoint_discovered";
     }
     return "unknown";
@@ -50,6 +51,7 @@ std::optional<EventType> parse_event_type(std::string_view name) noexcept {
         {"unsupported_api", EventType::UnsupportedApi},
         {"plugin_init", EventType::PluginInit},
         {"plugin_shutdown", EventType::PluginShutdown},
+        {"anti_bot_detected", EventType::AntiBotDetected},
         {"endpoint_discovered", EventType::EndpointDiscovered},
     };
     for (const auto& [candidate, type] : names) {

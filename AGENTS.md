@@ -333,3 +333,15 @@ The POSIX transport optionally uses OpenSSL 3 for certificate-verified HTTPS.
 Keep TLS dependency discovery in `cmake/Dependencies.cmake`, default trust and
 hostname verification enabled, and the HTTP-only build usable without OpenSSL.
 TLS tests use a local test CA and loopback peer; no public network is required.
+
+## Anti-bot detection and Captcha Handler
+
+Core anti-bot detection is heuristic and reports provenance, confidence, and
+signals through `AntiBotDetector`, `Session::anti_bot_detection()`, and the
+`anti_bot_detected` event. Do not present detections as authoritative proof.
+
+`plugins/captcha-handler` builds on that subsystem and exposes host-mediated
+handling plans only. It may prompt a user, call a configured solver API, dispatch
+a webhook, invoke a Lua callback, reuse a pre-solved token, reuse a cookie
+session, wait for clearance, or abort and report. Solver keys, cookies, tokens,
+and form values remain secret-bearing inputs and must not be logged or emitted.
