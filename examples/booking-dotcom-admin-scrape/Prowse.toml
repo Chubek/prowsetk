@@ -27,6 +27,22 @@ create_directories = true
 overwrite = true
 formats = ["yaml", "json"]
 
+[[plugins]]
+name = "captcha-handler"
+description = "Detect Booking.com anti-bot challenges and expose host-mediated handling plans"
+type = "native"
+path = "../../build/default/plugins/captcha-handler/libprowsetk_captcha_handler.so"
+enabled = true
+autoload = true
+capabilities = [
+    "captcha-handling",
+    "anti-bot-detection",
+    "cookie-session-reuse",
+    "pre-solved-token",
+    "wait-for-clearance",
+    "abort-and-report"
+]
+
 [[drivers]]
 name = "booking-dotcom-admin"
 description = "Login to admin.booking.com and recursively scrape heuristic endpoints"
@@ -45,5 +61,7 @@ arguments = [
     { name = "max_api_depth", type = "integer", required = false, default = 2 },
     { name = "max_api_requests", type = "integer", required = false, default = 64 },
     { name = "success_selector", type = "string", required = false, default = "" },
+    { name = "clearance_cookie", type = "string", required = false, default = "" },
+    { name = "captcha_token", type = "string", required = false, default = "" },
     { name = "html", type = "string", required = false, default = "" }
 ]

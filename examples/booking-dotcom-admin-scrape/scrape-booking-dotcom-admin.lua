@@ -219,9 +219,40 @@ local function response_header(response, name)
     end
 end
 
-local function fetch_page(session, url)
-    local response = session:request("GET", url)
-    return response.body or "", response
+local function is_redirect(status)
+    return status == 301 or status == 302 or status == 303 or status == 307 or status == 308
+end
+
+local function fetch_page(session, url, options)
+    options = options or {}
+    local method = options.method or "GET"
+    local current_url = url
+    local redirects = {}
+    local max_redirects = tonumber(options.max_redirects) or 0
+    for _ = 0, max_redirects do
+        local response = session:request(method, current_url, {body = options.body, headers = options.headers})
+        response.final_url = current_url
+        response.redirect_chain = redirects
+        local location = response_header(response, "Location")
+        if not options.follow_redirects or not is_redirect(response.status) or not location then
+            return response.body or "", response
+        end
+        local next_url = resolve_url(current_url, location)
+        if not next_url then
+            return response.body or "", response
+        end
+        local trust_base = options.trusted_start or current_url
+        if options.trusted_start and not booking_trusted(trust_base, next_url) then
+            return response.body or "", response
+        end
+        redirects[#redirects + 1] = current_url
+        current_url = next_url
+        if response.status == 303 or ((response.status == 301 or response.status == 302) and method ~= "GET" and method ~= "HEAD") then
+            method = "GET"
+            options.body = nil
+        end
+    end
+    error("booking-dotcom-admin: exceeded " .. tostring(max_redirects) .. " login redirects", 2)
 end
 
 local function load_page(session, url, body)
@@ -257,11 +288,62 @@ local function extract_op_token(url, body)
            (body or ""):match('"op_token"%s*:%s*"([^"]+)"')
 end
 
+local function json_unescape_ascii(value)
+    if type(value) ~= "string" then return nil end
+    return (value:gsub("\\u(%x%x%x%x)", function(hex)
+            local code = tonumber(hex, 16)
+            if code and code < 128 then return string.char(code) end
+            return ""
+        end)
+        :gsub("\\([\\\"/bfnrt])", {
+            ["\\"] = "\\", ['"'] = '"', ["/"] = "/",
+            b = "\b", f = "\f", n = "\n", r = "\r", t = "\t"
+        }))
+end
+
+local function extract_json_string(text, name)
+    text = text or ""
+    local key_start, key_end = text:find('"' .. name .. '"', 1, true)
+    if not key_end then return nil end
+    local colon = text:find(":", key_end + 1, true)
+    if not colon then return nil end
+    local quote = text:find('"', colon + 1, true)
+    if not quote then return nil end
+    local out, escaped = {}, false
+    local index = quote + 1
+    while index <= #text do
+        local ch = text:sub(index, index)
+        if escaped then
+            out[#out + 1] = "\\" .. ch
+            escaped = false
+        elseif ch == "\\" then
+            escaped = true
+        elseif ch == '"' then
+            return json_unescape_ascii(table.concat(out))
+        else
+            out[#out + 1] = ch
+        end
+        index = index + 1
+    end
+    return nil
+end
+
 local function login(session, url, username, password, options)
     options = options or {}
-    local first_body, first_response = fetch_page(session, url)
+    local first_body, first_response = fetch_page(session, url, {
+        follow_redirects = true,
+        max_redirects = 8,
+        trusted_start = url
+    })
     local location = response_header(first_response, "location")
     local login_url = url
+    if first_response.final_url and first_response.final_url ~= "" and
+       booking_trusted(url, first_response.final_url) then
+        login_url = first_response.final_url
+        if login_url ~= url then
+            first_body = select(1, fetch_page(session, login_url))
+        end
+    end
     if first_response.status and first_response.status >= 300 and first_response.status < 400 and location then
         local resolved = resolve_url(url, location)
         if not resolved or not booking_trusted(url, resolved) then
@@ -272,6 +354,17 @@ local function login(session, url, username, password, options)
     end
 
     local op_token = extract_op_token(login_url, first_body)
+    local page_as_token = extract_json_string(first_body, "as_token")
+    local login_diagnostics = string.format(
+        "status=%s final_url=%s login_host=%s login_has_query=%s body_len=%d body_op_token=%s body_as_token=%s noscript=%s",
+        tostring(first_response.status),
+        tostring(first_response.final_url ~= nil and first_response.final_url ~= ""),
+        tostring(url_host(login_url) or ""),
+        tostring(type(login_url) == "string" and login_url:find("?", 1, true) ~= nil),
+        #(first_body or ""),
+        tostring(extract_json_string(first_body, "op_token") ~= nil),
+        tostring(page_as_token ~= nil),
+        tostring((first_body or ""):lower():find("<noscript", 1, true) ~= nil))
     if op_token then
         local ok, err = pcall(function()
             ezlogin.configure(session, {
@@ -280,7 +373,7 @@ local function login(session, url, username, password, options)
                 username = username,
                 password = password,
                 op_token = op_token,
-                as_token = options.as_token,
+                as_token = options.as_token or page_as_token,
                 trusted = function(candidate) return booking_trusted(url, candidate) end
             })
         end)
@@ -288,6 +381,7 @@ local function login(session, url, username, password, options)
         if tostring(err):find("human verification", 1, true) then
             error("booking-dotcom-admin: login form not available; challenge detected", 2)
         end
+        error("booking-dotcom-admin: oauth login failed: " .. tostring(err):gsub("[\r\n].*$", ""), 2)
     end
 
     local ok, err = pcall(function()
@@ -304,7 +398,8 @@ local function login(session, url, username, password, options)
     if not ok then
         local message = tostring(err)
         if message:find("requires JavaScript", 1, true) then
-            error("booking-dotcom-admin: login page requires browser JavaScript or captcha support", 2)
+            error("booking-dotcom-admin: login page requires browser JavaScript or captcha support (" ..
+                  login_diagnostics .. ")", 2)
         end
         if message:find("no login form", 1, true) then
             error("booking-dotcom-admin: login form not available", 2)
@@ -312,6 +407,35 @@ local function login(session, url, username, password, options)
         error("booking-dotcom-admin: login failed", 2)
     end
     return true
+end
+
+local function apply_captcha_inputs(session, args, dotenv)
+    local clearance_cookie = args.clearance_cookie
+    if not clearance_cookie or clearance_cookie == "" then
+        clearance_cookie = env("BOOKING_DOTCOM_CLEARANCE_COOKIE", dotenv)
+    end
+    if clearance_cookie and clearance_cookie ~= "" then
+        session:set_header("Cookie", clearance_cookie)
+    end
+
+    local captcha_token = args.captcha_token
+    if not captcha_token or captcha_token == "" then
+        captcha_token = env("BOOKING_DOTCOM_CAPTCHA_TOKEN", dotenv)
+    end
+    return {
+        clearance_cookie = clearance_cookie,
+        captcha_token = captcha_token
+    }
+end
+
+local function captcha_handler_note(inputs)
+    if inputs and inputs.clearance_cookie and inputs.clearance_cookie ~= "" then
+        return "captcha-handler cookie-session-reuse did not clear the challenge"
+    end
+    if inputs and inputs.captcha_token and inputs.captcha_token ~= "" then
+        return "captcha-handler pre-solved-token did not clear the challenge"
+    end
+    return "captcha-handler detected a challenge; provide BOOKING_DOTCOM_CLEARANCE_COOKIE or BOOKING_DOTCOM_CAPTCHA_TOKEN"
 end
 
 local function load_authenticated_page(session, url, success_selector)
@@ -598,11 +722,39 @@ function main(args)
             if not username or username == "" or not password or password == "" then
                 error("booking-dotcom-admin: missing Booking.com credentials", 2)
             end
-            login(session, url, username, password, {
-                as_token = env("BOOKING_DOTCOM_AS_TOKEN", dotenv),
-                success_selector = args.success_selector
-            })
-            load_authenticated_page(session, url, args.success_selector)
+            local captcha_inputs = apply_captcha_inputs(session, args, dotenv)
+            local as_token = env("BOOKING_DOTCOM_AS_TOKEN", dotenv)
+            if (not as_token or as_token == "") and
+               captcha_inputs.captcha_token and captcha_inputs.captcha_token ~= "" then
+                as_token = captcha_inputs.captcha_token
+            end
+            local logged_in, login_err = pcall(function()
+                login(session, url, username, password, {
+                    as_token = as_token,
+                    success_selector = args.success_selector
+                })
+            end)
+            if not logged_in then
+                local message = tostring(login_err)
+                if message:lower():find("challenge", 1, true) or
+                   message:lower():find("captcha", 1, true) or
+                   message:find("Human Verification", 1, true) then
+                    error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs), 2)
+                end
+                error(login_err, 0)
+            end
+            local loaded, load_err = pcall(function()
+                load_authenticated_page(session, url, args.success_selector)
+            end)
+            if not loaded then
+                local message = tostring(load_err)
+                if message:lower():find("challenge", 1, true) or
+                   message:lower():find("captcha", 1, true) or
+                   message:find("Human Verification", 1, true) then
+                    error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs), 2)
+                end
+                error(load_err, 0)
+            end
             authenticated_flag = true
             endpoints = crawl(session, url, args, true)
         end

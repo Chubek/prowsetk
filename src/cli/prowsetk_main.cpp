@@ -299,6 +299,34 @@ int run_driver(const Arguments& args) {
     browser_config.unsupported_api_behavior = config.unsupported_api_behavior;
 
     prowsetk::Browser browser(std::move(browser_config));
+    try {
+        for (const auto& plugin : config.plugins) {
+            if (!plugin.enabled || !plugin.autoload || plugin.path.empty()) {
+                continue;
+            }
+            std::filesystem::path plugin_path = plugin.path;
+            if (plugin_path.is_relative()) {
+                plugin_path = project_root / plugin_path;
+            }
+            const std::string type = plugin.type.empty() ? "native" : plugin.type;
+            if (type == "native") {
+                browser.plugins().load_native(plugin_path);
+            } else if (type == "lua") {
+                browser.plugins().load_lua(plugin_path);
+            } else if (type == "wasm") {
+                browser.plugins().load_wasm(plugin_path, prowsetk::WasmSandboxConfig{});
+            } else {
+                std::cerr << "prowsetk run: unsupported plugin type for "
+                          << plugin.name << ": " << type << '\n';
+                return 2;
+            }
+        }
+        browser.plugins().initialize_all();
+    } catch (const prowsetk::Error& error) {
+        std::cerr << "prowsetk run: " << error.what() << '\n';
+        return 1;
+    }
+
     prowsetk::LuaRuntime lua;
     lua.bind_browser(&browser);
 

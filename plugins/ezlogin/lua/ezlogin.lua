@@ -301,9 +301,44 @@ local function extract_query_value(url, name)
     return nil
 end
 
+local function json_unescape(value)
+    if type(value) ~= "string" then return nil end
+    return (value:gsub("\\u(%x%x%x%x)", function(hex)
+            local code = tonumber(hex, 16)
+            if code and code < 128 then return string.char(code) end
+            return ""
+        end)
+        :gsub("\\([\\\"/bfnrt])", {
+            ["\\"] = "\\", ['"'] = '"', ["/"] = "/",
+            b = "\b", f = "\f", n = "\n", r = "\r", t = "\t"
+        }))
+end
+
 local function extract_json_string(text, name)
     text = text or ""
-    return text:match('"' .. name .. '"%s*:%s*"([^"]+)"')
+    local _, key_end = text:find('"' .. name .. '"', 1, true)
+    if not key_end then return nil end
+    local colon = text:find(":", key_end + 1, true)
+    if not colon then return nil end
+    local quote = text:find('"', colon + 1, true)
+    if not quote then return nil end
+    local out, escaped = {}, false
+    local index = quote + 1
+    while index <= #text do
+        local ch = text:sub(index, index)
+        if escaped then
+            out[#out + 1] = "\\" .. ch
+            escaped = false
+        elseif ch == "\\" then
+            escaped = true
+        elseif ch == '"' then
+            return json_unescape(table.concat(out))
+        else
+            out[#out + 1] = ch
+        end
+        index = index + 1
+    end
+    return nil
 end
 
 local function request_json(session, method, url, payload, referer)
@@ -344,6 +379,7 @@ function M.oauth_login(session, options)
     local body = response.body or ""
     local extracted_op = op_token or extract_query_value(final_url, "op_token") or
         extract_json_string(body, "op_token")
+    as_token = as_token or extract_json_string(body, "as_token")
     if not extracted_op or extracted_op == "" then
         error("ezlogin: oauth login page did not expose op_token")
     end
