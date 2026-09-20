@@ -308,6 +308,21 @@ int run_driver(const Arguments& args) {
         lua_args.push_back(prowsetk::LuaArgument{
             "cookies_json", "path", cookies_path.string()});
     }
+    lua_args.push_back(prowsetk::LuaArgument{
+        "assistant_browser_enabled", "boolean",
+        config.assistant_browser.enabled ? "true" : "false"});
+    lua_args.push_back(prowsetk::LuaArgument{
+        "assistant_browser", "string", config.assistant_browser.command});
+    lua_args.push_back(prowsetk::LuaArgument{
+        "assistant_browser_method", "string", config.assistant_browser.method});
+    lua_args.push_back(prowsetk::LuaArgument{
+        "assistant_browser_endpoint", "string", config.assistant_browser.endpoint});
+    lua_args.push_back(prowsetk::LuaArgument{
+        "assistant_browser_debug_port", "integer",
+        std::to_string(config.assistant_browser.debug_port)});
+    lua_args.push_back(prowsetk::LuaArgument{
+        "assistant_browser_wait_timeout_ms", "integer",
+        std::to_string(config.assistant_browser.wait_timeout_ms)});
 
     prowsetk::BrowserConfig browser_config;
     browser_config.javascript = config.javascript;

@@ -388,6 +388,39 @@ TEST(Scrape2OapiSession, ReportsMissingDocument) {
     EXPECT_EQ(result.warnings[0], "session has no document");
 }
 
+TEST(Scrape2OapiSession, RecommendsAssistantBrowserWhenEnabledAndNoEndpoints) {
+    Browser browser;
+    auto session = browser.create_session();
+    session->load_html("<html><title>Verification required</title><p>captcha</p></html>",
+                       "https://example.test/login");
+    scrape::Scrape2OapiOptions options;
+    options.assistant_browser_enabled = true;
+    options.assistant_browser = "assistant-browser";
+    options.assistant_browser_method = "cdp";
+    options.assistant_browser_endpoint = "http://127.0.0.1:9222";
+    options.assistant_browser_debug_port = 9222;
+    const auto result = scrape::scrape_from_session(*session, options);
+    ASSERT_TRUE(result.assistant_browser.has_value());
+    EXPECT_TRUE(result.assistant_browser->needed);
+    EXPECT_EQ(result.assistant_browser->command, "assistant-browser");
+    EXPECT_EQ(result.assistant_browser->method, "cdp");
+    EXPECT_EQ(result.assistant_browser->endpoint, "http://127.0.0.1:9222");
+    EXPECT_EQ(result.assistant_browser->debug_port, 9222u);
+    ASSERT_FALSE(result.warnings.empty());
+    EXPECT_NE(result.warnings.back().find("assistant browser handoff recommended"),
+              std::string::npos);
+    EXPECT_NE(result.openapi_yaml.find("x-prowsetk-assistant-browser:"),
+              std::string::npos);
+}
+
+TEST(Scrape2OapiSession, DoesNotRecommendAssistantBrowserWhenDisabled) {
+    Browser browser;
+    auto session = browser.create_session();
+    session->load_html("<p>captcha</p>", "https://example.test/login");
+    const auto result = scrape::scrape_from_session(*session, {});
+    EXPECT_FALSE(result.assistant_browser.has_value());
+}
+
 TEST(Scrape2OapiSession, ResolvesEndpointThroughNetwork) {
     Browser browser;
     auto network = std::make_unique<MemoryNetworkClient>();

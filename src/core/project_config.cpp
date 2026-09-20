@@ -334,6 +334,25 @@ void parse_sessions(const toml::table& root, ProjectConfig& config) {
         table_string(*table, "cookies_json", sessions.cookies_json);
 }
 
+void parse_assistant_browser(const toml::table& root, ProjectConfig& config) {
+    const auto* table = find_table(root, "assistant_browser");
+    if (table == nullptr) {
+        table = find_table(root, "assistant-browser");
+    }
+    if (table == nullptr) {
+        return;
+    }
+    auto& assistant = config.assistant_browser;
+    assistant.enabled = table_bool(*table, "enabled", assistant.enabled);
+    assistant.command = table_string(*table, "command", assistant.command);
+    assistant.method = table_string(*table, "method", assistant.method);
+    assistant.endpoint = table_string(*table, "endpoint", assistant.endpoint);
+    assistant.debug_port = static_cast<std::uint32_t>(
+        table_int(*table, "debug_port", assistant.debug_port));
+    assistant.wait_timeout_ms = static_cast<std::uint32_t>(
+        table_int(*table, "wait_timeout_ms", assistant.wait_timeout_ms));
+}
+
 void parse_variables(const toml::table& root, ProjectConfig& config) {
     const auto* table = find_table(root, "variables");
     if (table == nullptr) {
@@ -401,6 +420,7 @@ ProjectConfig parse_root(const toml::table& root) {
     parse_endpoint_extraction(root, config);
     parse_security(root, config);
     parse_sessions(root, config);
+    parse_assistant_browser(root, config);
     parse_variables(root, config);
     return config;
 }

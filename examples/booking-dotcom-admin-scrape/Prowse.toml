@@ -20,6 +20,14 @@ execution_timeout_ms = 60000
 [sessions]
 cookies_json = "../../_scraped/booking-dotcom-admin/cookies.json"
 
+[assistant-browser]
+enabled = false
+command = "assistant-browser"
+method = "webdriver"
+endpoint = ""
+debug_port = 0
+wait_timeout_ms = 300000
+
 [logging]
 level = "info"
 format = "text"

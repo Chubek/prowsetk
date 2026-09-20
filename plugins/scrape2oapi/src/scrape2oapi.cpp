@@ -103,6 +103,19 @@ std::vector<std::string> extract_api_urls_from_body(
     return out;
 }
 
+std::string assistant_command(const Scrape2OapiOptions& options) {
+    if (!options.assistant_browser.empty()) return options.assistant_browser;
+    return "assistant-browser";
+}
+
+std::string assistant_url(const Session& session) {
+    if (const auto document = session.document()) {
+        if (!document->url().empty()) return document->url();
+        if (!document->base_url().empty()) return document->base_url();
+    }
+    return session.current_url();
+}
+
 EndpointExtractionOptions to_extraction_opts(const Scrape2OapiOptions& o) {
     EndpointExtractionOptions e;
     e.follow_links = o.follow_links;
@@ -141,6 +154,36 @@ std::vector<DiscoveredEndpoint> filter_to_api(
         }
     }
     return out;
+}
+
+AssistantBrowserHandoff detect_assistant_browser_need(
+    const Session& session, const Scrape2OapiResult& result,
+    const Scrape2OapiOptions& options) {
+    AssistantBrowserHandoff handoff;
+    handoff.command = assistant_command(options);
+    handoff.method = options.assistant_browser_method.empty()
+        ? "webdriver"
+        : options.assistant_browser_method;
+    handoff.endpoint = options.assistant_browser_endpoint;
+    handoff.debug_port = options.assistant_browser_debug_port;
+    handoff.url = assistant_url(session);
+
+    if (!options.assistant_browser_enabled) {
+        return handoff;
+    }
+    if (const auto& detection = session.anti_bot_detection();
+        detection.has_value() && detection->activated) {
+        handoff.needed = true;
+        handoff.reason = detection->category.empty()
+            ? "anti-bot detection"
+            : "anti-bot detection: " + detection->category;
+        return handoff;
+    }
+    if (result.endpoints.empty() && session.document() != nullptr) {
+        handoff.needed = true;
+        handoff.reason = "no API endpoints discovered from current document";
+    }
+    return handoff;
 }
 
 Scrape2OapiResult scrape_from_document(const Document& document,
@@ -197,6 +240,12 @@ Scrape2OapiResult scrape_from_session(Session& session,
             r.endpoint = e;
             r.final_url = e.url;
             result.resolved.push_back(std::move(r));
+        }
+        auto handoff = detect_assistant_browser_need(session, result, options);
+        if (handoff.needed) {
+            result.assistant_browser = handoff;
+            result.warnings.push_back("assistant browser handoff recommended: " +
+                                      handoff.reason);
         }
         result.openapi_yaml = render_scrape_yaml(result.resolved, options, redactor);
         return result;
@@ -336,6 +385,12 @@ Scrape2OapiResult scrape_from_session(Session& session,
                   return a.method < b.method;
               });
 
+    auto handoff = detect_assistant_browser_need(session, result, options);
+    if (handoff.needed) {
+        result.assistant_browser = handoff;
+        result.warnings.push_back("assistant browser handoff recommended: " +
+                                  handoff.reason);
+    }
     result.openapi_yaml = render_scrape_yaml(result.resolved, options, redactor);
     return result;
 }
@@ -376,6 +431,21 @@ std::string render_scrape_yaml(const std::vector<ResolvedEndpoint>& resolved,
     out << "    requests.\n";
     out << "x-prowsetk-generated: true\n";
     out << "x-prowsetk-plugin: scrape2oapi\n";
+    if (options.assistant_browser_enabled) {
+        out << "x-prowsetk-assistant-browser:\n";
+        out << "  enabled: true\n";
+        out << "  method: " << yaml_quote(options.assistant_browser_method.empty()
+            ? "webdriver" : options.assistant_browser_method) << "\n";
+        const auto command = assistant_command(options);
+        out << "  command: " << yaml_quote(command) << "\n";
+        if (!options.assistant_browser_endpoint.empty()) {
+            out << "  endpoint: " << yaml_quote(options.assistant_browser_endpoint) << "\n";
+        }
+        if (options.assistant_browser_debug_port != 0) {
+            out << "  debug-port: " << options.assistant_browser_debug_port << "\n";
+        }
+        out << "  note: 'User-assisted browser handoff is optional and heuristic.'\n";
+    }
 
     // Group by path
     std::map<std::string, std::vector<const ResolvedEndpoint*>> by_path;

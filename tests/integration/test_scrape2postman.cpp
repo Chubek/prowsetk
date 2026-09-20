@@ -193,6 +193,34 @@ TEST(PostmanIntegration, LuaPostmanRecursiveScrapeFollowsJsonLinks) {
     EXPECT_TRUE(result.ok) << lua.last_error();
 }
 
+TEST(PostmanIntegration, LuaAssistantBrowserMetadataIsNonInteractiveWhenPromptDisabled) {
+    if (!prowsetk::LuaRuntime::available()) GTEST_SKIP() << "Lua unavailable";
+    prowsetk::LuaRuntime lua;
+    ASSERT_TRUE(lua.run("package.path = '" PROWSETK_SOURCE_DIR "/?.lua;' .. package.path").ok);
+    const auto result = lua.run(R"LUA(
+        local postman = require("plugins.scrape2postman.lua.scrape2postman")
+        local browser = require("lprowse").browser.new()
+        local session = browser:create_session()
+        local result = postman.scrape(session, {
+            html = '<html><title>Verification required</title><div id="captcha"></div></html>',
+            base_url = "https://example.test/login",
+            assistant_browser_enabled = true,
+            assistant_prompt = false,
+            assistant_browser = "test-browser",
+            assistant_browser_method = "cdp",
+            assistant_browser_endpoint = "http://127.0.0.1:9222",
+            assistant_browser_debug_port = 9222
+        })
+        assert(result.assistant_browser and result.assistant_browser.needed)
+        assert(result.assistant_browser.command == "test-browser")
+        assert(result.assistant_browser.method == "cdp")
+        assert(result.assistant_browser.endpoint == "http://127.0.0.1:9222")
+        assert(result.assistant_browser.debug_port == 9222)
+        assert(result.postman_json:find("Assistant browser handoff is enabled", 1, true))
+    )LUA");
+    EXPECT_TRUE(result.ok) << lua.last_error();
+}
+
 TEST(PostmanIntegration, LuaOpenApiRecursiveYamlIncludesResolvedEndpointsWithoutFiltering) {
     if (!prowsetk::LuaRuntime::available()) GTEST_SKIP() << "Lua unavailable";
     prowsetk::LuaRuntime lua;

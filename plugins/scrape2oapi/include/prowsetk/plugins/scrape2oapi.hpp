@@ -2,6 +2,7 @@
 #define PROWSETK_PLUGINS_SCRAPE2OAPI_HPP
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -49,6 +50,27 @@ struct Scrape2OapiOptions {
     bool follow_json_links = true;
     // Upper bound on network fetches during chain resolution.
     std::uint32_t max_resolve_requests = 64;
+
+    // Optional user-assisted browser handoff. The Lua/CLI layer performs the
+    // prompt and launch; C++ records the configured strategy and exposes helper
+    // detection so hosts can make the same decision.
+    bool assistant_browser_enabled = false;
+    bool assistant_prompt = true;
+    std::string assistant_browser;
+    std::string assistant_browser_method = "webdriver";
+    std::string assistant_browser_endpoint;
+    std::uint32_t assistant_browser_debug_port = 0;
+    std::uint32_t assistant_wait_timeout_ms = 300000;
+};
+
+struct AssistantBrowserHandoff {
+    bool needed = false;
+    std::string reason;
+    std::string url;
+    std::string command;
+    std::string method;
+    std::string endpoint;
+    std::uint32_t debug_port = 0;
 };
 
 // One endpoint that has been resolved through the network. The original
@@ -76,6 +98,7 @@ struct Scrape2OapiResult {
     std::vector<DiscoveredEndpoint> endpoints;
     std::string openapi_yaml;
     std::vector<std::string> warnings;
+    std::optional<AssistantBrowserHandoff> assistant_browser;
 };
 
 bool is_api_path(const std::string& path,
@@ -86,6 +109,10 @@ bool is_api_path(const std::string& path,
 // patterns (or the built-in heuristic markers) are kept.
 std::vector<DiscoveredEndpoint> filter_to_api(
     const std::vector<DiscoveredEndpoint>& endpoints,
+    const Scrape2OapiOptions& options);
+
+AssistantBrowserHandoff detect_assistant_browser_need(
+    const Session& session, const Scrape2OapiResult& result,
     const Scrape2OapiOptions& options);
 
 // Core extraction helpers. Session variants may optionally resolve the chain

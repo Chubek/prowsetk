@@ -21,6 +21,7 @@ struct Scrape2PostmanResult {
     std::vector<ResolvedEndpoint> resolved;
     std::vector<DiscoveredEndpoint> endpoints;
     std::vector<std::string> warnings;
+    std::optional<scrape2oapi::AssistantBrowserHandoff> assistant_browser;
     std::string postman_json;
 
     // Parent directory must exist. Throws on open, write, or close failure.

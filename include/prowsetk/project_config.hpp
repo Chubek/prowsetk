@@ -122,6 +122,16 @@ struct SessionDefaultsConfig {
     std::string cookies_json;
 };
 
+// Optional user-assisted browser handoff for pages that require interaction.
+struct AssistantBrowserConfig {
+    bool enabled = false;
+    std::string command = "assistant-browser";
+    std::string method = "webdriver";
+    std::string endpoint;
+    std::uint32_t debug_port = 0;
+    std::uint32_t wait_timeout_ms = 300000;
+};
+
 // The parsed `Prowse.toml` project configuration. Only documented sections are
 // read; unknown keys are ignored so forward-compatible configs keep working.
 struct ProjectConfig {
@@ -156,6 +166,7 @@ struct ProjectConfig {
     EndpointExtractionConfig endpoint_extraction;
     SecurityConfig security;
     SessionDefaultsConfig sessions;
+    AssistantBrowserConfig assistant_browser;
     std::map<std::string, std::string> variables;
 };
 

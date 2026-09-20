@@ -1560,6 +1560,31 @@ redact_query_parameters = [
 ]
 
 # ----------------------------------------------------------------------
+# Assistant browser handoff
+# ----------------------------------------------------------------------
+
+[assistant-browser]
+# Optional, user-approved handoff for pages that require interaction outside
+# Flatworm, such as MFA, human verification, or a site-specific browser check.
+enabled = false
+
+# `$PROWSETK_ASSISTANT_BROWSER` overrides this command at runtime. When neither
+# is set, scrape2oapi/scrape2postman use `assistant-browser`.
+command = "assistant-browser"
+
+# Describes how the assistant browser is controlled or observed. Supported
+# values are declarative and host-dependent: "webdriver", "cdp",
+# "debug-port", or a project-specific method string.
+method = "webdriver"
+
+# Optional protocol endpoint for an already-running assistant browser or driver.
+# For CDP/debug-port workflows this is commonly http://127.0.0.1:9222; for W3C
+# WebDriver it is commonly http://127.0.0.1:9515.
+endpoint = ""
+debug_port = 0
+wait_timeout_ms = 300000
+
+# ----------------------------------------------------------------------
 # Special commands
 # ----------------------------------------------------------------------
 

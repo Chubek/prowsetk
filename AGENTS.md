@@ -373,6 +373,20 @@ Keep TLS dependency discovery in `cmake/Dependencies.cmake`, default trust and
 hostname verification enabled, and the HTTP-only build usable without OpenSSL.
 TLS tests use a local test CA and loopback peer; no public network is required.
 
+## Assistant Browser Handoff
+
+`Prowse.toml` may define `[assistant-browser]` (or `[assistant_browser]`) with
+`enabled`, `command`, `method`, `endpoint`, `debug_port`, and
+`wait_timeout_ms`. `$PROWSETK_ASSISTANT_BROWSER` overrides the command at
+runtime. `scrape2oapi` and `scrape2postman` may offer this handoff when
+heuristics detect anti-bot/human-verification content or when no endpoints are
+found from the current document. The handoff is user-approved by default:
+prompt on the CLI, launch the configured browser command with the page URL, wait
+for the user to finish, then continue with the data explicitly available to the
+session or plugin. Do not treat a successful handoff as authoritative proof of
+coverage, and do not log or export cookies, tokens, form values, or challenge
+content.
+
 ## Anti-bot detection and Captcha Handler
 
 Core anti-bot detection is heuristic and reports provenance, confidence, and

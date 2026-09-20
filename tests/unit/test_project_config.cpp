@@ -133,6 +133,25 @@ redact_query_parameters = ["token", "api_key"]
     EXPECT_EQ(config.endpoint_extraction.redact_query_parameters[0], "token");
 }
 
+TEST(ProjectConfig, ParsesAssistantBrowserConfig) {
+    const auto config = parse_project_config(R"(
+[assistant-browser]
+enabled = true
+command = "chromium --remote-debugging-port=9222"
+method = "cdp"
+endpoint = "http://127.0.0.1:9222"
+debug_port = 9222
+wait_timeout_ms = 120000
+)");
+    EXPECT_TRUE(config.assistant_browser.enabled);
+    EXPECT_EQ(config.assistant_browser.command,
+              "chromium --remote-debugging-port=9222");
+    EXPECT_EQ(config.assistant_browser.method, "cdp");
+    EXPECT_EQ(config.assistant_browser.endpoint, "http://127.0.0.1:9222");
+    EXPECT_EQ(config.assistant_browser.debug_port, 9222u);
+    EXPECT_EQ(config.assistant_browser.wait_timeout_ms, 120000u);
+}
+
 TEST(ProjectConfig, UnknownKeysAreIgnored) {
     const auto config = parse_project_config(R"(
 [engine]

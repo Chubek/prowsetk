@@ -81,6 +81,17 @@ local function normalize_spec(spec)
     opts.follow_json_links = spec.follow_json_links ~= false
     opts.max_resolve_requests = tonumber(spec.max_resolve_requests) or 64
     opts.allow_cross_origin_resolve = spec.allow_cross_origin_resolve == true
+    opts.assistant_browser_enabled =
+        spec.assistant_browser_enabled == true or spec.assistant_browser == true
+    opts.assistant_prompt = spec.assistant_prompt ~= false
+    opts.assistant_browser = type(spec.assistant_browser) == "string" and spec.assistant_browser or ""
+    opts.assistant_browser_method =
+        spec.assistant_browser_method or spec.assistant_method or spec.browser_automation_method or "webdriver"
+    opts.assistant_browser_endpoint =
+        spec.assistant_browser_endpoint or spec.assistant_endpoint or spec.webdriver_url or spec.debugger_url or ""
+    opts.assistant_browser_debug_port =
+        tonumber(spec.assistant_browser_debug_port or spec.debug_port or spec.cdp_port) or 0
+    opts.assistant_wait_timeout_ms = tonumber(spec.assistant_wait_timeout_ms) or 300000
     opts.output = spec.output or spec.out or ""
     return opts
 end
@@ -130,6 +141,83 @@ end
 local function same_origin(a, b)
     local oa, ob = url_origin(a), url_origin(b)
     return oa ~= nil and ob ~= nil and oa:lower() == ob:lower()
+end
+
+local function shell_quote(value)
+    value = tostring(value or "")
+    return "'" .. value:gsub("'", "'\\''") .. "'"
+end
+
+local function lower(value)
+    return tostring(value or ""):lower()
+end
+
+local function document_needs_interaction(doc, endpoints)
+    if doc == nil then return false, "" end
+    local title, text, html = "", "", ""
+    pcall(function() title = type(doc.title) == "function" and doc:title() or "" end)
+    pcall(function() text = type(doc.text) == "function" and doc:text() or "" end)
+    pcall(function() html = type(doc.html) == "function" and doc:html() or "" end)
+    local body = lower(title .. "\n" .. text .. "\n" .. html)
+    if body:find("g%-recaptcha") or body:find("h%-captcha") or
+       body:find("cf%-turnstile") or body:find("captcha", 1, true) or
+       body:find("verify you are human", 1, true) or
+       body:find("human verification", 1, true) or
+       body:find("verification required", 1, true) then
+        return true, "anti-bot or human-verification content detected"
+    end
+    if endpoints ~= nil and #endpoints == 0 then
+        return true, "no API endpoints discovered from current document"
+    end
+    return false, ""
+end
+
+local function assistant_launch_command(opts, url)
+    local browser = os.getenv("PROWSETK_ASSISTANT_BROWSER")
+    if browser == nil or browser == "" then browser = opts.assistant_browser end
+    if browser == nil or browser == "" then browser = "assistant-browser" end
+    return browser, browser .. " " .. shell_quote(url)
+end
+
+local function offer_assistant_browser(session, doc, endpoints, opts)
+    if not opts.assistant_browser_enabled then return false, nil end
+    local needed, reason = document_needs_interaction(doc, endpoints)
+    if not needed then return false, nil end
+
+    local url = opts.url
+    if (url == nil or url == "") and session ~= nil and type(session.current_url) == "function" then
+        pcall(function() url = session:current_url() end)
+    end
+    if (url == nil or url == "") and doc ~= nil and type(doc.url) == "function" then
+        pcall(function() url = doc:url() end)
+    end
+    if url == nil or url == "" then url = opts.base_url end
+    if url == nil or url == "" then return false, nil end
+
+    local command, launch = assistant_launch_command(opts, url)
+    local handoff = {
+        needed = true,
+        reason = reason,
+        url = url,
+        command = command,
+        method = opts.assistant_browser_method,
+        endpoint = opts.assistant_browser_endpoint,
+        debug_port = opts.assistant_browser_debug_port
+    }
+    if not opts.assistant_prompt then return true, handoff end
+
+    io.stderr:write("scrape2oapi: " .. reason .. ". Launch assistant browser with "
+        .. tostring(opts.assistant_browser_method) .. " handoff? [y/N] ")
+    local answer = io.read("*l") or ""
+    answer = lower(answer):gsub("^%s+", ""):gsub("%s+$", "")
+    if answer ~= "y" and answer ~= "yes" then
+        return true, handoff
+    end
+    io.stderr:write("scrape2oapi: launching " .. command .. " for " .. url .. "\n")
+    os.execute(launch)
+    io.stderr:write("scrape2oapi: press Enter after browser interaction is complete. ")
+    io.read("*l")
+    return true, handoff
 end
 
 local function json_unescape(value)
@@ -324,6 +412,7 @@ function scrape2oapi.scrape(session_or_document, spec)
 
     local endpoints = result:endpoints()
     local filtered = filter_api_endpoints(endpoints, opts)
+    local assistant_needed, assistant_handoff = offer_assistant_browser(session, doc, filtered, opts)
 
     -- Optionally resolve chains (requires a session)
     local resolved = filtered
@@ -367,6 +456,20 @@ function scrape2oapi.scrape(session_or_document, spec)
         lines[#lines+1] = "    heuristic internal-API discoveries."
         lines[#lines+1] = "x-prowsetk-generated: true"
         lines[#lines+1] = "x-prowsetk-plugin: scrape2oapi"
+        if opts.assistant_browser_enabled then
+            lines[#lines+1] = "x-prowsetk-assistant-browser:"
+            lines[#lines+1] = "  enabled: true"
+            lines[#lines+1] = "  method: '" .. tostring(opts.assistant_browser_method):gsub("'", "''") .. "'"
+            local command = os.getenv("PROWSETK_ASSISTANT_BROWSER") or opts.assistant_browser
+            if command == nil or command == "" then command = "assistant-browser" end
+            lines[#lines+1] = "  command: '" .. tostring(command):gsub("'", "''") .. "'"
+            if opts.assistant_browser_endpoint ~= "" then
+                lines[#lines+1] = "  endpoint: '" .. opts.assistant_browser_endpoint:gsub("'", "''") .. "'"
+            end
+            if opts.assistant_browser_debug_port ~= 0 then
+                lines[#lines+1] = "  debug-port: " .. tostring(opts.assistant_browser_debug_port)
+            end
+        end
         if #resolved == 0 then
             lines[#lines+1] = "paths: {}"
         else
@@ -419,13 +522,20 @@ function scrape2oapi.scrape(session_or_document, spec)
         write_yaml(opts.output, yaml)
     end
 
+    local warnings = result:warnings()
+    if assistant_needed and assistant_handoff ~= nil then
+        warnings[#warnings + 1] =
+            "assistant browser handoff recommended: " .. assistant_handoff.reason
+    end
+
     -- Augmented result table
     local augmented = {
         openapi_yaml = yaml,
         endpoints = resolved,
         all_endpoints = endpoints,
         filtered_endpoints = filtered,
-        warnings = result:warnings(),
+        warnings = warnings,
+        assistant_browser = assistant_handoff,
         endpoint_count = #resolved,
         write_openapi_yaml = function(_, path) return write_yaml(path, yaml) end
     }
@@ -461,6 +571,20 @@ function scrape2oapi.render_openapi_yaml(endpoints, spec)
     lines[#lines+1] = "    heuristic discoveries, not authoritative API documentation."
     lines[#lines+1] = "x-prowsetk-generated: true"
     lines[#lines+1] = "x-prowsetk-plugin: scrape2oapi"
+    if opts.assistant_browser_enabled then
+        lines[#lines+1] = "x-prowsetk-assistant-browser:"
+        lines[#lines+1] = "  enabled: true"
+        lines[#lines+1] = "  method: '" .. tostring(opts.assistant_browser_method):gsub("'", "''") .. "'"
+        local command = os.getenv("PROWSETK_ASSISTANT_BROWSER") or opts.assistant_browser
+        if command == nil or command == "" then command = "assistant-browser" end
+        lines[#lines+1] = "  command: '" .. tostring(command):gsub("'", "''") .. "'"
+        if opts.assistant_browser_endpoint ~= "" then
+            lines[#lines+1] = "  endpoint: '" .. opts.assistant_browser_endpoint:gsub("'", "''") .. "'"
+        end
+        if opts.assistant_browser_debug_port ~= 0 then
+            lines[#lines+1] = "  debug-port: " .. tostring(opts.assistant_browser_debug_port)
+        end
+    end
     
     if #endpoints == 0 then
         lines[#lines+1] = "paths: {}"
