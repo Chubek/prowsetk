@@ -21,7 +21,7 @@ execution_timeout_ms = 60000
 cookies_json = "../../_scraped/booking-dotcom-admin/cookies.json"
 
 [assistant-browser]
-enabled = false
+enabled = true
 command = "assistant-browser"
 method = "webdriver"
 endpoint = ""
