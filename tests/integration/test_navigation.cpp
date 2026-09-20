@@ -11,6 +11,7 @@ using prowsetk::BrowserConfig;
 using prowsetk::Error;
 using prowsetk::EventType;
 using prowsetk::HttpResponse;
+using prowsetk::HttpRequest;
 using prowsetk::MemoryNetworkClient;
 
 namespace {
@@ -135,6 +136,62 @@ TEST(Navigation, SendsSessionHeadersAndCookies) {
     }
     EXPECT_TRUE(has_trace);
     EXPECT_TRUE(has_cookie);
+}
+
+TEST(Navigation, PublicRequestsInheritSessionHeaders) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    HttpResponse response;
+    response.status = 204;
+    network->set_response("https://example.com/api", response);
+    auto* network_ptr = network.get();
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->set_header("X-Trace", "session-default");
+    HttpRequest request;
+    request.method = "POST";
+    request.url = "https://example.com/api";
+    request.headers.emplace_back("X-Request", "explicit");
+    EXPECT_EQ(session->request(std::move(request)).status, 204);
+
+    ASSERT_EQ(network_ptr->requests().size(), 1u);
+    bool found_trace = false;
+    bool found_request = false;
+    for (const auto& [name, value] : network_ptr->requests().front().headers) {
+        found_trace = found_trace || (name == "X-Trace" && value == "session-default");
+        found_request = found_request || (name == "X-Request" && value == "explicit");
+    }
+    EXPECT_TRUE(found_trace);
+    EXPECT_TRUE(found_request);
+}
+
+TEST(Navigation, CrossOriginRedirectScrubsCredentialHeaders) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    HttpResponse redirect;
+    redirect.status = 302;
+    redirect.headers.emplace_back("Location", "https://other.test/final");
+    network->set_response("https://example.com/start", redirect);
+    HttpResponse landed;
+    landed.status = 200;
+    landed.body = "<title>Landed</title>";
+    network->set_response("https://other.test/final", landed);
+    auto* network_ptr = network.get();
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    HttpRequest request;
+    request.url = "https://example.com/start";
+    request.headers.emplace_back("Authorization", "Bearer secret");
+    request.headers.emplace_back("Cookie", "sid=private");
+    session->request(std::move(request));
+
+    ASSERT_EQ(network_ptr->requests().size(), 2u);
+    for (const auto& [name, value] : network_ptr->requests().back().headers) {
+        EXPECT_NE(name, "Authorization");
+        EXPECT_NE(name, "Cookie");
+    }
 }
 
 TEST(Navigation, PersistsSetCookiesAcrossRedirects) {

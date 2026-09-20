@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cctype>
 #include <ctime>
 #include <iomanip>
 #include <limits>
@@ -26,6 +27,17 @@ bool header_name_equal(std::string_view left, std::string_view right) {
                           return std::tolower(static_cast<unsigned char>(a)) ==
                                  std::tolower(static_cast<unsigned char>(b));
                       });
+}
+
+bool sensitive_redirect_header(std::string_view name) {
+    return header_name_equal(name, "Authorization") ||
+           header_name_equal(name, "Proxy-Authorization") ||
+           header_name_equal(name, "Cookie");
+}
+
+bool same_origin(const Url& left, const Url& right) {
+    return left.scheme == right.scheme && left.host == right.host &&
+           left.port == right.port && left.has_authority && right.has_authority;
 }
 
 std::string header_value(
@@ -521,6 +533,14 @@ HttpResponse Session::request(HttpRequest request) {
     int redirects = 0;
     std::vector<std::string> chain;
 
+    // Public request() calls are session requests too. Preserve explicit
+    // per-request headers while supplying session defaults for missing names.
+    for (const auto& [name, value] : headers_) {
+        if (header_value(request.headers, name).empty()) {
+            request.headers.emplace_back(name, value);
+        }
+    }
+
     while (true) {
         if (header_value(request.headers, "User-Agent").empty()) {
             request.headers.emplace_back("User-Agent",
@@ -576,7 +596,9 @@ HttpResponse Session::request(HttpRequest request) {
         const std::string location = response.header("Location");
         if (!redirect || location.empty() ||
             !browser_->config().follow_redirects) {
-            response.final_url = request.url;
+            if (response.final_url.empty()) {
+                response.final_url = request.url;
+            }
             response.redirect_chain = chain;
             return response;
         }
@@ -597,7 +619,17 @@ HttpResponse Session::request(HttpRequest request) {
             return response;
         }
         chain.push_back(request.url);
-        request.url = resolve_url(request.url, location);
+        const std::string redirected_url = resolve_url(request.url, location);
+        const Url redirected = parse_url(redirected_url);
+        if (!same_origin(parsed, redirected)) {
+            request.headers.erase(
+                std::remove_if(request.headers.begin(), request.headers.end(),
+                               [](const auto& header) {
+                                   return sensitive_redirect_header(header.first);
+                               }),
+                request.headers.end());
+        }
+        request.url = redirected_url;
         // 303 always reissues as GET; 301/302 also convert non-idempotent
         // methods to GET, matching common browser behavior. 307/308 preserve
         // the method and body.

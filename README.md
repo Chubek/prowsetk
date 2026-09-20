@@ -1739,7 +1739,19 @@ Dotenv supports assignments, `export`, comments, and single/double quotes,
 with common double-quote escapes. It never executes shell code or expands
 variables; loaded values stay local to the driver.
 
-The login workflow first follows the Booking.com account-portal redirect and,
+The login workflow first tries the session's existing cookies, including those
+imported by `[sessions].cookies_json` or `--cookies-json FILE`. A valid session
+does not require a username or password. Login confirmation follows up to eight
+trusted HTTPS redirects and checks the resulting admin document for an actual
+logout control or account menu (including controls created by page JavaScript).
+HTTP errors and logout strings inside scripts are not proof of login. Crawling
+starts at the confirmed dashboard URL, including `hotel/hoteladmin` pages.
+Expired sessions fall back to credential login; challenges stop the run with
+status/evidence diagnostics that omit response bodies, URLs, and secrets.
+If verification is required, complete it in your browser, export fresh cookies,
+and rerun with `--cookies-json FILE`.
+
+Credential login follows the Booking.com account-portal redirect and,
 when an `op_token` is exposed, uses ezlogin's OAuth endpoints. If the page has
 no OAuth token, it falls back to HTML POST forms, hidden fields, username-first
 flows, and bounded redirects. It sends the password only after the login-name

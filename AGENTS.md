@@ -352,13 +352,18 @@ Rules:
 
 ## Booking.com example and HTTPS
 
-`examples/booking-dotcom/scrape_booking_dotcom.lua` is an example driver
-registered by `examples/booking_dotcom.toml`. It follows the `main(args)` and
+`examples/booking-dotcom-admin-scrape/scrape-booking-dotcom-admin.lua` is an example driver
+registered by `examples/booking-dotcom-admin-scrape/Prowse.toml`. It follows the `main(args)` and
 offline `html`
 contracts despite living in `examples/`. Load dotenv before looking up its
 Booking.com credentials; never log those values. Require positive login
-evidence before exporting a live page, and retain the documented limitation
-that the current JavaScript-only Booking.com portal is not supported.
+evidence before exporting a live page. Try imported session cookies before
+requiring credentials, follow bounded trusted HTTPS redirects for confirmation,
+and crawl from the confirmed admin URL. Confirmation requires a successful HTTP
+response and a DOM logout/account control, not words inside scripts. JavaScript
+support is partial; human verification and MFA can still require browser
+interaction followed by importing fresh cookies. Never claim those challenges
+have been solved merely because a cookie exists.
 Discovery is heuristic and bounded, with explicit incomplete coverage metadata.
 Tests cover the real extractor, simulated login flows, CLI, redaction, and
 rejected form actions/redirects.

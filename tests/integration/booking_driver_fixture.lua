@@ -5,7 +5,8 @@ local browser = prowse.browser.new({javascript=true})
 local dom_session = browser:create_session()
 local calls = {}
 local closed = false
-local authenticated = false
+local cookie_session = scenario == 'cookie-session' or scenario == 'cookie-admin-path'
+local authenticated = cookie_session
 
 -- Login page HTML
 local login = [[<form method="post" action="/auth"><input name="_csrf" type="hidden" value="fixture-csrf">
@@ -39,6 +40,12 @@ local dashboard = [[<a href="/logout">Log out</a><a href="/reservations">Reserva
 <a href="/api/hotels?token=fixture-token">Hotels</a><a href="/hotel/hoteladmin">Hotel admin</a>
 <a href="/partner-settings/security">Partner security</a><script src="/app.js"></script>
 <script>fetch('/api/inline')</script>]]
+if scenario == 'js-dashboard' then
+    dashboard = dashboard:gsub('<a href="/logout">Log out</a>',
+        [[<div id="account"></div><script>document.getElementById('account').innerHTML = '<a href="/sign-out">Exit</a>';</script>]])
+elseif scenario == 'script-marker' then
+    dashboard = [[<script>var messages = {logout: 'Log out'};</script><p>Sign in required</p>]]
+end
 
 -- Reservations page (for recursive crawl)
 local reservations = [[<a href="/logout">Log out</a><a href="/dashboard">Dashboard</a>
@@ -60,11 +67,26 @@ function wrapper:request(method, url, options)
     calls[#calls+1] = {method=method, url=url, body=options.body}
     
     if url == 'https://admin.booking.com/' then
+        if scenario == 'redirect-loop' then
+            return {status=302, body='', headers={Location='/'}}
+        elseif scenario == 'downgrade-redirect' then
+            return {status=302, body='', headers={Location='http://admin.booking.com/auth'}}
+        end
         if scenario == 'oauth' and not authenticated then
             return {status=302, body='', headers={Location='https://account.booking.com/sign-in?op_token=fixture-op-token'}}
         end
-        if authenticated then return {status=200, body=dashboard, headers={}} end
+        if authenticated then
+            if scenario == 'redirect-dashboard' or cookie_session then
+                return {status=302, body='', headers={Location='/landing'}}
+            end
+            return {status=scenario == 'http-error-marker' and 401 or 200, body=dashboard, headers={}}
+        end
         return {status=200, body=login, headers={}}
+    elseif url == 'https://admin.booking.com/landing' then
+        return {status=303, body='', headers={Location=scenario == 'cookie-admin-path' and
+            '/hotel/hoteladmin/index.html' or '/dashboard'}}
+    elseif url == 'https://admin.booking.com/hotel/hoteladmin/index.html' then
+        return {status=200, body=dashboard, headers={}}
     elseif url == 'https://account.booking.com/sign-in?op_token=fixture-op-token' then
         return {status=200, body='<html><body><noscript>Please enable JavaScript</noscript></body></html>', headers={}}
     elseif url == 'https://account.booking.com/account/sign-in/login_name' then
@@ -97,7 +119,9 @@ function wrapper:request(method, url, options)
         return {status=303, body='', headers={Location='/dashboard', ['Set-Cookie']='session=fixture-session-token; Path=/; HttpOnly'}}
     elseif url == 'https://admin.booking.com/dashboard' then
         assert(method == 'GET' and (options.body == nil or options.body == ''))
-        return {status=200, body=dashboard, headers={}}
+        -- The login helper can succeed; the driver must still verify the final page.
+        return {status=200, body=(scenario == 'script-marker' or scenario == 'js-dashboard') and
+            '<a href="/logout">Log out</a>' or dashboard, headers={}}
     elseif url == 'https://admin.booking.com/app.js' then
         return {status=200, body=[[fetch('/api/external'); import('/static/chunk.js')]], headers={['Content-Type']='application/javascript'}}
     elseif url == 'https://admin.booking.com/static/chunk.js' then
@@ -152,7 +176,9 @@ end
 
 -- Write dotenv file
 local f = assert(io.open(dotenv_file,'w'))
-if scenario == 'malformed-dotenv' then
+if cookie_session then
+    f:write('# Existing session needs no username or password\n')
+elseif scenario == 'malformed-dotenv' then
     f:write('BOOKING_DOTCOM_USER="unclosed\n')
 else
     f:write('BOOKING_DOTCOM_USER="fixture@example.com"\n',
@@ -171,7 +197,8 @@ local succeeded, message = pcall(main, {
 })
 
 -- Verify results based on scenario
-if scenario == 'success' or scenario == 'js-built-form' or scenario == 'two-step' or scenario == 'oauth' then
+if scenario == 'success' or scenario == 'js-built-form' or scenario == 'two-step' or scenario == 'oauth' or
+   scenario == 'redirect-dashboard' or scenario == 'js-dashboard' or cookie_session then
     assert(succeeded, message)
     assert(message == 0)
     
@@ -207,6 +234,9 @@ if scenario == 'success' or scenario == 'js-built-form' or scenario == 'two-step
     
     local minimum_calls = (scenario == 'two-step' or scenario == 'oauth') and 14 or 13
     assert(#calls >= minimum_calls, 'recursive API crawl made too few calls: ' .. #calls)
+    if cookie_session then
+        for _, call in ipairs(calls) do assert(call.method == 'GET', 'cookie session posted credentials') end
+    end
     
 elseif scenario == 'challenge' then
     assert(not succeeded, 'expected a challenge failure')
@@ -231,7 +261,14 @@ else
     assert(not succeeded, 'expected a failure')
     assert(not io.open(output_file, 'r'), 'failure produced output')
     assert(not message:find('fixture', 1, true), 'error leaked a secret')
-    if scenario == 'get-form' or scenario == 'foreign-action' then
+    if scenario == 'redirect-loop' then
+        assert(#calls == 9, 'redirect limit was not enforced')
+        assert(message:find('exceeded 8 login redirects', 1, true), message)
+    elseif scenario == 'downgrade-redirect' then
+        assert(#calls == 1, 'insecure redirect was followed')
+    elseif scenario == 'script-marker' or scenario == 'http-error-marker' then
+        assert(message:find('login was not confirmed', 1, true), message)
+    elseif scenario == 'get-form' or scenario == 'foreign-action' then
         for _, call in ipairs(calls) do
             assert(call.method ~= 'POST', 'credentials sent unexpectedly')
         end
