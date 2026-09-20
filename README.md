@@ -1,6 +1,6 @@
 # ProwseTk
 
-![./emblem.svg]
+![./emblem.svg]()
 
 ProwseTk is an embeddable C++ toolkit for building programmable, headless web
 browsers. It targets web scraping, endpoint discovery, API automation, testing,
