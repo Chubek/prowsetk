@@ -22,8 +22,8 @@ cookies_json = "../../_scraped/booking-dotcom-admin/cookies.json"
 
 [assistant-browser]
 enabled = true
-command = "assistant-browser"
-method = "webdriver"
+command = "firefox"
+method = "manual"
 endpoint = ""
 debug_port = 0
 wait_timeout_ms = 300000
@@ -73,7 +73,11 @@ arguments = [
     { name = "max_api_depth", type = "integer", required = false, default = 2 },
     { name = "max_api_requests", type = "integer", required = false, default = 64 },
     { name = "success_selector", type = "string", required = false, default = "" },
+    { name = "success_beacon", type = "string", required = false, default = "" },
+    { name = "success_beacon_type", type = "string", required = false, default = "auto" },
     { name = "clearance_cookie", type = "string", required = false, default = "", secret = true },
     { name = "captcha_token", type = "string", required = false, default = "", secret = true },
+    { name = "assistant_browser_force", type = "boolean", required = false, default = false },
+    { name = "assistant_browser_cookie_command", type = "string", required = false, default = "" },
     { name = "html", type = "string", required = false, default = "" }
 ]

@@ -1,5 +1,7 @@
 # ProwseTk
 
+![./emblem.svg]
+
 ProwseTk is an embeddable C++ toolkit for building programmable, headless web
 browsers. It targets web scraping, endpoint discovery, API automation, testing,
 and data-extraction workflows that need browser-like document and script
@@ -1775,6 +1777,11 @@ Expired sessions fall back to credential login; challenges stop the run with
 status/evidence diagnostics that omit response bodies, URLs, and secrets.
 If verification is required, complete it in your browser, export fresh cookies,
 and rerun with `--cookies-json FILE`.
+The Booking.com example also supports `--assistant_browser_force true`; after
+the handoff it automatically snapshots the newest Firefox `cookies.sqlite`
+under `~/.mozilla/firefox` (or `$FIREFOX_PROFILE_ROOT`) into the configured
+cookie JSON and retries the session. Set
+`PROWSETK_ASSISTANT_BROWSER_COOKIE_COMMAND` to override that grabber.
 
 Credential login follows the Booking.com account-portal redirect and,
 when an `op_token` is exposed, uses ezlogin's OAuth endpoints. If the page has

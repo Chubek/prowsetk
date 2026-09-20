@@ -11,6 +11,7 @@
 #include <sstream>
 
 #include "prowsetk/browser.hpp"
+#include "prowsetk/cookie_import.hpp"
 #include "prowsetk/document.hpp"
 #include "prowsetk/endpoint_extraction.hpp"
 #include "prowsetk/error.hpp"
@@ -764,6 +765,17 @@ int session_set_header(lua_State* L) {
         const char* value = luaL_checkstring(L, 3);
         (*userdata->session)->set_header(name, value);
         lua_pushboolean(L, 1);
+        return 1;
+    });
+}
+
+int session_import_cookies_json(lua_State* L) {
+    return protect(L, [&]() -> int {
+        auto* userdata = check_session(L, 1);
+        const char* path = luaL_checkstring(L, 2);
+        const auto result = import_cookies_json_file(
+            (*userdata->session)->cookies(), std::filesystem::path(path));
+        lua_pushinteger(L, static_cast<lua_Integer>(result.imported));
         return 1;
     });
 }
@@ -1603,6 +1615,7 @@ const luaL_Reg session_methods[] = {
     {"evaluate_js", session_evaluate_js},
     {"current_url", session_current_url},
     {"set_header", session_set_header},
+    {"import_cookies_json", session_import_cookies_json},
     {"clear_headers", session_clear_headers},
     {"headers", session_headers},
     {"request", session_request},

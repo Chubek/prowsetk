@@ -92,6 +92,8 @@ local function normalize_spec(spec)
     opts.assistant_browser_debug_port =
         tonumber(spec.assistant_browser_debug_port or spec.debug_port or spec.cdp_port) or 0
     opts.assistant_wait_timeout_ms = tonumber(spec.assistant_wait_timeout_ms) or 300000
+    opts.success_beacon = spec.success_beacon or spec.auth_beacon or ""
+    opts.success_beacon_type = spec.success_beacon_type or "auto"
     opts.output = spec.output or spec.out or ""
     return opts
 end

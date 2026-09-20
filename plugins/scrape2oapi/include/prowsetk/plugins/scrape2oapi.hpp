@@ -61,6 +61,11 @@ struct Scrape2OapiOptions {
     std::string assistant_browser_endpoint;
     std::uint32_t assistant_browser_debug_port = 0;
     std::uint32_t assistant_wait_timeout_ms = 300000;
+
+    // Optional authentication success beacon shared by host integrations.
+    // The Lua surface accepts "css=...", "xpath=...", or "text=...".
+    std::string success_beacon;
+    std::string success_beacon_type = "auto";
 };
 
 struct AssistantBrowserHandoff {

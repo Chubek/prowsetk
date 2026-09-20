@@ -23,6 +23,7 @@ install_manifest.txt
 compile_commands.json
 Makefile
 _scraped/
+*.sql*
 *.o
 *.obj
 *.lo

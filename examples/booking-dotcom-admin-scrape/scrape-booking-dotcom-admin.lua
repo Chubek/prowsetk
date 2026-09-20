@@ -50,6 +50,65 @@ local function shell_quote(value)
     return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
+-- Login can fail before scrape2oapi gets a chance to offer its handoff. Keep
+-- this small driver-level bridge so the configured assistant browser is still
+-- offered for MFA, human verification, or site-specific browser checks.
+local function offer_login_assistant_browser(session, url, args, reason)
+    args = args or {}
+    local enabled = args.assistant_browser_force == true or
+        tostring(args.assistant_browser_force or ""):lower() == "true" or
+        args.assistant_browser_enabled == true or
+        tostring(args.assistant_browser_enabled or ""):lower() == "true"
+    if not enabled then return false end
+
+    local command = os.getenv("PROWSETK_ASSISTANT_BROWSER") or
+        args.assistant_browser or "assistant-browser"
+    if command == "" then command = "assistant-browser" end
+    local method = args.assistant_browser_method or "manual"
+    local forced = args.assistant_browser_force == true or
+        tostring(args.assistant_browser_force or ""):lower() == "true"
+    local cookie_path = args.cookies_json
+    local cookie_hint = cookie_path and
+        (" Export fresh cookies to " .. tostring(cookie_path) .. " before pressing Enter.") or
+        " Export fresh browser cookies and rerun with --cookies-json FILE before pressing Enter."
+    if not forced then
+        io.stderr:write("booking-dotcom-admin: " .. tostring(reason) ..
+            ". Launch assistant browser with " .. tostring(method) ..
+            " handoff? [y/N]." .. cookie_hint .. "\n")
+        io.stderr:write("booking-dotcom-admin: continue? [y/N] ")
+        local answer = io.read("*l") or ""
+        answer = trim(answer):lower()
+        if answer ~= "y" and answer ~= "yes" then return false end
+    else
+        io.stderr:write("booking-dotcom-admin: " .. tostring(reason) .. "." ..
+            cookie_hint .. "\n")
+    end
+
+    io.stderr:write("booking-dotcom-admin: launching " .. tostring(command) ..
+        " for " .. tostring(url) .. "\n")
+    os.execute(tostring(command) .. " " .. shell_quote(url))
+    io.stderr:write("booking-dotcom-admin: press Enter after browser interaction is complete. ")
+    io.read("*l")
+    local cookie_command = os.getenv("PROWSETK_ASSISTANT_BROWSER_COOKIE_COMMAND") or
+        args.assistant_browser_cookie_command or ""
+    if cookie_command == "" then
+        cookie_command = repo_root .. "/scripts/grab-firefox-cookies.sh"
+    end
+    if cookie_command ~= "" and cookie_path and cookie_path ~= "" then
+        io.stderr:write("booking-dotcom-admin: grabbing Firefox cookies\n")
+        os.execute(tostring(cookie_command) .. " " .. shell_quote(cookie_path))
+    end
+    local imported = 0
+    if cookie_path and cookie_path ~= "" and session and
+       type(session.import_cookies_json) == "function" then
+        local ok, count = pcall(function()
+            return session:import_cookies_json(cookie_path)
+        end)
+        if ok then imported = tonumber(count) or 0 end
+    end
+    return true, imported
+end
+
 local function ensure_dir(path)
     if not path or path == "" or path == "." then return true end
     local ok = os.execute("mkdir -p " .. shell_quote(path))
@@ -280,6 +339,28 @@ local function authenticated(document, html, selector)
     return document:query_selector('[data-testid="account-menu"], [aria-label="Account menu"]') ~= nil
 end
 
+local function beacon_authenticated(document, beacon, beacon_type)
+    if not document or type(beacon) ~= "string" or beacon == "" then return false end
+    beacon_type = (beacon_type or "auto"):lower()
+    local value = beacon
+    local prefix, payload = beacon:match("^(%w+)%s*=%s*(.+)$")
+    if prefix then beacon_type, value = prefix:lower(), payload end
+    if beacon_type == "auto" then
+        beacon_type = value:match("^//") and "xpath" or "css"
+    end
+    if beacon_type == "xpath" and type(document.xpath) == "function" then
+        local ok, nodes = pcall(function() return document:xpath(value) end)
+        return ok and type(nodes) == "table" and #nodes > 0
+    elseif beacon_type == "css" and type(document.query_selector) == "function" then
+        local ok, node = pcall(function() return document:query_selector(value) end)
+        return ok and node ~= nil
+    elseif beacon_type == "text" and type(document.text) == "function" then
+        local ok, text = pcall(function() return document:text() end)
+        return ok and tostring(text or ""):lower():find(value:lower(), 1, true) ~= nil
+    end
+    return false
+end
+
 local function detect_blocked_login(html)
     local lower = (html or ""):lower()
     if lower:find("captcha", 1, true) or lower:find("human verification", 1, true) or
@@ -477,19 +558,22 @@ local function captcha_handler_note(inputs, response)
         "; complete verification in your browser, export fresh session cookies, and retry with --cookies-json FILE"
 end
 
-local function probe_authenticated_page(session, url, success_selector)
+local function probe_authenticated_page(session, url, success_selector, success_beacon, success_beacon_type)
     local body, response = fetch_page(session, url, {
         follow_redirects = true, max_redirects = 8, trusted_start = url
     })
     if confirmed_challenge(response) then return false, body, response end
     local doc = load_page(session, response.final_url, body)
     local valid = response.status >= 200 and response.status < 300 and
-        same_origin(url, response.final_url) and authenticated(doc, body, success_selector)
+        same_origin(url, response.final_url) and
+        (authenticated(doc, body, success_selector) or
+         beacon_authenticated(doc, success_beacon, success_beacon_type))
     return valid, body, response
 end
 
-local function load_authenticated_page(session, url, success_selector)
-    local valid, body, response = probe_authenticated_page(session, url, success_selector)
+local function load_authenticated_page(session, url, success_selector, success_beacon, success_beacon_type)
+    local valid, body, response = probe_authenticated_page(
+        session, url, success_selector, success_beacon, success_beacon_type)
     if confirmed_challenge(response) then
         error("booking-dotcom-admin: login form not available; challenge detected", 2)
     end
@@ -646,6 +730,21 @@ local function discover(session, url, spec)
     return result.endpoints or {}
 end
 
+local function add_assistant_browser_options(spec, args, url)
+    spec.url = url or spec.url
+    spec.assistant_browser_enabled = args.assistant_browser_enabled == true or
+        tostring(args.assistant_browser_enabled or ""):lower() == "true"
+    spec.assistant_prompt = true
+    spec.assistant_browser = args.assistant_browser or ""
+    spec.assistant_browser_method = args.assistant_browser_method or "manual"
+    spec.assistant_browser_endpoint = args.assistant_browser_endpoint or ""
+    spec.assistant_browser_debug_port = tonumber(args.assistant_browser_debug_port) or 0
+    spec.assistant_wait_timeout_ms = tonumber(args.assistant_browser_wait_timeout_ms) or 300000
+    spec.success_beacon = args.success_beacon or ""
+    spec.success_beacon_type = args.success_beacon_type or "auto"
+    return spec
+end
+
 local function crawl(session, start_url, args, authenticated_flag)
     local max_depth = tonumber(args.max_depth) or 2
     local max_pages = tonumber(args.max_pages) or 100
@@ -663,7 +762,7 @@ local function crawl(session, start_url, args, authenticated_flag)
             local body = select(1, fetch_page(session, item.url))
             local document = load_page(session, item.url, body)
             inspect_scripts(session, document, item.url, endpoints, seen_endpoints, authenticated_flag)
-            local page_spec = {
+            local page_spec = add_assistant_browser_options({
                 url = item.url,
                 follow_links = true,
                 inspect_scripts = true,
@@ -680,12 +779,12 @@ local function crawl(session, start_url, args, authenticated_flag)
                 max_depth = max_api_depth,
                 max_pages = max_pages,
                 max_resolve_requests = max_api_requests
-            }
+            }, args, item.url)
             for _, ep in ipairs(discover(session, item.url, page_spec)) do
                 add_endpoint(endpoints, seen_endpoints, ep, authenticated_flag)
             end
 
-            local api_spec = {
+            local api_spec = add_assistant_browser_options({
                 url = item.url,
                 follow_links = true,
                 inspect_scripts = true,
@@ -702,7 +801,7 @@ local function crawl(session, start_url, args, authenticated_flag)
                 max_depth = max_api_depth,
                 max_pages = max_pages,
                 max_resolve_requests = max_api_requests
-            }
+            }, args, item.url)
             for _, ep in ipairs(discover(session, item.url, api_spec)) do
                 add_endpoint(endpoints, seen_endpoints, ep, authenticated_flag)
             end
@@ -774,10 +873,21 @@ function main(args)
             local dotenv = load_dotenv(args.dotenv)
             local captcha_inputs = apply_captcha_inputs(session, args, dotenv)
 
+            -- An explicit force switch is useful when the site has not yet
+            -- produced a detectable challenge. The browser is still user
+            -- approved, but launch no longer depends on heuristics or a
+            -- failed login confirmation.
+            if args.assistant_browser_force == true or
+               tostring(args.assistant_browser_force or ""):lower() == "true" then
+                offer_login_assistant_browser(session, url, args,
+                    "assistant browser launch forced by --assistant_browser_force")
+            end
+
             -- Cookies from Prowse.toml and --cookies-json are already in the
             -- session jar; they are not driver arguments. Always try them first.
             local loaded, initial_body, initial_response =
-                probe_authenticated_page(session, url, args.success_selector)
+                probe_authenticated_page(session, url, args.success_selector,
+                    args.success_beacon, args.success_beacon_type)
             local authenticated_url = loaded and initial_response.final_url or nil
             if confirmed_challenge(initial_response) then
                 error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs, initial_response), 2)
@@ -812,8 +922,27 @@ function main(args)
                 end
                 local load_err
                 loaded, load_err = pcall(function()
-                    authenticated_url = load_authenticated_page(session, url, args.success_selector)
+                    authenticated_url = load_authenticated_page(session, url, args.success_selector,
+                        args.success_beacon, args.success_beacon_type)
                 end)
+                if not loaded then
+                    -- A failed post-login confirmation is exactly the case
+                    -- where a user-assisted browser may be required. Give the
+                    -- user a chance to complete the interaction, then retry
+                    -- the host-mediated confirmation before reporting failure.
+                    local handed_off, imported_cookies = offer_login_assistant_browser(
+                        session, url, args, tostring(load_err):gsub("^[^:]+:%s*", ""))
+                    if handed_off then
+                        loaded, load_err = pcall(function()
+                            authenticated_url = load_authenticated_page(session, url, args.success_selector,
+                                args.success_beacon, args.success_beacon_type)
+                        end)
+                        if not loaded and imported_cookies == 0 then
+                            load_err = tostring(load_err) ..
+                                "; Firefox is a separate session; export fresh cookies and rerun with --cookies-json FILE"
+                        end
+                    end
+                end
                 if not loaded then
                     local message = tostring(load_err)
                     if message:find("requires browser JavaScript or captcha support", 1, true) then
