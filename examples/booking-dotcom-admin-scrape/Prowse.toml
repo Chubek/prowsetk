@@ -79,5 +79,7 @@ arguments = [
     { name = "captcha_token", type = "string", required = false, default = "", secret = true },
     { name = "assistant_browser_force", type = "boolean", required = false, default = false },
     { name = "assistant_browser_cookie_command", type = "string", required = false, default = "" },
+    { name = "no-xcors", type = "boolean", required = false, default = false },
+    { name = "no_xcors", type = "boolean", required = false, default = false },
     { name = "html", type = "string", required = false, default = "" }
 ]

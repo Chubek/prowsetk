@@ -4,7 +4,9 @@
 -- process environment, authenticate through ezlogin, crawl same-origin admin
 -- pages, and write OpenAPI plus Postman artifacts under
 -- _scraped/booking-dotcom-admin by default. Offline runs pass args.html and do
--- not read credentials.
+-- not read credentials. Pass --no-xcors (boolean, default false) to drop any
+-- discovered endpoint whose host is outside the booking.com TLD
+-- (booking.com or *.booking.com).
 
 local source = debug.getinfo(1, "S").source
 if source:sub(1, 1) == "@" then source = source:sub(2) end
@@ -272,6 +274,52 @@ local function booking_trusted(start_url, candidate)
         return host == "booking.com" or host:match("%.booking%.com$") ~= nil
     end
     return false
+end
+
+-- `--no-xcors` drops endpoints outside the booking.com TLD. The CLI maps
+-- `--no-xcors VALUE` onto the `no-xcors` driver argument (coerced to a Lua
+-- boolean); direct `main(args)` callers may use `["no-xcors"]` or `no_xcors`
+-- with a boolean or a truthy string ("true"/"1"/"yes"/"on").
+local no_xcors_only = false
+
+local function is_booking_tld_host(host)
+    host = (host or ""):lower()
+    if host == "" then return false end
+    if host == "booking.com" then return true end
+    return host:match("%.booking%.com$") ~= nil
+end
+
+local function is_booking_tld_url(url)
+    if type(url) ~= "string" or url == "" then return false end
+    if url:match("^https?://") then
+        return is_booking_tld_host(url_host(url))
+    end
+    if url:sub(1, 1) == "/" then return true end
+    if url:match("^[%w+.-]+:") then return false end
+    return true
+end
+
+local function no_xcors_requested(args)
+    args = args or {}
+    local raw = args["no-xcors"]
+    if raw == nil then raw = args.no_xcors end
+    if raw == true then return true end
+    if type(raw) == "number" then return raw ~= 0 end
+    if type(raw) == "string" then
+        local lower = raw:lower()
+        return lower == "true" or lower == "1" or lower == "yes" or lower == "on"
+    end
+    return false
+end
+
+local function filter_booking_tld(endpoints)
+    local out = {}
+    for _, ep in ipairs(endpoints or {}) do
+        if type(ep) == "table" and is_booking_tld_url(ep.url) then
+            out[#out + 1] = ep
+        end
+    end
+    return out
 end
 
 local function response_header(response, name)
@@ -606,6 +654,7 @@ end
 local function add_endpoint(target, seen, ep, authenticated_flag)
     if type(ep) ~= "table" then return end
     if not ep.url or ep.url == "" then return end
+    if no_xcors_only and not is_booking_tld_url(ep.url) then return end
     ep.authenticated = authenticated_flag == true
     local key = endpoint_key(ep)
     if not seen[key] then
@@ -669,8 +718,10 @@ local function inspect_scripts(session, document, page_url, endpoints, seen_endp
     for _, script in ipairs(document:query_selector_all("script[src]")) do
         local src = resolve_url(page_url, script:attribute("src"))
         if src and same_origin(page_url, src) and not seen_scripts[src] then
-            seen_scripts[src] = true
-            queue[#queue + 1] = src
+            if not no_xcors_only or is_booking_tld_url(src) then
+                seen_scripts[src] = true
+                queue[#queue + 1] = src
+            end
         end
     end
     while #queue > 0 and fetched_scripts < max_scripts do
@@ -681,12 +732,16 @@ local function inspect_scripts(session, document, page_url, endpoints, seen_endp
             for import_ref in body:gmatch("import%s*%(%s*['\"]([^'\"]+)['\"]%s*%)") do
                 local imported = resolve_url(script_url, import_ref)
                 if imported and same_origin(page_url, imported) and not seen_scripts[imported] then
-                    seen_scripts[imported] = true
-                    queue[#queue + 1] = imported
+                    if not no_xcors_only or is_booking_tld_url(imported) then
+                        seen_scripts[imported] = true
+                        queue[#queue + 1] = imported
+                    end
                 end
             end
             for _, url in ipairs(scan_urls(body, script_url)) do
-                if is_api_like(url) then
+                if no_xcors_only and not is_booking_tld_url(url) then
+                    -- skip: --no-xcors keeps booking.com TLD endpoints only
+                elseif is_api_like(url) then
                     add_endpoint(endpoints, seen_endpoints, make_endpoint(url, script_url), authenticated_flag)
                 elseif path_from_url(url):match("%.js$") and not seen_scripts[url] and fetched_scripts < max_scripts then
                     seen_scripts[url] = true
@@ -702,18 +757,26 @@ local function resolve_api_chains(session, endpoints, seen_endpoints, start_url,
     local max_requests = tonumber(args.max_api_requests) or 64
     local queue, visited = {}, {}
     for _, ep in ipairs(endpoints) do
-        if is_api_like(ep.url) then queue[#queue + 1] = {url = ep.url, depth = 0} end
+        if is_api_like(ep.url) then
+            if not no_xcors_only or is_booking_tld_url(ep.url) then
+                queue[#queue + 1] = {url = ep.url, depth = 0}
+            end
+        end
     end
     local count = 0
     while #queue > 0 and count < max_requests do
         local item = table.remove(queue, 1)
-        if not visited[item.url] and same_origin(start_url, item.url) then
+        if no_xcors_only and not is_booking_tld_url(item.url) then
+            visited[item.url] = true
+        elseif not visited[item.url] and same_origin(start_url, item.url) then
             visited[item.url] = true
             count = count + 1
             local ok, body = pcall(function() return select(1, fetch_page(session, item.url)) end)
             if ok and item.depth < max_depth then
                 for _, url in ipairs(scan_urls(body, item.url)) do
-                    if is_api_like(url) and same_origin(start_url, url) then
+                    if no_xcors_only and not is_booking_tld_url(url) then
+                        -- skip: --no-xcors keeps booking.com TLD endpoints only
+                    elseif is_api_like(url) and same_origin(start_url, url) then
                         add_endpoint(endpoints, seen_endpoints, make_endpoint(url, item.url), authenticated_flag)
                         if not visited[url] then
                             queue[#queue + 1] = {url = url, depth = item.depth + 1}
@@ -746,6 +809,7 @@ local function add_assistant_browser_options(spec, args, url)
 end
 
 local function crawl(session, start_url, args, authenticated_flag)
+    no_xcors_only = no_xcors_requested(args)
     local max_depth = tonumber(args.max_depth) or 2
     local max_pages = tonumber(args.max_pages) or 100
     local max_api_depth = tonumber(args.max_api_depth) or 2
@@ -850,6 +914,7 @@ function main(args)
     })
     local session = browser:create_session()
     local ok, err = pcall(function()
+        no_xcors_only = no_xcors_requested(args)
         local endpoints = nil
         local authenticated_flag = false
         if offline then
@@ -869,6 +934,9 @@ function main(args)
                 max_depth = tonumber(args.max_api_depth) or 2,
                 max_pages = tonumber(args.max_pages) or 100
             })
+            if no_xcors_only then
+                endpoints = filter_booking_tld(endpoints)
+            end
         else
             local dotenv = load_dotenv(args.dotenv)
             local captcha_inputs = apply_captcha_inputs(session, args, dotenv)
@@ -960,6 +1028,9 @@ function main(args)
             endpoints = crawl(session, authenticated_url, args, true)
         end
 
+        if no_xcors_only then
+            endpoints = filter_booking_tld(endpoints or {})
+        end
         local safe_endpoints = redacted_endpoints(endpoints or {})
         local yaml = scrape2oapi.render_openapi_yaml(safe_endpoints, {
             openapi_version = "3.1.0",
