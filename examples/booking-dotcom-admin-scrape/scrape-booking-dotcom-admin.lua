@@ -36,6 +36,12 @@ local ezlogin = require_first("ezlogin", "plugins.ezlogin.lua.ezlogin")
 local scrape2oapi = require_first("scrape2oapi", "plugins.scrape2oapi.lua.scrape2oapi")
 local scrape2postman = require_first("scrape2postman", "plugins.scrape2postman.lua.scrape2postman")
 local captcha_handler = require_first("captcha_handler", "plugins.captcha-handler.lua.captcha_handler")
+local restful_resolver = nil
+do
+    local ok, module = pcall(require_first,
+        "restful_resolver", "plugins.restful-resolver.lua.restful_resolver")
+    if ok then restful_resolver = module end
+end
 
 local function trim(value)
     return tostring(value or ""):match("^%s*(.-)%s*$")
@@ -892,12 +898,79 @@ local function output_paths(args)
     return output, postman
 end
 
-local function append_metadata(yaml, authenticated_flag)
+local function append_metadata(yaml, authenticated_flag, restful)
+    restful = restful or {}
     return yaml ..
         "x-prowsetk-booking-admin:\n" ..
         "  authenticated: " .. tostring(authenticated_flag == true) .. "\n" ..
         "  complete: false\n" ..
-        "  note: 'Heuristic endpoint discovery; not authoritative API documentation.'\n"
+        "  note: 'Heuristic endpoint discovery; not authoritative API documentation.'\n" ..
+        "x-prowsetk-restful:\n" ..
+        "  has-post: " .. tostring(restful.has_post == true) .. "\n" ..
+        "  is-complete: " .. tostring(restful.is_complete == true) .. "\n" ..
+        "  rounds-used: " .. tostring(tonumber(restful.rounds_used) or 0) .. "\n" ..
+        "  request-count: " .. tostring(tonumber(restful.request_count) or 0) .. "\n" ..
+        "  note: 'restful-resolver iterative resolution; heuristic, not authoritative.'\n"
+end
+
+-- Applies the restful-resolver plugin: iteratively probes scraped endpoints
+-- through the session until a POST endpoint joins the GET surface, or the
+-- round/request budget is exhausted. Never throws: on any failure the seed
+-- endpoints are kept and the shortfall is reported in the status table.
+local function resolve_until_restful(session, page_url, seed_endpoints, args)
+    local status = { has_post = false, is_complete = false,
+        rounds_used = 0, request_count = 0 }
+    local merged, seen = {}, {}
+    local function add(ep)
+        if type(ep) ~= "table" or not ep.url or ep.url == "" then return end
+        local key = (ep.method or "get") .. "\0" .. ep.url
+        if not seen[key] then
+            seen[key] = true
+            merged[#merged + 1] = ep
+        end
+    end
+    for _, ep in ipairs(seed_endpoints or {}) do add(ep) end
+    for _, ep in ipairs(seed_endpoints or {}) do
+        if tostring(ep.method or ""):lower() == "post" then
+            status.has_post = true
+            break
+        end
+    end
+    if restful_resolver == nil then
+        status.note = "restful-resolver lua module unavailable; seeds kept"
+        return merged, status
+    end
+    local ok, result = pcall(function()
+        return restful_resolver.resolve(session, {
+            url = page_url,
+            endpoints = seed_endpoints,
+            max_rounds = tonumber(args.max_resolve_rounds)
+                or tonumber(args.max_api_depth) or 2,
+            max_requests = tonumber(args.max_api_requests) or 64,
+            require_api_pattern = true,
+            redact_secrets = true,
+            include_provenance = true,
+            infer_schemas = true,
+        })
+    end)
+    if not ok or type(result) ~= "table" then
+        status.note = "restful-resolver probe failed; seeds kept"
+        return merged, status
+    end
+    merged, seen = {}, {}
+    for _, ep in ipairs(result.endpoints or {}) do add(ep) end
+    if no_xcors_only then
+        local filtered = {}
+        for _, ep in ipairs(merged) do
+            if is_booking_tld_url(ep.url) then filtered[#filtered + 1] = ep end
+        end
+        merged = filtered
+    end
+    status.has_post = result.has_post == true
+    status.is_complete = result.is_complete == true
+    status.rounds_used = tonumber(result.rounds_used) or 0
+    status.request_count = tonumber(result.request_count) or 0
+    return merged, status
 end
 
 function main(args)
@@ -917,6 +990,7 @@ function main(args)
         no_xcors_only = no_xcors_requested(args)
         local endpoints = nil
         local authenticated_flag = false
+        local authenticated_url = url
         if offline then
             session:load_html(html, url)
             endpoints = discover(session, url, {
@@ -956,7 +1030,7 @@ function main(args)
             local loaded, initial_body, initial_response =
                 probe_authenticated_page(session, url, args.success_selector,
                     args.success_beacon, args.success_beacon_type)
-            local authenticated_url = loaded and initial_response.final_url or nil
+            authenticated_url = loaded and initial_response.final_url or url
             if confirmed_challenge(initial_response) then
                 error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs, initial_response), 2)
             end
@@ -1028,6 +1102,29 @@ function main(args)
             endpoints = crawl(session, authenticated_url, args, true)
         end
 
+        local restful_page = (not offline) and authenticated_url or url
+        local restful_status = { has_post = false, is_complete = false,
+            rounds_used = 0, request_count = 0 }
+        if not offline then
+            endpoints, restful_status =
+                resolve_until_restful(session, restful_page, endpoints, args)
+        else
+            for _, ep in ipairs(endpoints or {}) do
+                if tostring(ep.method or ""):lower() == "post" then
+                    restful_status.has_post = true
+                    break
+                end
+            end
+            local has_get = false
+            for _, ep in ipairs(endpoints or {}) do
+                if tostring(ep.method or ""):lower() == "get" then
+                    has_get = true
+                    break
+                end
+            end
+            restful_status.is_complete = restful_status.has_post and has_get
+        end
+
         if no_xcors_only then
             endpoints = filter_booking_tld(endpoints or {})
         end
@@ -1038,7 +1135,7 @@ function main(args)
             include_provenance = true,
             infer_schemas = true
         })
-        yaml = append_metadata(yaml, authenticated_flag)
+        yaml = append_metadata(yaml, authenticated_flag, restful_status)
         write_file(output, yaml)
 
         local postman_json = scrape2postman.render_postman_json(safe_endpoints, {

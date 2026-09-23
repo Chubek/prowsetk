@@ -398,3 +398,25 @@ handling plans only. It may prompt a user, call a configured solver API, dispatc
 a webhook, invoke a Lua callback, reuse a pre-solved token, reuse a cookie
 session, wait for clearance, or abort and report. Solver keys, cookies, tokens,
 and form values remain secret-bearing inputs and must not be logged or emitted.
+
+## RESTful resolver and Booking.com application
+
+`plugins/restful-resolver` resolves scraped endpoints iteratively through the
+owning `Session` until a full RESTful surface (at least one GET and at least
+one POST) is discovered, or until `max_rounds`/`max_requests` is exhausted.
+Seeds come from `EndpointExtractor`; each round issues host-mediated GET
+probes, follows API-like JSON references, and re-parses HTML bodies so POST
+forms and script POST calls surface with native methods and provenance. A POST
+for an already-fetched URL counts without refetching; cross-origin URLs are
+rejected unless `allow_cross_origin` is set. Output is deterministic OpenAPI
+3.x YAML with `x-prowsetk-restful` (`has-get`, `has-post`, `is-complete`,
+`rounds-used`, `request-count`), provenance, confidence, and redaction.
+Discovery is heuristic, never authoritative.
+
+`examples/booking-dotcom-admin-scrape` registers the plugin in its
+`Prowse.toml` and applies it after the crawl via
+`lua/restful_resolver.lua`: `resolve_until_restful` merges probed endpoints
+under the existing `max_api_depth`/`max_api_requests` budget plus
+`max_resolve_rounds`, never throws (seeds are kept on failure), and records
+the outcome in `x-prowsetk-restful`. Offline `html` runs skip probing and
+report seed-level GET/POST status only.

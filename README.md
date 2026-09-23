@@ -462,6 +462,22 @@ cookie/session reuse, wait-for-clearance, and abort-and-report. Methods that
 could expose secrets or call external services are unavailable until explicitly
 configured by the host.
 
+The repository also includes `plugins/restful-resolver`, a native plugin that
+resolves scraped endpoints iteratively through the owning session until a full
+RESTful surface is discovered: at least one GET and at least one POST
+endpoint. Seeds come from static discovery (links, POST forms,
+`fetch`/`XMLHttpRequest` methods); each round probes API-like URLs through the
+host-mediated `NetworkClient`, follows JSON references, and re-parses HTML
+bodies so POST forms and script POST calls in resolved pages are found. The
+loop stops on GET+POST completeness or when `max_rounds` / `max_requests` is
+exhausted, and emits deterministic OpenAPI 3.x YAML with an
+`x-prowsetk-restful` extension (`has-get`, `has-post`, `is-complete`,
+`rounds-used`, `request-count`). Discovery is heuristic and never
+authoritative; secrets stay redacted. See
+`plugins/restful-resolver/README.md` for options. The
+`examples/booking-dotcom-admin-scrape` driver applies it after its crawl and
+records the outcome in the same `x-prowsetk-restful` block.
+
 ProwseTk provides a native plugin interface through `ProwseTk-Plugin.h`. The
 interface allows native components to extend the browser without modifying the
 Flatworm core.

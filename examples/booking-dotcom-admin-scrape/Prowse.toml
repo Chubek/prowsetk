@@ -55,6 +55,20 @@ capabilities = [
     "abort-and-report"
 ]
 
+[[plugins]]
+name = "restful-resolver"
+description = "Resolve scraped endpoints iteratively until a full RESTful API surface (GET+POST) is discovered"
+type = "native"
+path = "../../build/default/plugins/restful-resolver/libprowsetk_restful_resolver.so"
+enabled = true
+autoload = true
+capabilities = [
+    "restful-resolution",
+    "endpoint-discovery",
+    "openapi-yaml",
+    "post-discovery"
+]
+
 [[drivers]]
 name = "booking-dotcom-admin"
 description = "Login to admin.booking.com and recursively scrape heuristic endpoints"
@@ -72,6 +86,7 @@ arguments = [
     { name = "max_pages", type = "integer", required = false, default = 100 },
     { name = "max_api_depth", type = "integer", required = false, default = 2 },
     { name = "max_api_requests", type = "integer", required = false, default = 64 },
+    { name = "max_resolve_rounds", type = "integer", required = false, default = 4 },
     { name = "success_selector", type = "string", required = false, default = "" },
     { name = "success_beacon", type = "string", required = false, default = "" },
     { name = "success_beacon_type", type = "string", required = false, default = "auto" },

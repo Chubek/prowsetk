@@ -90,6 +90,9 @@ endif()
 if(EXISTS "${PROJECT_SOURCE_DIR}/plugins/captcha-handler/CMakeLists.txt")
     add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/captcha-handler" "${CMAKE_BINARY_DIR}/plugins/captcha-handler")
 endif()
+if(EXISTS "${PROJECT_SOURCE_DIR}/plugins/restful-resolver/CMakeLists.txt")
+    add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/restful-resolver" "${CMAKE_BINARY_DIR}/plugins/restful-resolver")
+endif()
 
 add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/scrape2postman" "${CMAKE_BINARY_DIR}/plugins/scrape2postman")
 
