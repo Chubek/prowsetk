@@ -865,14 +865,14 @@ public:
                          "FIFO jobs; bounded checkpoints, remaining jobs retained on limit or callback failure");
         capabilities.set("dom", ImplementationClass::PartiallyImplemented,
                          "handle-based Flatworm DOM bridge: querySelector(All), createElement/TextNode/Comment, attributes, textContent/innerHTML/outerHTML, tree mutation, classList, dataset, style, form submit");
-        capabilities.set("eventtarget", ImplementationClass::PartiallyImplemented,
-                         "window/document/element listeners and synthetic events; click and submit drive navigation, no capture-phase or DOM event objects from real input");
+        capabilities.set("eventtarget", ImplementationClass::ImplementedWithRestrictions,
+                         "DOM dispatch with capture, target, and bubble phases; once, passive, and AbortSignal; Event, CustomEvent, UIEvent, MouseEvent, PointerEvent, KeyboardEvent, FocusEvent, InputEvent, and SubmitEvent; inline on* handlers; MutationObserver. No layout hit-testing, trusted input, or shadow-DOM retargeting");
         capabilities.set("xmlhttprequest", ImplementationClass::ImplementedWithRestrictions,
                          "sync and async XHR over the host-mediated NetworkClient; no progress events, upload streams, timeouts, or CORS enforcement");
         capabilities.set("fetch", ImplementationClass::ImplementedWithRestrictions,
                          "fetch with Headers/Response over the host-mediated NetworkClient; responses resolve through microtasks, no streaming bodies");
         capabilities.set("timers", ImplementationClass::PartiallyImplemented,
-                         "setTimeout/setInterval/requestAnimationFrame drained by bounded flush passes after each document's scripts");
+                         "setTimeout/setInterval/requestAnimationFrame and MessageChannel, plus microtasks queued by lifecycle handlers, drained by bounded flush passes");
         capabilities.set("storage", ImplementationClass::PartiallyImplemented,
                          "localStorage/sessionStorage and document.cookie backed by the session storage and cookie jar");
         capabilities.set("url", ImplementationClass::PartiallyImplemented,
@@ -881,7 +881,7 @@ public:
                          "TextEncoder/TextDecoder in the web platform shim; UTF-8 and "
                          "windows-1252 labels, encodeInto, fatal and streaming modes");
         capabilities.set("location", ImplementationClass::PartiallyImplemented,
-                         "location reads resolve against the live document; assignment and form submit trigger a host navigation after the script pass");
+                         "location reads resolve against the live document; assignment, link clicks, and form submit trigger a host navigation after the script pass; pushState, replaceState, and same-document hash changes update location without a navigation");
         capabilities.set("navigator", ImplementationClass::PartiallyImplemented,
                          "static navigator fields from the session configuration");
         return capabilities;

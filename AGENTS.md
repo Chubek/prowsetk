@@ -330,7 +330,12 @@ synthetic events, synchronous and asynchronous `XMLHttpRequest`, `fetch` with
 `Headers`/`Response`, timers, `navigator`, `location` (assignment and link
 clicks and `form.submit()` queue a bounded host navigation),
 `localStorage`/`sessionStorage`, `document.cookie` through the session cookie
-jar, `URL`/`URLSearchParams`, and inert stubs for observers.
+jar, `URL`/`URLSearchParams`, DOM events (capture, target, and bubble, including
+`submit` from a submit control and `MutationObserver`), and inert stubs for
+`IntersectionObserver` and `ResizeObserver`. `history.pushState` /
+`replaceState` update `location` without a host navigation. Lifecycle flush
+also drains microtasks queued by `DOMContentLoaded` and `load` handlers, so
+`fetch` started there is host-mediated and can be recorded as an endpoint.
 
 Rules:
 

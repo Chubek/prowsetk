@@ -466,6 +466,44 @@ TEST(Scrape2OapiSession, ResolvesEndpointThroughNetwork) {
     EXPECT_EQ(result.resolved[0].status, 200);
 }
 
+TEST(Scrape2OapiSession, ObservesRuntimePostIssuedByPageScript) {
+    prowsetk::BrowserConfig config;
+    config.javascript = true;
+    Browser browser(config);
+    auto network = std::make_unique<MemoryNetworkClient>();
+    network->set_response("https://example.test/api/orders", response(201, "{}"));
+    browser.set_network_client(std::move(network));
+    auto session = browser.create_session();
+    // Method and path are assembled at runtime inside a lifecycle handler, so
+    // static script inspection cannot see them; only execution can.
+    session->load_html(
+        "<script>document.addEventListener('DOMContentLoaded', function () {"
+        "  var m = 'PO' + 'ST';"
+        "  fetch('/api/' + 'orders', {method: m, body: 'q=1'});"
+        "});</script>",
+        "https://example.test/app");
+
+    scrape::Scrape2OapiOptions options;
+    options.inspect_scripts = false;
+    options.observe_network = true;
+    options.minimum_confidence = 0.5;
+    const auto observed = scrape::scrape_from_session(*session, options);
+    bool saw_post = false;
+    for (const auto& endpoint : observed.endpoints) {
+        if (endpoint.method == "post" && endpoint.path == "/api/orders") {
+            saw_post = true;
+        }
+    }
+    EXPECT_TRUE(saw_post);
+    EXPECT_NE(observed.openapi_yaml.find("post:"), std::string::npos);
+
+    options.observe_network = false;
+    const auto unobserved = scrape::scrape_from_session(*session, options);
+    for (const auto& endpoint : unobserved.endpoints) {
+        EXPECT_FALSE(endpoint.method == "post" && endpoint.path == "/api/orders");
+    }
+}
+
 TEST(Scrape2OapiSession, FollowsJsonApiLinks) {
     Browser browser;
     auto network = std::make_unique<MemoryNetworkClient>();

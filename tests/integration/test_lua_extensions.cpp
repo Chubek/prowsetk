@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <fstream>
+#include <memory>
 
 #include "prowsetk/browser.hpp"
 #include "prowsetk/lua_runtime.hpp"
@@ -203,6 +204,70 @@ TEST(Lprowsext, EndpointExtractionFromLua) {
         local warnings = result:warnings()
         assert(warnings ~= nil, "warnings missing")
     )LUA", "lprowsext_endpoints");
+    EXPECT_TRUE(result.ok) << lua.last_error();
+}
+
+TEST(Lprowsext, EndpointExtractionObservesPageScriptRequests) {
+    if (!LuaRuntime::available()) {
+        GTEST_SKIP() << "ProwseTk was built without Lua support";
+    }
+    prowsetk::BrowserConfig config;
+    config.javascript = true;
+    prowsetk::Browser browser(config);
+    auto network = std::make_unique<prowsetk::MemoryNetworkClient>();
+    prowsetk::HttpResponse response;
+    response.status = 201;
+    response.final_url = "https://example.com/api/orders";
+    response.headers.push_back({"Content-Type", "application/json"});
+    response.body = "{\"ok\":true}";
+    network->set_response("https://example.com/api/orders", response);
+    browser.set_network_client(std::move(network));
+
+    LuaRuntime lua;
+    lua.bind_browser(&browser);
+    const auto result = lua.run(R"LUA(
+        local prowse = require("lprowse")
+        local ext = require("lprowsext")
+        local browser = prowse.browser.new()
+        local session = browser:create_session()
+        session:load_html([[
+            <html><body><div id="app"></div><script>
+              document.addEventListener('DOMContentLoaded', function () {
+                fetch('/api/orders', {method: 'POST', body: 'q=1'});
+              });
+            </script></body></html>]], "https://example.com/")
+
+        local function has_post(result)
+            for _, ep in ipairs(result:endpoints()) do
+                if string.lower(ep.method) == "post" and
+                   string.find(ep.path, "/api/orders", 1, true) then
+                    return true
+                end
+            end
+            return false
+        end
+
+        local observed = ext.endpoints.extract(session, {
+            inspect_scripts = false,
+            observe_network = true,
+            minimum_confidence = 0.5
+        })
+        assert(has_post(observed), "session extraction missed the script POST")
+
+        local unobserved = ext.endpoints.extract(session, {
+            inspect_scripts = false,
+            observe_network = false,
+            minimum_confidence = 0.5
+        })
+        assert(not has_post(unobserved), "observe_network=false must not record")
+
+        local document_only = ext.endpoints.extract(session:document(), {
+            inspect_scripts = false,
+            observe_network = true,
+            minimum_confidence = 0.5
+        })
+        assert(not has_post(document_only), "document has no session requests")
+    )LUA", "lprowsext_observed_endpoints");
     EXPECT_TRUE(result.ok) << lua.last_error();
 }
 

@@ -1047,6 +1047,16 @@ base URL, normalizes HTTP methods for OpenAPI output, infers query parameter
 names from discovered URLs, respects `observe_network`, and merges duplicate
 method/path discoveries while retaining higher-confidence provenance.
 
+With `observe_network`, extraction from a `Session` (C++, `lprowsext.endpoints.extract(session, ...)`,
+`scrape2oapi`, and `scrape2postman`) also records the host-mediated requests the
+current document's scripts actually issued (`fetch`, `XMLHttpRequest`,
+`sendBeacon`, dynamic script and image loads), exposed as
+`Session::page_script_requests()`. This surfaces methods and URLs assembled at
+runtime that static script inspection cannot see, with `observed-network`
+provenance. The list is cleared when the next document is installed; document
+navigations are not included. Extracting from a bare `Document` never observes
+requests.
+
 Configurable behavior:
 
 - Crawl depth
@@ -1204,9 +1214,13 @@ never sees engine internals — and every network call an `XMLHttpRequest`,
 the owning `Session`, so cookies, redirects, events, plugins, and redaction
 apply exactly as they do for navigations. Timers and lifecycle events
 (`DOMContentLoaded`, `load`) are drained in bounded flush passes after a
-document's scripts; script-initiated navigation (`location` assignment, link
-clicks, form submits) is performed after the current script pass and is
-hop-bounded. Restrictions are reported honestly via capabilities: no layout,
+document's scripts, including microtasks queued by those handlers.
+Script-initiated navigation (`location` assignment, link clicks, form submits)
+is performed after the current script pass and is hop-bounded.
+`history.pushState` and same-document hash changes update `location` without
+navigating. DOM events dispatch through capture, target, and bubble; a submit
+control fires a cancelable `submit` event before the host POST or GET.
+Restrictions are reported honestly via capabilities: no layout,
 no progress events, no streaming response bodies, no CORS enforcement.
 
 Lua does not replace JavaScript as the page scripting language:

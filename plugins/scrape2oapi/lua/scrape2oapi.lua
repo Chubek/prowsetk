@@ -415,7 +415,11 @@ function scrape2oapi.scrape(session_or_document, spec)
     }
 
     if ext ~= nil and ext.endpoints ~= nil and type(ext.endpoints.extract) == "function" then
-        result = ext.endpoints.extract(doc, extraction_opts)
+        -- A native session lets the extractor observe host-mediated page
+        -- script requests; duck-typed wrappers only expose the document.
+        local target = doc
+        if session ~= nil and type(session) == "userdata" then target = session end
+        result = ext.endpoints.extract(target, extraction_opts)
     else
         error("scrape2oapi: lprowsext.endpoints.extract is not available (build without Lua?)", 2)
     end

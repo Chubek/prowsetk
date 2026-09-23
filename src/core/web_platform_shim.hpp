@@ -136,61 +136,481 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   URLPolyfill.createObjectURL = function () { return 'blob:prowsetk/' + Math.random().toString(36).slice(2); };
   URLPolyfill.revokeObjectURL = function () {};
 
-  // ---------- event plumbing ----------
-  function ListenerStore() { this.map = {}; }
-  ListenerStore.prototype.add = function (type, fn, opts) {
-    if (typeof fn !== 'function') return;
-    var list = this.map[type] || (this.map[type] = []);
-    for (var i = 0; i < list.length; ++i) {
-      if (list[i].fn === fn && !!list[i].capture === !!(opts && opts.capture)) return;
+  // ---------- DOM events ----------
+  // Capture, target, and bubble follow the DOM dispatch algorithm. There is
+  // no layout hit-testing and no trusted user input: events are synthetic.
+  var CAPTURING_PHASE = 1, AT_TARGET = 2, BUBBLING_PHASE = 3;
+
+  function listenerOptions(opts) {
+    if (opts === true) return { capture: true, once: false, passive: false, signal: null };
+    if (opts == null || opts === false) return { capture: false, once: false, passive: false, signal: null };
+    return {
+      capture: !!opts.capture,
+      once: !!opts.once,
+      passive: !!opts.passive,
+      signal: opts.signal || null
+    };
+  }
+
+  function ListenerStore() { this.list = []; }
+  ListenerStore.prototype.add = function (type, callback, opts) {
+    var options = listenerOptions(opts);
+    var fn = callback;
+    if (typeof callback !== 'function') {
+      if (!callback || typeof callback.handleEvent !== 'function') return;
+      fn = function (event) { callback.handleEvent(event); };
     }
-    list.push({ fn: fn, capture: !!(opts && opts.capture), once: !!(opts && (opts.once || opts === true)) });
+    type = String(type);
+    for (var i = 0; i < this.list.length; ++i) {
+      var existing = this.list[i];
+      if (!existing.removed && existing.type === type && existing.callback === callback &&
+          existing.capture === options.capture) return;
+    }
+    var entry = {
+      type: type, fn: fn, callback: callback, capture: options.capture,
+      once: options.once, passive: options.passive, removed: false
+    };
+    if (options.signal && options.signal.aborted) return;
+    this.list.push(entry);
+    if (options.signal && typeof options.signal.addEventListener === 'function') {
+      var store = this;
+      options.signal.addEventListener('abort', function () {
+        store.remove(type, callback, options.capture);
+      }, { once: true });
+    }
   };
-  ListenerStore.prototype.remove = function (type, fn) {
-    var list = this.map[type];
-    if (!list) return;
-    this.map[type] = list.filter(function (e) { return e.fn !== fn; });
-  };
-  ListenerStore.prototype.take = function (type) {
-    var list = this.map[type];
-    if (!list) return [];
-    if (list.length) this.map[type] = list.filter(function (e) { return !e.once; });
-    return list.slice();
+  ListenerStore.prototype.remove = function (type, callback, capture) {
+    var wantCapture = capture === true || !!(capture && typeof capture === 'object' && capture.capture);
+    type = String(type);
+    for (var i = 0; i < this.list.length; ++i) {
+      var entry = this.list[i];
+      if (entry.type === type && entry.callback === callback && entry.capture === wantCapture) {
+        entry.removed = true;
+      }
+    }
+    this.list = this.list.filter(function (entry) { return !entry.removed; });
   };
 
-  function makeEvent(type, init) {
-    var ev = init && typeof init === 'object' ? init : {};
-    var prevented = false;
-    var stopped = false;
-    var event = {
-      type: String(type),
-      bubbles: !!ev.bubbles,
-      cancelable: !!ev.cancelable,
-      detail: ev.detail,
-      target: null,
-      currentTarget: null,
-      srcElement: null,
-      defaultPrevented: false,
-      isTrusted: false,
-      eventPhase: 0,
-      timeStamp: Date.now(),
-      preventDefault: function () { prevented = true; event.defaultPrevented = true; },
-      stopPropagation: function () { stopped = true; },
-      stopImmediatePropagation: function () { stopped = true; },
-      composedPath: function () { return []; }
-    };
-    if (typeof ev.relatedTarget !== 'undefined') event.relatedTarget = ev.relatedTarget;
-    if (typeof ev.button !== 'undefined') event.button = ev.button;
-    return event;
+  function Event(type, init) {
+    if (!(this instanceof Event)) throw new TypeError("Failed to construct 'Event'");
+    init = init || {};
+    this.type = String(type);
+    this.bubbles = !!init.bubbles;
+    this.cancelable = !!init.cancelable;
+    this.composed = !!init.composed;
+    this.detail = init.detail === undefined ? null : init.detail;
+    this.target = null;
+    this.currentTarget = null;
+    this.srcElement = null;
+    this.relatedTarget = init.relatedTarget || null;
+    this.eventPhase = 0;
+    this.timeStamp = Date.now();
+    this.defaultPrevented = false;
+    this.returnValue = true;
+    this.cancelBubble = false;
+    this.isTrusted = false;
+    this.__stop = false;
+    this.__stopImmediate = false;
+    this.__passive = false;
+    this.__path = [];
+  }
+  Event.prototype.preventDefault = function () {
+    if (this.__passive || !this.cancelable) return;
+    this.defaultPrevented = true;
+    this.returnValue = false;
+  };
+  Event.prototype.stopPropagation = function () { this.__stop = true; this.cancelBubble = true; };
+  Event.prototype.stopImmediatePropagation = function () {
+    this.__stop = true;
+    this.__stopImmediate = true;
+    this.cancelBubble = true;
+  };
+  Event.prototype.composedPath = function () { return this.__path.slice(); };
+  Event.prototype.initEvent = function (type, bubbles, cancelable) {
+    this.type = String(type);
+    this.bubbles = !!bubbles;
+    this.cancelable = !!cancelable;
+  };
+  Event.NONE = 0;
+  Event.CAPTURING_PHASE = CAPTURING_PHASE;
+  Event.AT_TARGET = AT_TARGET;
+  Event.BUBBLING_PHASE = BUBBLING_PHASE;
+
+  function UIEvent(type, init) {
+    if (!(this instanceof UIEvent)) throw new TypeError("Failed to construct 'UIEvent'");
+    init = init || {};
+    Event.call(this, type, init);
+    this.detail = init.detail == null ? 0 : init.detail;
+    this.view = init.view || G;
+  }
+  UIEvent.prototype = Object.create(Event.prototype);
+  UIEvent.prototype.constructor = UIEvent;
+
+  function numOrZero(value) { return typeof value === 'number' && isFinite(value) ? value : 0; }
+
+  function MouseEvent(type, init) {
+    if (!(this instanceof MouseEvent)) throw new TypeError("Failed to construct 'MouseEvent'");
+    init = init || {};
+    UIEvent.call(this, type, init);
+    this.screenX = numOrZero(init.screenX);
+    this.screenY = numOrZero(init.screenY);
+    this.clientX = numOrZero(init.clientX);
+    this.clientY = numOrZero(init.clientY);
+    this.pageX = numOrZero(init.pageX);
+    this.pageY = numOrZero(init.pageY);
+    this.button = numOrZero(init.button);
+    this.buttons = numOrZero(init.buttons);
+    this.ctrlKey = !!init.ctrlKey;
+    this.shiftKey = !!init.shiftKey;
+    this.altKey = !!init.altKey;
+    this.metaKey = !!init.metaKey;
+    this.relatedTarget = init.relatedTarget || null;
+  }
+  MouseEvent.prototype = Object.create(UIEvent.prototype);
+  MouseEvent.prototype.constructor = MouseEvent;
+
+  function PointerEvent(type, init) {
+    if (!(this instanceof PointerEvent)) throw new TypeError("Failed to construct 'PointerEvent'");
+    init = init || {};
+    MouseEvent.call(this, type, init);
+    this.pointerId = init.pointerId == null ? 1 : numOrZero(init.pointerId);
+    this.pointerType = init.pointerType || 'mouse';
+    this.isPrimary = init.isPrimary !== false;
+    this.width = numOrZero(init.width) || 1;
+    this.height = numOrZero(init.height) || 1;
+  }
+  PointerEvent.prototype = Object.create(MouseEvent.prototype);
+  PointerEvent.prototype.constructor = PointerEvent;
+
+  function KeyboardEvent(type, init) {
+    if (!(this instanceof KeyboardEvent)) throw new TypeError("Failed to construct 'KeyboardEvent'");
+    init = init || {};
+    UIEvent.call(this, type, init);
+    this.key = init.key == null ? '' : String(init.key);
+    this.code = init.code == null ? '' : String(init.code);
+    this.location = numOrZero(init.location);
+    this.repeat = !!init.repeat;
+    this.ctrlKey = !!init.ctrlKey;
+    this.shiftKey = !!init.shiftKey;
+    this.altKey = !!init.altKey;
+    this.metaKey = !!init.metaKey;
+    this.charCode = numOrZero(init.charCode);
+    this.keyCode = numOrZero(init.keyCode);
+    this.which = numOrZero(init.which || init.keyCode);
+  }
+  KeyboardEvent.prototype = Object.create(UIEvent.prototype);
+  KeyboardEvent.prototype.constructor = KeyboardEvent;
+
+  function FocusEvent(type, init) {
+    if (!(this instanceof FocusEvent)) throw new TypeError("Failed to construct 'FocusEvent'");
+    init = init || {};
+    UIEvent.call(this, type, init);
+    this.relatedTarget = init.relatedTarget || null;
+  }
+  FocusEvent.prototype = Object.create(UIEvent.prototype);
+  FocusEvent.prototype.constructor = FocusEvent;
+
+  function InputEvent(type, init) {
+    if (!(this instanceof InputEvent)) throw new TypeError("Failed to construct 'InputEvent'");
+    init = init || {};
+    UIEvent.call(this, type, init);
+    this.data = init.data == null ? null : String(init.data);
+    this.inputType = init.inputType == null ? '' : String(init.inputType);
+  }
+  InputEvent.prototype = Object.create(UIEvent.prototype);
+  InputEvent.prototype.constructor = InputEvent;
+
+  function SubmitEvent(type, init) {
+    if (!(this instanceof SubmitEvent)) throw new TypeError("Failed to construct 'SubmitEvent'");
+    init = init || {};
+    Event.call(this, type, init);
+    this.submitter = init.submitter || null;
+  }
+  SubmitEvent.prototype = Object.create(Event.prototype);
+  SubmitEvent.prototype.constructor = SubmitEvent;
+
+  function CustomEvent(type, init) {
+    if (!(this instanceof CustomEvent)) throw new TypeError("Failed to construct 'CustomEvent'");
+    init = init || {};
+    Event.call(this, type, init);
+    this.detail = init.detail === undefined ? null : init.detail;
+  }
+  CustomEvent.prototype = Object.create(Event.prototype);
+  CustomEvent.prototype.constructor = CustomEvent;
+
+  function MessageEvent(type, init) {
+    if (!(this instanceof MessageEvent)) throw new TypeError("Failed to construct 'MessageEvent'");
+    init = init || {};
+    Event.call(this, type, init);
+    this.data = init.data;
+    this.origin = init.origin || '';
+    this.lastEventId = init.lastEventId || '';
+    this.source = init.source || null;
+    this.ports = init.ports || [];
+  }
+  MessageEvent.prototype = Object.create(Event.prototype);
+  MessageEvent.prototype.constructor = MessageEvent;
+
+  function HashChangeEvent(type, init) {
+    if (!(this instanceof HashChangeEvent)) throw new TypeError("Failed to construct 'HashChangeEvent'");
+    init = init || {};
+    Event.call(this, type, init);
+    this.oldURL = init.oldURL || '';
+    this.newURL = init.newURL || '';
+  }
+  HashChangeEvent.prototype = Object.create(Event.prototype);
+  HashChangeEvent.prototype.constructor = HashChangeEvent;
+
+  function PopStateEvent(type, init) {
+    if (!(this instanceof PopStateEvent)) throw new TypeError("Failed to construct 'PopStateEvent'");
+    init = init || {};
+    Event.call(this, type, init);
+    this.state = init.state === undefined ? null : init.state;
+  }
+  PopStateEvent.prototype = Object.create(Event.prototype);
+  PopStateEvent.prototype.constructor = PopStateEvent;
+
+  function makeEvent(type, init) { return new Event(type, init || {}); }
+
+  function invokeListeners(store, event, phase, current) {
+    if (!store || !store.list) return;
+    var entries = store.list.filter(function (entry) {
+      if (entry.removed || entry.type !== event.type) return false;
+      if (phase === CAPTURING_PHASE) return entry.capture;
+      if (phase === BUBBLING_PHASE) return !entry.capture;
+      return true;
+    });
+    for (var i = 0; i < entries.length; ++i) {
+      if (event.__stopImmediate) return;
+      var entry = entries[i];
+      if (entry.removed) continue;
+      if (entry.once) entry.removed = true;
+      event.eventPhase = phase;
+      event.currentTarget = current;
+      var previousPassive = event.__passive;
+      event.__passive = entry.passive;
+      try { entry.fn.call(current === undefined ? G : current, event); }
+      catch (err) { reportError(err); }
+      event.__passive = previousPassive;
+      if (event.__stopImmediate) break;
+    }
+    store.list = store.list.filter(function (entry) { return !entry.removed; });
+  }
+
+  function storeOf(node) {
+    if (!node) return null;
+    if (node === document) return documentTarget;
+    if (node === G) return windowTarget;
+    if (node.__h) return storeFor(node.__h);
+    if (node.__listeners instanceof ListenerStore) return node.__listeners;
+    return null;
+  }
+
+  function eventPath(target) {
+    var path = [];
+    if (target && target.__h) {
+      var node = target;
+      while (node && node.__h) {
+        path.push(node);
+        var parent = H.parentNode(node.__h);
+        node = parent ? wrap(parent) : null;
+      }
+      path.push(document);
+      path.push(G);
+      return path;
+    }
+    if (target === document) return [document, G];
+    if (target === G) return [G];
+    return [target];
+  }
+
+  function dispatchDOMEvent(target, event) {
+    if (!event || !event.type) return true;
+    if (!(event instanceof Event)) event = new Event(event.type, event);
+    var path = eventPath(target);
+    event.__path = path.slice();
+    event.target = path[0];
+    event.srcElement = path[0];
+    event.__stop = false;
+    event.__stopImmediate = false;
+    for (var i = path.length - 1; i >= 1; --i) {
+      if (event.__stop) break;
+      invokeListeners(storeOf(path[i]), event, CAPTURING_PHASE, path[i]);
+    }
+    if (!event.__stop) invokeListeners(storeOf(path[0]), event, AT_TARGET, path[0]);
+    if (event.bubbles && !event.__stop) {
+      for (var j = 1; j < path.length; ++j) {
+        if (event.__stop) break;
+        invokeListeners(storeOf(path[j]), event, BUBBLING_PHASE, path[j]);
+      }
+    }
+    event.eventPhase = 0;
+    event.currentTarget = null;
+    return !event.defaultPrevented;
   }
 
   function fireStored(store, event, target) {
-    event.target = target;
-    var entries = store.take(event.type);
-    for (var i = 0; i < entries.length; ++i) {
-      try { entries[i].fn.call(target === undefined ? G : target, event); }
-      catch (err) { reportError(err); }
+    var ev = event instanceof Event ? event : new Event(event && event.type || 'event', event || {});
+    ev.target = target;
+    invokeListeners(store, ev, AT_TARGET, target);
+  }
+
+  function DOMException(message, name) {
+    this.message = String(message || '');
+    this.name = String(name || 'Error');
+    this.code = 0;
+  }
+  DOMException.prototype = Object.create(Error.prototype);
+  DOMException.prototype.constructor = DOMException;
+
+  function AbortSignal() {
+    this.aborted = false;
+    this.reason = undefined;
+    this.onabort = null;
+    this.__listeners = new ListenerStore();
+  }
+  AbortSignal.prototype.addEventListener = function (type, fn, opts) {
+    this.__listeners.add(type, fn, opts);
+  };
+  AbortSignal.prototype.removeEventListener = function (type, fn, opts) {
+    this.__listeners.remove(type, fn, opts);
+  };
+  AbortSignal.prototype.throwIfAborted = function () {
+    if (this.aborted) throw this.reason;
+  };
+  function AbortController() { this.signal = new AbortSignal(); }
+  AbortController.prototype.abort = function (reason) {
+    var signal = this.signal;
+    if (signal.aborted) return;
+    signal.aborted = true;
+    signal.reason = reason === undefined
+      ? new DOMException('The operation was aborted.', 'AbortError') : reason;
+    var event = new Event('abort');
+    event.target = signal;
+    if (typeof signal.onabort === 'function') {
+      try { signal.onabort.call(signal, event); } catch (err) { reportError(err); }
     }
+    invokeListeners(signal.__listeners, event, AT_TARGET, signal);
+  };
+
+  var mutationObservers = [];
+  var mutationScheduled = false;
+  function MutationRecord(type, target, extra) {
+    extra = extra || {};
+    this.type = type;
+    this.target = target;
+    this.addedNodes = extra.addedNodes || [];
+    this.removedNodes = extra.removedNodes || [];
+    this.previousSibling = extra.previousSibling || null;
+    this.nextSibling = extra.nextSibling || null;
+    this.attributeName = extra.attributeName || null;
+    this.attributeNamespace = null;
+    this.oldValue = extra.oldValue === undefined ? null : extra.oldValue;
+  }
+  function MutationObserver(callback) {
+    if (typeof callback !== 'function') throw new TypeError('MutationObserver requires a callback');
+    this.callback = callback;
+    this.__records = [];
+    this.__registrations = [];
+  }
+  MutationObserver.prototype.observe = function (target, options) {
+    options = options || {};
+    if (!options.childList && !options.attributes && !options.characterData) {
+      throw new TypeError('MutationObserver options require childList, attributes, or characterData');
+    }
+    this.__registrations = this.__registrations.filter(function (reg) { return reg.target !== target; });
+    this.__registrations.push({ target: target, options: options });
+    if (mutationObservers.indexOf(this) < 0) mutationObservers.push(this);
+  };
+  MutationObserver.prototype.disconnect = function () {
+    this.__registrations = [];
+    this.__records = [];
+    var self = this;
+    mutationObservers = mutationObservers.filter(function (observer) { return observer !== self; });
+  };
+  MutationObserver.prototype.takeRecords = function () {
+    var records = this.__records.slice();
+    this.__records = [];
+    return records;
+  };
+  function observerWants(observer, target, type, attrName) {
+    for (var i = 0; i < observer.__registrations.length; ++i) {
+      var reg = observer.__registrations[i];
+      var node = reg.target;
+      var opts = reg.options || {};
+      var hit = node === target;
+      if (!hit && opts.subtree) {
+        if (typeof node.contains === 'function' && target) hit = node.contains(target);
+        else if (node === document && target && target.__h) hit = isConnectedHandle(target.__h);
+      }
+      if (!hit) continue;
+      if (type === 'childList' && opts.childList) return opts;
+      if (type === 'characterData' && opts.characterData) return opts;
+      if (type === 'attributes' && opts.attributes) {
+        if (!opts.attributeFilter) return opts;
+        var name = String(attrName || '').toLowerCase();
+        for (var a = 0; a < opts.attributeFilter.length; ++a) {
+          if (String(opts.attributeFilter[a]).toLowerCase() === name) return opts;
+        }
+      }
+    }
+    return null;
+  }
+  function deliverMutations() {
+    mutationScheduled = false;
+    var pending = mutationObservers.slice();
+    pending.forEach(function (observer) {
+      if (!observer.__records.length) return;
+      var records = observer.takeRecords();
+      try { observer.callback.call(observer, records, observer); }
+      catch (err) { reportError(err); }
+    });
+  }
+  function notifyMutation(type, target, extra) {
+    var queued = false;
+    mutationObservers.forEach(function (observer) {
+      var opts = observerWants(observer, target, type, extra && extra.attributeName);
+      if (!opts) return;
+      var recordExtra = extra || {};
+      var keepOld = (type === 'attributes' && opts.attributeOldValue) ||
+        (type === 'characterData' && opts.characterDataOldValue);
+      observer.__records.push(new MutationRecord(type, target, {
+        addedNodes: recordExtra.addedNodes,
+        removedNodes: recordExtra.removedNodes,
+        previousSibling: recordExtra.previousSibling,
+        nextSibling: recordExtra.nextSibling,
+        attributeName: recordExtra.attributeName,
+        oldValue: keepOld ? recordExtra.oldValue : null
+      }));
+      queued = true;
+    });
+    if (!queued || mutationScheduled) return;
+    mutationScheduled = true;
+    if (typeof queueMicrotask === 'function') queueMicrotask(deliverMutations);
+  }
+
+  function bindOneInline(el, name, value) {
+    if (!el || !el.__h) return;
+    var lower = String(name).toLowerCase();
+    if (lower.indexOf('on') !== 0 || lower.length < 3) return;
+    var type = lower.slice(2);
+    if (!el.__inline) el.__inline = {};
+    if (el.__inline[type]) {
+      storeFor(el.__h).remove(type, el.__inline[type], false);
+      el.__inline[type] = null;
+    }
+    if (value == null || value === '') return;
+    var fn;
+    try { fn = new Function('event', String(value)); }
+    catch (err) { return; }
+    var bound = function (event) { return fn.call(el, event); };
+    el.__inline[type] = bound;
+    storeFor(el.__h).add(type, bound, false);
+  }
+  function bindInlineHandlers(wrapper) {
+    if (!wrapper || !wrapper.__h || H.nodeType(wrapper.__h) !== 1) return;
+    var attrs = H.attrs(wrapper.__h);
+    for (var i = 0; i < attrs.length; ++i) bindOneInline(wrapper, attrs[i][0], attrs[i][1]);
   }
 
   function reportError(err) {
@@ -223,6 +643,7 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     var wrapper = Object.create(proto);
     wrapper.__h = handle;
     wrappers.set(handle, wrapper);
+    bindInlineHandlers(wrapper);
     return wrapper;
   }
 
@@ -232,7 +653,10 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
 
   function attrString(el, name) { return H.attr(el.__h, name); }
   function setAttrString(el, name, value) {
+    var previous = H.attr(el.__h, name);
     H.setAttr(el.__h, name, String(value));
+    notifyMutation('attributes', el, { attributeName: String(name), oldValue: previous });
+    bindOneInline(el, name, value);
     if (String(name).toLowerCase() === 'src') maybeExecuteScript(el);
   }
 
@@ -246,12 +670,7 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   }
 
   function fireElementCallback(el, type) {
-    var event = makeEvent(type);
-    fireStored(storeFor(el.__h), event, el);
-    var handler = el['on' + type];
-    if (typeof handler === 'function') {
-      try { handler.call(el, event); } catch (err) { reportError(err); }
-    }
+    dispatchDOMEvent(el, new Event(type));
   }
 
   function maybeExecuteScript(el) {
@@ -315,8 +734,16 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     textContent: {
       get: function () { return H.text(this.__h); },
       set: function (v) {
-        if (H.nodeType(this.__h) === 3 || H.nodeType(this.__h) === 8) H.setText(this.__h, String(v));
-        else H.setText(this.__h, String(v));
+        var kind = H.nodeType(this.__h);
+        if (kind === 3 || kind === 8) {
+          var previous = H.text(this.__h);
+          H.setText(this.__h, String(v));
+          notifyMutation('characterData', this, { oldValue: previous });
+          return;
+        }
+        var removed = this.childNodes.slice();
+        H.setText(this.__h, String(v));
+        notifyMutation('childList', this, { removedNodes: removed, addedNodes: this.childNodes.slice() });
       }, enumerable: true
     },
     innerText: {
@@ -325,7 +752,11 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     },
     innerHTML: {
       get: function () { return H.innerHTML(this.__h); },
-      set: function (v) { H.setInnerHTML(this.__h, String(v)); }, enumerable: true
+      set: function (v) {
+        var removed = this.childNodes.slice();
+        H.setInnerHTML(this.__h, String(v));
+        notifyMutation('childList', this, { removedNodes: removed, addedNodes: this.childNodes.slice() });
+      }, enumerable: true
     },
     outerHTML: {
       get: function () { return H.outerHTML(this.__h); },
@@ -387,9 +818,20 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
       },
       set: function (v) {
         var tag = H.tagName(this.__h);
-        if (tag === 'textarea') { this.textContent = String(v); return; }
-        if (tag === 'option') { if (H.attr(this.__h, 'value') == null) H.setText(this.__h, String(v)); }
-        setAttrString(this, 'value', v);
+        if (tag === 'textarea') this.textContent = String(v);
+        else {
+          if (tag === 'option' && H.attr(this.__h, 'value') == null) H.setText(this.__h, String(v));
+          setAttrString(this, 'value', v);
+        }
+        if (this.__settingValue) return;
+        if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
+        this.__settingValue = true;
+        try {
+          dispatchDOMEvent(this, new InputEvent('input', {
+            bubbles: true, data: String(v), inputType: 'insertReplacementText'
+          }));
+        } catch (err) { reportError(err); }
+        this.__settingValue = false;
       }, enumerable: true
     });
   }
@@ -398,7 +840,21 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   function defineCheckedProperty(proto) {
     Object.defineProperty(proto, 'checked', {
       get: function () { return H.hasAttr(this.__h, 'checked'); },
-      set: function (v) { if (v) setAttrString(this, 'checked', 'checked'); else H.delAttr(this.__h, 'checked'); }
+      set: function (v) {
+        if (v) setAttrString(this, 'checked', 'checked');
+        else {
+          var previous = H.attr(this.__h, 'checked');
+          H.delAttr(this.__h, 'checked');
+          notifyMutation('attributes', this, { attributeName: 'checked', oldValue: previous });
+        }
+        if (H.tagName(this.__h) !== 'input' || this.__settingValue) return;
+        this.__settingValue = true;
+        try {
+          dispatchDOMEvent(this, new Event('input', { bubbles: true }));
+          dispatchDOMEvent(this, new Event('change', { bubbles: true }));
+        } catch (err) { reportError(err); }
+        this.__settingValue = false;
+      }
     });
     Object.defineProperty(proto, 'disabled', {
       get: function () { return H.hasAttr(this.__h, 'disabled'); },
@@ -508,7 +964,12 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   };
   ElementNode.prototype.setAttribute = function (name, value) { setAttrString(this, name, value); };
   ElementNode.prototype.hasAttribute = function (name) { return H.hasAttr(this.__h, String(name)); };
-  ElementNode.prototype.removeAttribute = function (name) { H.delAttr(this.__h, String(name)); };
+  ElementNode.prototype.removeAttribute = function (name) {
+    var previous = H.attr(this.__h, String(name));
+    H.delAttr(this.__h, String(name));
+    notifyMutation('attributes', this, { attributeName: String(name), oldValue: previous });
+    bindOneInline(this, name, '');
+  };
   ElementNode.prototype.toggleAttribute = function (name, force) {
     var has = this.hasAttribute(name);
     var want = typeof force === 'undefined' ? !has : !!force;
@@ -554,14 +1015,19 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   ElementNode.prototype.appendChild = function (child) {
     if (child && child.__h) {
       H.appendChild(this.__h, child.__h);
+      notifyMutation('childList', this, { addedNodes: [child] });
       maybeExecuteScript(child);
       return child;
     }
     if (child && child.__fragment) {
+      var added = [];
       child.__nodes.forEach(function (h) {
         H.appendChild(this.__h, h);
-        maybeExecuteScript(wrap(h));
+        var wrapped = wrap(h);
+        added.push(wrapped);
+        maybeExecuteScript(wrapped);
       }, this);
+      notifyMutation('childList', this, { addedNodes: added });
       child.__nodes = [];
       return child;
     }
@@ -570,13 +1036,17 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   ElementNode.prototype.insertBefore = function (node, ref) {
     if (node && node.__h) {
       H.insertBefore(this.__h, node.__h, ref ? ref.__h : 0);
+      notifyMutation('childList', this, { addedNodes: [node], nextSibling: ref || null });
       maybeExecuteScript(node);
       return node;
     }
     return node;
   };
   ElementNode.prototype.removeChild = function (child) {
-    if (child && child.__h) { H.detach(child.__h); }
+    if (child && child.__h) {
+      H.detach(child.__h);
+      notifyMutation('childList', this, { removedNodes: [child] });
+    }
     return child;
   };
   ElementNode.prototype.replaceChild = function (node, old) {
@@ -594,37 +1064,37 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     return copy;
   };
   ElementNode.prototype.addEventListener = function (type, fn, opts) { storeFor(this.__h).add(String(type), fn, opts); };
-  ElementNode.prototype.removeEventListener = function (type, fn) { storeFor(this.__h).remove(String(type), fn); };
-  ElementNode.prototype.dispatch = function (type, init) {
-    var event = makeEvent(type, init);
-    fireStored(storeFor(this.__h), event, this);
-    if (event.bubbles) {
-      var p = H.parentNode(this.__h);
-      while (p && !event.__stopped) { fireStored(storeFor(p), event, wrap(p)); p = H.parentNode(p); }
-    }
-    return !event.defaultPrevented;
-  };
+  ElementNode.prototype.removeEventListener = function (type, fn, opts) { storeFor(this.__h).remove(String(type), fn, opts); };
   ElementNode.prototype.dispatchEvent = function (event) {
     if (!event || !event.type) return true;
-    fireStored(storeFor(this.__h), event, this);
-    if (event.bubbles) {
-      var p = H.parentNode(this.__h);
-      while (p) { fireStored(storeFor(p), event, wrap(p)); p = H.parentNode(p); }
-    }
-    return !event.defaultPrevented;
+    var ev = event instanceof Event ? event : new Event(event.type, event);
+    var proceed = dispatchDOMEvent(this, ev);
+    if (proceed) runDefaultAction(this, ev);
+    return proceed;
   };
-  ElementNode.prototype.focus = function () { document.activeElement = this; };
-  ElementNode.prototype.blur = function () { if (document.activeElement === this) document.activeElement = document.body; };
+  ElementNode.prototype.dispatch = function (type, init) {
+    return this.dispatchEvent(new Event(type, init || {}));
+  };
+  ElementNode.prototype.focus = function () {
+    var previous = document.activeElement;
+    document.activeElement = this;
+    if (previous && previous !== this && previous.__h) {
+      dispatchDOMEvent(previous, new FocusEvent('blur', { relatedTarget: this }));
+      dispatchDOMEvent(previous, new FocusEvent('focusout', { bubbles: true, relatedTarget: this }));
+    }
+    dispatchDOMEvent(this, new FocusEvent('focus', { relatedTarget: previous || null }));
+    dispatchDOMEvent(this, new FocusEvent('focusin', { bubbles: true, relatedTarget: previous || null }));
+  };
+  ElementNode.prototype.blur = function () {
+    if (document.activeElement !== this) return;
+    document.activeElement = document.body || null;
+    dispatchDOMEvent(this, new FocusEvent('blur'));
+    dispatchDOMEvent(this, new FocusEvent('focusout', { bubbles: true }));
+  };
   ElementNode.prototype.click = function () {
-    var handled = this.dispatch('click', { bubbles: true, cancelable: true });
-    if (H.tagName(this.__h) === 'a' && handled) {
-      var href = this.href;
-      if (href && href.indexOf('javascript:') !== 0) navigateTo(href);
-    }
-    if (H.tagName(this.__h) === 'button' && handled) {
-      var form = this.closest ? this.closest('form') : null;
-      if (form) form.submit();
-    }
+    var event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    var proceed = dispatchDOMEvent(this, event);
+    if (proceed) runDefaultAction(this, event);
   };
   ElementNode.prototype.getBoundingClientRect = function () {
     return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 };
@@ -634,9 +1104,9 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   ElementNode.prototype.getBoundingClientRect = function () {
     return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 };
   };
-  ElementNode.prototype.requestSubmit = function () {
-    var form = this.closest ? this.closest('form') : null;
-    if (form) form.submit();
+  ElementNode.prototype.requestSubmit = function (submitter) {
+    var form = H.tagName(this.__h) === 'form' ? this : (this.closest ? this.closest('form') : null);
+    if (form) requestSubmitForm(form, submitter || null);
   };
 
   function formFields(form) {
@@ -653,11 +1123,11 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     return fields;
   }
 
-  ElementNode.prototype.submit = function () {
-    if (H.tagName(this.__h) !== 'form') return;
-    var method = (this.getAttribute('method') || 'GET').toUpperCase();
-    var action = this.action || H.pageInfo().url;
-    var fields = formFields(this);
+  function performFormSubmit(form) {
+    if (!form || H.tagName(form.__h) !== 'form') return;
+    var method = (form.getAttribute('method') || 'GET').toUpperCase();
+    var action = form.action || H.pageInfo().url;
+    var fields = formFields(form);
     var query = fields.map(function (kv) {
       return encodeURIComponent(kv[0]) + '=' + encodeURIComponent(kv[1]);
     }).join('&');
@@ -668,7 +1138,72 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     var target = action;
     if (query) target += (action.indexOf('?') >= 0 ? '&' : '?') + query;
     navigateTo(target, false);
+  }
+  function requestSubmitForm(form, submitter) {
+    var event = new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: submitter || null });
+    if (!dispatchDOMEvent(form, event)) return;
+    performFormSubmit(form);
+  }
+  function runDefaultAction(target, event) {
+    if (!target || !target.__h || !event || event.defaultPrevented) return;
+    var tag = H.tagName(target.__h);
+    if (event.type === 'click') {
+      if (tag === 'a' || tag === 'area') {
+        var href = target.href;
+        if (href && href.indexOf('javascript:') !== 0) navigateTo(href);
+        return;
+      }
+      var controlType = (target.getAttribute('type') || (tag === 'button' ? 'submit' : '')).toLowerCase();
+      if ((tag === 'button' || tag === 'input') && controlType === 'submit') {
+        var form = target.form || (target.closest ? target.closest('form') : null);
+        if (form) requestSubmitForm(form, target);
+        return;
+      }
+      if ((tag === 'button' || tag === 'input') && controlType === 'reset') {
+        var resetForm = target.closest ? target.closest('form') : null;
+        if (resetForm && resetForm.reset) resetForm.reset();
+      }
+    }
+  }
+  ElementNode.prototype.submit = function () {
+    performFormSubmit(this);
   };
+  var elementEventTypes = ['click', 'dblclick', 'mousedown', 'mouseup', 'mouseover', 'mouseout',
+    'mousemove', 'pointerdown', 'pointerup', 'pointermove', 'input', 'change', 'submit', 'reset',
+    'focus', 'blur', 'focusin', 'focusout', 'keydown', 'keyup', 'keypress', 'load', 'error',
+    'contextmenu'];
+  elementEventTypes.forEach(function (type) {
+    Object.defineProperty(ElementNode.prototype, 'on' + type, {
+      configurable: true,
+      get: function () { return (this.__on && this.__on[type]) || null; },
+      set: function (fn) {
+        if (!this.__on) this.__on = {};
+        if (this.__on[type]) storeFor(this.__h).remove(type, this.__on[type], false);
+        this.__on[type] = typeof fn === 'function' ? fn : null;
+        if (this.__on[type]) storeFor(this.__h).add(type, this.__on[type], false);
+      }
+    });
+  });
+  Object.defineProperty(ElementNode.prototype, 'method', {
+    get: function () {
+      if (H.tagName(this.__h) !== 'form') return '';
+      var value = (this.getAttribute('method') || 'get').toLowerCase();
+      return value === 'post' || value === 'dialog' ? value : 'get';
+    },
+    set: function (value) { setAttrString(this, 'method', value); }
+  });
+  Object.defineProperty(ElementNode.prototype, 'form', {
+    get: function () {
+      var tag = H.tagName(this.__h);
+      if (tag === 'form') return this;
+      var id = H.attr(this.__h, 'form');
+      if (id) {
+        var owner = document.getElementById(id);
+        if (owner && H.tagName(owner.__h) === 'form') return owner;
+      }
+      return this.closest ? this.closest('form') : null;
+    }
+  });
   ElementNode.prototype.reset = function () {
     if (H.tagName(this.__h) !== 'form') return;
     formFields(this).length;  // no-op reset: Flatworm does not snapshot initial values
@@ -711,7 +1246,17 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     return ctor;
   }
   var DOMInterfaces = {};
-  DOMInterfaces.Node = interfaceCtor('Node', Object.prototype);
+  DOMInterfaces.EventTarget = interfaceCtor('EventTarget', Object.prototype);
+  DOMInterfaces.Node = interfaceCtor('Node', DOMInterfaces.EventTarget.prototype);
+  DOMInterfaces.Document = interfaceCtor('Document', DOMInterfaces.Node.prototype);
+  DOMInterfaces.Window = interfaceCtor('Window', DOMInterfaces.EventTarget.prototype);
+  [['ELEMENT_NODE', 1], ['ATTRIBUTE_NODE', 2], ['TEXT_NODE', 3],
+   ['CDATA_SECTION_NODE', 4], ['PROCESSING_INSTRUCTION_NODE', 7],
+   ['COMMENT_NODE', 8], ['DOCUMENT_NODE', 9], ['DOCUMENT_TYPE_NODE', 10],
+   ['DOCUMENT_FRAGMENT_NODE', 11]].forEach(function (pair) {
+    DOMInterfaces.Node[pair[0]] = pair[1];
+    DOMInterfaces.Node.prototype[pair[0]] = pair[1];
+  });
   DOMInterfaces.CharacterData =
     interfaceCtor('CharacterData', DOMInterfaces.Node.prototype);
   DOMInterfaces.Element = interfaceCtor('Element', DOMInterfaces.Node.prototype);
@@ -1068,10 +1613,7 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
       } };
       return frag;
     },
-    createEvent: function (kind) { return { initEvent: function (type, bubbles, cancelable) {
-      var self = this;
-      self.type = type; self.bubbles = !!bubbles; self.cancelable = !!cancelable;
-    }, type: '', bubbles: false, cancelable: false, preventDefault: function () {}, stopPropagation: function () {} }; },
+    createEvent: function () { return new Event(''); },
     createExpression: function () { return { evaluate: function () { return { stringResultValue: '', numberValue: 0, booleanValue: false }; } }; },
     write: function (markup) {
       var handles = H.parseFragment(String(markup));
@@ -1084,27 +1626,30 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     open: function () {},
     close: function () {},
     addEventListener: function (type, fn, opts) { documentTarget.add(String(type), fn, opts); },
-    removeEventListener: function (type, fn) { documentTarget.remove(String(type), fn); },
+    removeEventListener: function (type, fn, opts) { documentTarget.remove(String(type), fn, opts); },
     dispatchEvent: function (event) {
       if (!event || !event.type) return true;
-      fireStored(documentTarget, event, document);
-      return !event.defaultPrevented;
+      var ev = event instanceof Event ? event : new Event(event.type, event);
+      return dispatchDOMEvent(document, ev);
     },
+    contains: function (other) {
+      if (other === document) return true;
+      if (!other || !other.__h) return false;
+      return isConnectedHandle(other.__h);
+    },
+    get forms() { return H.queryAll('form').map(function (h) { return wrap(h); }); },
     elementFromPoint: function () { return null; },
     getSelection: function () { return { toString: function () { return ''; }, removeAllRanges: function () {} }; },
     createRange: function () { return { selectNodeContents: function () {}, toString: function () { return ''; } }; },
     createTreeWalker: function () { return { nextNode: function () { return null; } }; },
     createNodeIterator: function () { return { nextNode: function () { return null; } }; }
   };
-  document.addEventListener = function (type, fn, opts) {
-    if (typeof fn === 'function' || (fn && typeof fn.handleEvent === 'function')) {
-      documentTarget.add(String(type), typeof fn === 'function' ? fn : function (ev) { fn.handleEvent(ev); }, opts);
-    }
-  };
+  document.addEventListener = function (type, fn, opts) { documentTarget.add(String(type), fn, opts); };
+  document.removeEventListener = function (type, fn, opts) { documentTarget.remove(String(type), fn, opts); };
   document.dispatchEvent = function (event) {
     if (!event || !event.type) return true;
-    fireStored(documentTarget, event, document);
-    return !event.defaultPrevented;
+    var ev = event instanceof Event ? event : new Event(event.type, event);
+    return dispatchDOMEvent(document, ev);
   };
   document.getElementById = function (id) {
     id = String(id);
@@ -1155,7 +1700,19 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     var resolved = parseUrl(url, null);
     if (!resolved || !resolved.href) return;
     if (resolved.href.indexOf('javascript:') === 0) return;
+    var current = parseUrl(currentHref(), null);
+    var sameDocument = current && resolved.protocol === current.protocol &&
+      resolved.host === current.host && resolved.pathname === current.pathname &&
+      resolved.search === current.search;
     locationState.override = resolved.href;
+    if (sameDocument) {
+      if (resolved.hash !== current.hash) {
+        dispatchDOMEvent(G, new HashChangeEvent('hashchange', {
+          bubbles: false, oldURL: current.href, newURL: resolved.href
+        }));
+      }
+      return;
+    }
     H.navigate(resolved.href);
   }
 
@@ -1213,19 +1770,14 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     docState.fired[name] = true;
     if (name === 'DOMContentLoaded') {
       docState.readyState = 'interactive';
-      var event = makeEvent('DOMContentLoaded');
-      fireStored(documentTarget, event, document);
-      fireStored(windowTarget, event, G);
-      if (typeof G.onreadystatechange === 'function') { try { G.onreadystatechange(); } catch (e) { reportError(e); } }
+      dispatchDOMEvent(document, new Event('DOMContentLoaded'));
+      dispatchDOMEvent(document, new Event('readystatechange'));
       return 1;
     }
     if (name === 'load') {
       docState.readyState = 'complete';
-      var loadEvent = makeEvent('load');
-      fireStored(windowTarget, loadEvent, G);
-      if (typeof G.onload === 'function') { try { G.onload(loadEvent); } catch (e) { reportError(e); } }
-      var docLoad = makeEvent('load');
-      fireStored(documentTarget, docLoad, document);
+      dispatchDOMEvent(G, new Event('load'));
+      dispatchDOMEvent(document, new Event('readystatechange'));
       return 1;
     }
     return 0;
@@ -1235,14 +1787,16 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     var fired = 0;
     while (fired < MAX_FLUSH_CALLBACKS) {
       var ran = 0;
-      if (lifecycleQueue.length) { ran += fireLifecycle(lifecycleQueue.shift()); }
-      if (ran) { fired += ran; continue; }
+      if (lifecycleQueue.length) ran += fireLifecycle(lifecycleQueue.shift());
+      var jobs = 0;
+      try { jobs = Number(H.drainJobs()) || 0; } catch (err) { reportError(err); }
+      if (ran || jobs) { fired += ran + jobs; continue; }
       var now = Date.now();
       var due = null;
       for (var i = 0; i < timers.length; ++i) {
-        if (timers[i].when <= now && (!due || due.when > timers[i].when)) due = timers[i];
+        if (timers[i].active !== false && timers[i].when <= now && (!due || due.when > timers[i].when)) due = timers[i];
       }
-      if (rafCbs.length && !due) due = { when: now, fn: function () { var snapshot = rafCbs; rafCbs = []; snapshot.forEach(function (r) { try { r.fn(now); } catch (e) { reportError(e); } }); }, args: [], interval: 0, id: 0 };
+      if (rafCbs.length && !due) due = { when: now, fn: function () { var snapshot = rafCbs; rafCbs = []; snapshot.forEach(function (r) { if (r.fn) { try { r.fn(now); } catch (e) { reportError(e); } } }); }, args: [], interval: 0, id: 0 };
       if (!due) break;
       timers = timers.filter(function (t) { return t.id !== due.id; });
       var fn = due.fn;
@@ -1258,7 +1812,6 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
         timers.push(due);
       }
       fired += 1;
-      var microtasks = H.drainJobs();
     }
     return fired;
   }
@@ -1313,20 +1866,22 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     }
   };
   XMLHttpRequest.prototype.addEventListener = function (type, fn, opts) {
-    var store = this.__listeners || (this.__listeners = {});
-    (store[String(type)] || (store[String(type)] = [])).push(fn);
+    if (!this.__listenerStore) this.__listenerStore = new ListenerStore();
+    this.__listenerStore.add(type, fn, opts);
   };
-  XMLHttpRequest.prototype.removeEventListener = function (type, fn) {
-    var store = this.__listeners || (this.__listeners = {});
-    var key = String(type);
-    if (store[key]) store[key] = store[key].filter(function (f) { return f !== fn; });
+  XMLHttpRequest.prototype.removeEventListener = function (type, fn, opts) {
+    if (!this.__listenerStore) this.__listenerStore = new ListenerStore();
+    this.__listenerStore.remove(type, fn, opts);
   };
-  XMLHttpRequest.prototype.dispatchEvent = function (ev) { this.__fire(ev.type, ev); return true; };
+  XMLHttpRequest.prototype.dispatchEvent = function (ev) {
+    if (!ev || !ev.type) return true;
+    this.__fire(ev.type, ev);
+    return !ev.defaultPrevented;
+  };
   XMLHttpRequest.prototype.__fire = function (type, event) {
-    var ev = event || makeEvent(type);
+    var ev = event instanceof Event ? event : new Event(type);
     ev.target = this;
-    var store = this.__listeners || {};
-    (store[type] || []).forEach(function (fn) { try { fn.call(this, ev); } catch (e) { reportError(e); } }, this);
+    if (this.__listenerStore) invokeListeners(this.__listenerStore, ev, AT_TARGET, this);
     var handler = this['on' + type];
     if (typeof handler === 'function') { try { handler.call(this, ev); } catch (e) { reportError(e); } }
   };
@@ -1508,9 +2063,6 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   }
 
   // ---------- misc ----------
-  function EventCtor(type, init) { return makeEvent(type, init); }
-  function CustomEventCtor(type, init) { return makeEvent(type, init); }
-
   function DOMParserStub() {}
   DOMParserStub.prototype.parseFromString = function (markup, mime) {
     var handles = H.parseFragment(String(markup));
@@ -1575,25 +2127,46 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     };
   } catch (e) {}
 
-  function ObserverStub(behavior) {
-    return function ObserverCtor(callback) {
+  function ObserverStub() {
+    function ObserverCtor(callback) {
       this.callback = callback;
       this.__observed = [];
-    };
-    ObserverCtor.prototype.observe = function (target, opts) { this.__observed.push([target, opts]); };
+    }
+    ObserverCtor.prototype.observe = function (target, opts) { this.__observed.push([target, opts || {}]); };
     ObserverCtor.prototype.unobserve = function () {};
     ObserverCtor.prototype.disconnect = function () { this.__observed = []; };
     ObserverCtor.prototype.takeRecords = function () { return []; };
     return ObserverCtor;
   }
-  var MutationObserverCtor = (function () {
-    function MutationObserver(callback) { this.callback = callback; }
-    MutationObserver.prototype.observe = function () {};
-    MutationObserver.prototype.unobserve = function () {};
-    MutationObserver.prototype.disconnect = function () {};
-    MutationObserver.prototype.takeRecords = function () { return []; };
-    return MutationObserver;
-  })();
+  function MessagePort() {
+    this.onmessage = null;
+    this.__listeners = new ListenerStore();
+    this.__other = null;
+    this.__closed = false;
+  }
+  MessagePort.prototype.addEventListener = function (type, fn, opts) { this.__listeners.add(type, fn, opts); };
+  MessagePort.prototype.removeEventListener = function (type, fn, opts) { this.__listeners.remove(type, fn, opts); };
+  MessagePort.prototype.start = function () {};
+  MessagePort.prototype.close = function () { this.__closed = true; };
+  MessagePort.prototype.postMessage = function (data) {
+    var other = this.__other;
+    if (!other || other.__closed || this.__closed) return;
+    setTimeoutJs(function () {
+      if (other.__closed) return;
+      var event = new MessageEvent('message', { data: data });
+      event.target = other;
+      if (typeof other.onmessage === 'function') {
+        try { other.onmessage.call(other, event); } catch (err) { reportError(err); }
+      }
+      invokeListeners(other.__listeners, event, AT_TARGET, other);
+    }, 0);
+  };
+  function MessageChannel() {
+    this.port1 = new MessagePort();
+    this.port2 = new MessagePort();
+    this.port1.__other = this.port2;
+    this.port2.__other = this.port1;
+  }
 
   function ImageCtor(width, height) {
     var img = document.createElement('img');
@@ -1653,11 +2226,26 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   install('Request', function RequestCtor(url, opts) { this.url = url; this.method = (opts && opts.method) || 'GET'; }, true);
   install('URL', URLPolyfill, true);
   install('URLSearchParams', UrlSearchParams, true);
-  install('Event', EventCtor, true);
-  install('CustomEvent', CustomEventCtor, true);
+  install('Event', Event, true);
+  install('CustomEvent', CustomEvent, true);
+  install('UIEvent', UIEvent, true);
+  install('MouseEvent', MouseEvent, true);
+  install('PointerEvent', PointerEvent, true);
+  install('KeyboardEvent', KeyboardEvent, true);
+  install('FocusEvent', FocusEvent, true);
+  install('InputEvent', InputEvent, true);
+  install('SubmitEvent', SubmitEvent, true);
+  install('MessageEvent', MessageEvent, true);
+  install('HashChangeEvent', HashChangeEvent, true);
+  install('PopStateEvent', PopStateEvent, true);
+  install('DOMException', DOMException, true);
+  install('AbortController', AbortController, true);
+  install('AbortSignal', AbortSignal, true);
+  install('MessageChannel', MessageChannel, true);
+  install('MessagePort', MessagePort, true);
   install('DOMParser', DOMParserStub, true);
   install('FormData', FormDataStub, true);
-  install('MutationObserver', MutationObserverCtor, true);
+  install('MutationObserver', MutationObserver, true);
   install('IntersectionObserver', ObserverStub(), true);
   install('ResizeObserver', ObserverStub(), true);
   install('PerformanceObserver', ObserverStub(), true);
@@ -1751,11 +2339,36 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   }
 
   install('location', location, true);
+  var historyEntries = [{ state: null, url: null }];
+  var historyIndex = 0;
   install('history', {
-    length: 1, state: null, scrollRestoration: 'auto',
-    pushState: function (state, title, url) { if (url != null) navigateTo(url, false); },
-    replaceState: function (state, title, url) { if (url != null) navigateTo(url, true); },
-    back: function () {}, forward: function () {}, go: function () {}
+    get length() { return historyEntries.length; },
+    get state() { return historyEntries[historyIndex] ? historyEntries[historyIndex].state : null; },
+    scrollRestoration: 'auto',
+    pushState: function (state, title, url) {
+      historyEntries = historyEntries.slice(0, historyIndex + 1);
+      var nextUrl = url == null ? currentHref() : parseUrl(url, null).href;
+      if (nextUrl && nextUrl.indexOf('javascript:') === 0) return;
+      historyEntries.push({ state: state, url: nextUrl });
+      historyIndex = historyEntries.length - 1;
+      if (url != null) locationState.override = nextUrl;
+    },
+    replaceState: function (state, title, url) {
+      var nextUrl = url == null ? currentHref() : parseUrl(url, null).href;
+      if (nextUrl && nextUrl.indexOf('javascript:') === 0) return;
+      historyEntries[historyIndex] = { state: state, url: nextUrl };
+      if (url != null) locationState.override = nextUrl;
+    },
+    back: function () { this.go(-1); },
+    forward: function () { this.go(1); },
+    go: function (delta) {
+      var next = historyIndex + (Number(delta) || 0);
+      if (next < 0 || next >= historyEntries.length || next === historyIndex) return;
+      historyIndex = next;
+      var entry = historyEntries[historyIndex];
+      if (entry.url) locationState.override = entry.url;
+      dispatchDOMEvent(G, new PopStateEvent('popstate', { state: entry.state }));
+    }
   }, true);
   install('screen', { width: 1920, height: 1080, availWidth: 1920, availHeight: 1040, colorDepth: 24, pixelDepth: 24, orientation: { type: 'landscape-primary', angle: 0, lock: function () {}, unlock: function () {} } }, true);
   install('devicePixelRatio', 1, true);
@@ -1809,13 +2422,11 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   G.focus = function () {};
   G.blur = function () {};
   G.addEventListener = function (type, fn, opts) { windowTarget.add(String(type), fn, opts); };
-  G.removeEventListener = function (type, fn) { windowTarget.remove(String(type), fn); };
+  G.removeEventListener = function (type, fn, opts) { windowTarget.remove(String(type), fn, opts); };
   G.dispatchEvent = function (event) {
     if (!event || !event.type) return true;
-    fireStored(windowTarget, event, G);
-    var handler = G['on' + event.type];
-    if (typeof handler === 'function') { try { handler.call(G, event); } catch (e) { reportError(e); } }
-    return !event.defaultPrevented;
+    var ev = event instanceof Event ? event : new Event(event.type, event);
+    return dispatchDOMEvent(G, ev);
   };
   var B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
   G.atob = function (input) {
@@ -2046,18 +2657,26 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     return out;
   };
 
-  windowTarget.add('error', function () {});
-  G.onerror = null;
-  G.onload = null;
-  G.onunload = null;
-  G.onbeforeunload = null;
-  G.onhashchange = null;
-  G.onpopstate = null;
-  G.onresize = null;
-  G.onscroll = null;
-  G.onorientationchange = null;
-  document.onload = null;
-  document.onreadystatechange = null;
+  function installOnProperty(target, store, type) {
+    var slot = null;
+    Object.defineProperty(target, 'on' + type, {
+      configurable: true,
+      enumerable: true,
+      get: function () { return slot; },
+      set: function (fn) {
+        if (slot) store.remove(type, slot, false);
+        slot = typeof fn === 'function' ? fn : null;
+        if (slot) store.add(type, slot, false);
+      }
+    });
+  }
+  ['error', 'load', 'unload', 'beforeunload', 'hashchange', 'popstate', 'resize',
+   'scroll', 'orientationchange'].forEach(function (type) {
+    installOnProperty(G, windowTarget, type);
+  });
+  installOnProperty(document, documentTarget, 'readystatechange');
+  try { Object.setPrototypeOf(document, DOMInterfaces.Document.prototype); } catch (err) {}
+  try { Object.setPrototypeOf(G, DOMInterfaces.Window.prototype); } catch (err) {}
 })();
 )SHIM";
 

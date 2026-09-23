@@ -279,6 +279,93 @@ TEST(JavaScriptPlatform, ScriptErrorsAreReportedNotFatal) {
     EXPECT_EQ(platform.value("1 + 1"), "2");
 }
 
+TEST(JavaScriptPlatform, DomEventsCaptureBubbleAndSubmit) {
+    auto platform = make_platform(
+        "<html><body>"
+        "<form id='f' method='post' action='/api/orders'>"
+        "<input name='q' value='hello'>"
+        "<button id='go' type='submit'>send</button>"
+        "</form>"
+        "<div id='outer'><button id='inner'>x</button></div>"
+        "<a id='link' href='/away'>go</a>"
+        "</body></html>");
+    ASSERT_TRUE(platform
+                    .run("globalThis.phases = [];"
+                         "var outer = document.getElementById('outer');"
+                         "var inner = document.getElementById('inner');"
+                         "outer.addEventListener('click', function () { phases.push('cap'); }, true);"
+                         "inner.addEventListener('click', function (event) {"
+                         "  phases.push('target:' + event.eventPhase + ':' + (event instanceof MouseEvent));"
+                         "  event.stopPropagation();"
+                         "});"
+                         "outer.addEventListener('click', function () { phases.push('bubble'); });"
+                         "document.addEventListener('click', function () { phases.push('doc'); });"
+                         "inner.click();")
+                    .ok);
+    EXPECT_EQ(platform.value("phases.join(',')"), "cap,target:2:true");
+    EXPECT_EQ(platform.value("new Event('x') instanceof Event"), "true");
+    EXPECT_EQ(platform.value("Node.ELEMENT_NODE"), "1");
+
+    ASSERT_TRUE(platform
+                    .run("globalThis.submitted = 0;"
+                         "document.getElementById('f').addEventListener('submit', function (event) {"
+                         "  submitted = submitted + 1;"
+                         "  event.preventDefault();"
+                         "}, {once: true});"
+                         "document.getElementById('go').click();")
+                    .ok);
+    EXPECT_EQ(platform.value("submitted"), "1");
+    prowsetk::PendingNavigation navigation;
+    EXPECT_FALSE(platform.host->consume_pending_navigation(navigation));
+
+    // The `once` listener is gone, so requestSubmit fires an uncancelled
+    // submit event and the form navigates.
+    ASSERT_TRUE(platform.run("document.getElementById('f').requestSubmit();").ok);
+    EXPECT_EQ(platform.value("submitted"), "1");
+    ASSERT_TRUE(platform.host->consume_pending_navigation(navigation));
+    EXPECT_EQ(navigation.method, "POST");
+    EXPECT_EQ(navigation.url, "https://app.test/api/orders");
+    EXPECT_NE(navigation.body.find("q=hello"), std::string::npos);
+
+    ASSERT_TRUE(platform
+                    .run("document.getElementById('link').addEventListener('click',"
+                         " function (event) { event.preventDefault(); });"
+                         "document.getElementById('link').click();")
+                    .ok);
+    EXPECT_FALSE(platform.host->consume_pending_navigation(navigation));
+}
+
+TEST(JavaScriptPlatform, MutationObserverAndLifecycleMicrotasks) {
+    auto platform = make_platform();
+    ASSERT_TRUE(platform
+                    .run("globalThis.mutations = 0;"
+                         "var mount = document.getElementById('mount');"
+                         "var observer = new MutationObserver(function (records) {"
+                         "  mutations = records.length;"
+                         "});"
+                         "observer.observe(mount, {childList: true});"
+                         "mount.appendChild(document.createElement('span'));")
+                    .ok);
+    EXPECT_EQ(platform.value("mutations"), "1");
+
+    ASSERT_TRUE(platform
+                    .run("globalThis.posted = 0;"
+                         "document.addEventListener('DOMContentLoaded', function () {"
+                         "  document.getElementById('mount').innerHTML ="
+                         "    \"<form id='rendered' method='post' action='/api/orders'></form>\";"
+                         "  fetch('/api/orders', {method: 'POST', body: 'a=1'});"
+                         "});")
+                    .ok);
+    platform.flush();
+    EXPECT_EQ(platform.value("document.getElementById('rendered').method"), "post");
+    bool saw_post = false;
+    for (const auto& [method, url] : platform.requests) {
+        if (method == "POST" && url.find("/api/orders") != std::string::npos) saw_post = true;
+    }
+    EXPECT_TRUE(saw_post);
+    EXPECT_NE(platform.host->document()->query_selector("form#rendered"), nullptr);
+}
+
 TEST(JavaScriptPlatform, LifecycleEventsFireOnceInOrder) {
     auto platform = make_platform();
     ASSERT_TRUE(platform

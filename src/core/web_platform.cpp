@@ -57,7 +57,8 @@ WebPlatform default_web_platform() {
                      "<a>/<area> hrefs");
     platform.declare("location", ImplementationClass::PartiallyImplemented,
                      "reads resolve against the live document; assignment and "
-                     "form submit trigger a host navigation after the script pass");
+                     "form submit trigger a host navigation after the script pass; "
+                     "pushState, replaceState, and same-document hash changes do not");
     platform.declare("navigator", ImplementationClass::PartiallyImplemented,
                      "static fields from the session configuration");
     platform.declare("console", ImplementationClass::FullyImplemented,

@@ -237,8 +237,12 @@ Scrape2OapiResult scrape_from_session(Session& session,
     }
     EndpointExtractionOptions eo = to_extraction_opts(options);
     EndpointExtractor extractor(eo);
-    // Note: observed network endpoints could be fed via extractor.observe()
-    // by hooking session events; for now we rely on static analysis.
+    if (options.observe_network) {
+        for (const auto& call : session.page_script_requests()) {
+            extractor.observe(call.method, call.url, call.status,
+                              call.content_type);
+        }
+    }
 
     EndpointExtractionResult raw = extractor.extract(*document);
     auto filtered = filter_to_api(raw.endpoints, options);

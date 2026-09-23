@@ -1332,12 +1332,22 @@ int lprowsext_dom_xpath_strings(lua_State* L) {
 
 int lprowsext_endpoints_extract(lua_State* L) {
     return protect(L, [&]() -> int {
+        Session* session = nullptr;
+        if (luaL_testudata(L, 1, kSessionMeta) != nullptr) {
+            session = check_session(L, 1)->session->get();
+        }
         const auto document = document_from(L, 1);
         if (document == nullptr) {
             luaL_error(L, "endpoints.extract expects a document or session");
             return 0;
         }
         EndpointExtractor extractor(read_endpoint_options(L, 2));
+        if (session != nullptr && extractor.options().observe_network) {
+            for (const auto& call : session->page_script_requests()) {
+                extractor.observe(call.method, call.url, call.status,
+                                  call.content_type);
+            }
+        }
         push_endpoint_result(L, extractor.extract(*document));
         return 1;
     });

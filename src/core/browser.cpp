@@ -354,6 +354,14 @@ Session::Session(Browser* browser, SessionConfig config, std::string id)
             out.body = response.body;
             out.final_url = response.final_url;
             out.ok = true;
+            PageScriptRequest observed;
+            observed.method = host_request.method;
+            // Record the URL the script addressed, not the redirect target:
+            // a 303 after a POST would otherwise attribute POST to a GET page.
+            observed.url = host_request.url;
+            observed.status = response.status;
+            observed.content_type = response.header("Content-Type");
+            page_script_requests_.push_back(std::move(observed));
         } catch (const std::exception& error) {
             out.error = error.what();
         }
@@ -676,6 +684,7 @@ void Session::navigate(std::string_view url) {
 
 void Session::install_document(std::string_view html, std::string url,
                                std::string base_url) {
+    page_script_requests_.clear();
     std::string previous_url = std::move(current_url_);
     document_ = parse_html(html, std::move(url), std::move(base_url));
     current_url_ = document_->url();

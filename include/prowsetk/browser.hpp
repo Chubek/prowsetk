@@ -97,6 +97,17 @@ private:
     std::size_t session_counter_ = 0;
 };
 
+// One host-mediated request issued by page JavaScript (`fetch`,
+// `XMLHttpRequest`, `sendBeacon`, or a dynamic script or image load).
+// Document navigations are not included. Endpoint extraction records these
+// when `observe_network` is set.
+struct PageScriptRequest {
+    std::string method;
+    std::string url;
+    int status = 0;
+    std::string content_type;
+};
+
 // Represents an isolated browsing context: URL, cookies, storage, headers, and
 // the currently loaded document.
 class Session {
@@ -129,6 +140,12 @@ public:
 
     std::string evaluate_js(std::string_view script,
                             const ScriptOptions& options = {});
+
+    // Requests issued by the current document's scripts since it was
+    // installed. Cleared when the next document is installed.
+    const std::vector<PageScriptRequest>& page_script_requests() const noexcept {
+        return page_script_requests_;
+    }
 
     // Sends an HTTP request through the browser's NetworkClient, applying the
     // session's default headers and cookies, and follows redirects according to
@@ -180,6 +197,7 @@ private:
     std::shared_ptr<Document> document_;
     std::unique_ptr<JavaScriptRuntime> javascript_;
     std::optional<AntiBotDetection> anti_bot_detection_;
+    std::vector<PageScriptRequest> page_script_requests_;
     bool closed_ = false;
 };
 

@@ -77,6 +77,57 @@ TEST(EngineEvents, StorageAccessEventsAreScopedAndValueFree) {
     EXPECT_EQ(events[2].name, "remove");
 }
 
+TEST(EngineEvents, PageScriptPostSurvivesLoadAndIsObservable) {
+    BrowserConfig config;
+    config.javascript = true;
+    Browser browser(config);
+    auto client = std::make_unique<MemoryNetworkClient>();
+    const char* html =
+        "<html><body><div id='app'></div><script>"
+        "document.addEventListener('DOMContentLoaded', function () {"
+        "  document.getElementById('app').innerHTML = "
+        "    \"<form method='post' action='/api/orders'><input name='q' value='1'></form>\";"
+        "  fetch('/api/orders', {method: 'POST', body: 'q=1'});"
+        "});"
+        "</script></body></html>";
+    register_page(*client, html);
+    browser.set_network_client(std::move(client));
+
+    auto session = browser.create_session();
+    session->load_html(html, "https://admin.example/hotel/hoteladmin");
+
+    const auto form = session->document()->query_selector("form");
+    ASSERT_NE(form, nullptr);
+    EXPECT_EQ(form->attribute("method"), "post");
+
+    bool saw_post = false;
+    for (const auto& call : session->page_script_requests()) {
+        if (call.method == "POST" &&
+            call.url.find("/api/orders") != std::string::npos) {
+            saw_post = true;
+            EXPECT_EQ(call.status, 200);
+        }
+    }
+    EXPECT_TRUE(saw_post);
+
+    EndpointExtractionOptions options;
+    options.observe_network = true;
+    options.minimum_confidence = 0.5;
+    EndpointExtractor extractor(options);
+    for (const auto& call : session->page_script_requests()) {
+        extractor.observe(call.method, call.url, call.status, call.content_type);
+    }
+    const auto result = extractor.extract(*session->document());
+    bool post_endpoint = false;
+    for (const auto& endpoint : result.endpoints) {
+        if (endpoint.method == "post" &&
+            endpoint.path.find("orders") != std::string::npos) {
+            post_endpoint = true;
+        }
+    }
+    EXPECT_TRUE(post_endpoint);
+}
+
 TEST(EngineEvents, EndpointDiscoveredEventsCarryProvenance) {
     Browser browser;
     auto session = browser.create_session();

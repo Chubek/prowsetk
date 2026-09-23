@@ -1209,7 +1209,7 @@ local function crawl(session, start_url, args, authenticated_flag)
                 follow_links = true,
                 inspect_scripts = true,
                 scrape_all_paths = false,
-                observe_network = false,
+                observe_network = true,
                 redact_secrets = true,
                 include_provenance = true,
                 infer_schemas = true,
