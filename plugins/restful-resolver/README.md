@@ -5,7 +5,9 @@ full RESTful API surface is discovered.
 
 - **Seed:** static discovery through `EndpointExtractor` (links, POST forms,
   `fetch`/`XMLHttpRequest` methods including `POST`, `navigator.sendBeacon`,
-  shorthand POST helpers such as `$.post` / `axios.post` / `$.ajax`).
+  shorthand POST helpers such as `$.post` / `axios.post` / `$.ajax`, and
+  generic options-object POST configs such as `axios.request({method, url})`
+  or `fresa({uri, method})`).
 - **Resolve:** breadth-first GET probes through the owning `Session`
   (`Session::request`, host-mediated `NetworkClient`). JSON bodies that
   reference further API URLs are enqueued; HTML bodies are re-parsed so POST

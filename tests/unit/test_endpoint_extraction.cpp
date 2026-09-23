@@ -237,3 +237,76 @@ TEST(EndpointExtraction, QuotedLiteralAcceptsUnderscorePrefix) {
     }
     EXPECT_TRUE(found);
 }
+
+TEST(EndpointExtraction, DiscoversOptionsObjectPostCalls) {
+    const auto document = parse_html(R"HTML(
+        <script>
+          fresa({uri: "/fresa/extranet/inbox/send_message", method: "POST", data: e});
+          c.axios.request({method: 'POST', url: '/fresa/extranet/content/name/validate'});
+          $.ajax({url: "/fresa/extranet/triage/getTriageData", type: "POST"});
+        </script>
+    )HTML",
+                                     "https://example.com/");
+    EndpointExtractor extractor;
+    const auto result = extractor.extract(*document);
+
+    bool found_fresa = false;
+    bool found_axios = false;
+    bool found_ajax = false;
+    for (const auto& endpoint : result.endpoints) {
+        if (endpoint.path == "/fresa/extranet/inbox/send_message") {
+            found_fresa = true;
+            EXPECT_EQ(endpoint.method, "post");
+        }
+        if (endpoint.path == "/fresa/extranet/content/name/validate") {
+            found_axios = true;
+            EXPECT_EQ(endpoint.method, "post");
+        }
+        if (endpoint.path == "/fresa/extranet/triage/getTriageData") {
+            found_ajax = true;
+            EXPECT_EQ(endpoint.method, "post");
+        }
+    }
+    EXPECT_TRUE(found_fresa);
+    EXPECT_TRUE(found_axios);
+    EXPECT_TRUE(found_ajax);
+}
+
+TEST(EndpointExtraction, IgnoresDistantUnrelatedLiteralsNearPostOption) {
+    // A POST options object must not pair with a URL literal from unrelated
+    // code far away in the same bundle.
+    const auto document = parse_html(std::string(
+        "<script>var unrelated = \"/api/elsewhere\";"
+        + std::string(1200, ' ') +
+        "fresa({uri: \"/fresa/extranet/real\", method: \"POST\"});</script>"),
+                                     "https://example.com/");
+    EndpointExtractor extractor;
+    const auto result = extractor.extract(*document);
+
+    bool found_real = false;
+    for (const auto& endpoint : result.endpoints) {
+        EXPECT_NE(endpoint.path, "/api/elsewhere");
+        if (endpoint.path == "/fresa/extranet/real") {
+            found_real = true;
+            EXPECT_EQ(endpoint.method, "post");
+        }
+    }
+    EXPECT_TRUE(found_real);
+}
+
+TEST(EndpointExtraction, RejectsSchemeOnlyUrlFragments) {
+    // `"https://" + host` concatenation leaves a scheme-only quoted
+    // fragment; it must not become an endpoint.
+    const auto document = parse_html(R"HTML(
+        <script>
+          var xhr = new XMLHttpRequest();
+          xhr.open("POST", "https://" + host + "/submit");
+        </script>
+    )HTML",
+                                     "https://example.com/");
+    EndpointExtractor extractor;
+    const auto result = extractor.extract(*document);
+    for (const auto& endpoint : result.endpoints) {
+        EXPECT_NE(endpoint.url, "https://");
+    }
+}

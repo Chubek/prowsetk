@@ -299,6 +299,80 @@ local function post_endpoints_in_html(body, page_url, opts)
             end
         end
     end
+    -- Generic options-object POST scan: anchors on each method:/type: "POST"
+    -- literal and pairs it with the nearest url:/uri: quoted literal within
+    -- a bounded window. Catches config-object clients of any name
+    -- (axios.request, fresa, ...) regardless of key order.
+    do
+        local lowered_all = lower(body)
+        local function key_start_ok(at)
+            if at <= 1 then return true end
+            local prev = lowered_all:sub(at - 1, at - 1)
+            return prev == '"' or prev == "'" or prev == "{" or prev == "," or
+                   prev == " " or prev == "\t" or prev == "\n" or prev == "("
+        end
+        local function read_literal(at)
+            local q = at
+            while q <= #body and body:sub(q, q):match("%s") do q = q + 1 end
+            local quote = body:sub(q, q)
+            if quote ~= '"' and quote ~= "'" and quote ~= "`" then return nil end
+            local close = body:find(quote, q + 1, true)
+            if close == nil then return nil end
+            return body:sub(q + 1, close - 1)
+        end
+        local pos = 1
+        while true do
+            local ms = lowered_all:find("method", pos, true)
+            local ts = lowered_all:find("type", pos, true)
+            local ks
+            if ms == nil then ks = ts
+            elseif ts == nil then ks = ms
+            else ks = (ms < ts) and ms or ts end
+            if ks == nil then break end
+            pos = ks + 6
+            if key_start_ok(ks) then
+                local colon = lowered_all:find(":", ks + 6, true)
+                if colon ~= nil and colon - ks <= 14 then
+                    local value = read_literal(colon + 1)
+                    if value ~= nil and lower(value) == "post" then
+                        local from = math.max(1, ks - 800)
+                        local upto = math.min(#body, ks + 400)
+                        local best, best_dist = nil, nil
+                        local upos = from
+                        while true do
+                            local um = lowered_all:find("url", upos, true)
+                            local im = lowered_all:find("uri", upos, true)
+                            local nxt
+                            if um == nil then nxt = im
+                            elseif im == nil then nxt = um
+                            else nxt = (um < im) and um or im end
+                            if nxt == nil or nxt >= upto then break end
+                            if key_start_ok(nxt) then
+                                local ucolon = lowered_all:find(":", nxt + 3, true)
+                                if ucolon ~= nil and ucolon - nxt <= 14 and ucolon <= upto then
+                                    local uval = read_literal(ucolon + 1)
+                                    if type(uval) == "string" and uval ~= "" and
+                                        (uval:sub(1, 1) == "/" or
+                                         (uval:lower():match("^https?://") ~= nil and
+                                          (uval:match("^https?://([^/?#:]+)") or "") ~= "")) then
+                                        local dist = (nxt > ks) and (nxt - ks) or (ks - nxt)
+                                        if best_dist == nil or dist < best_dist then
+                                            best, best_dist = uval, dist
+                                        end
+                                    end
+                                end
+                            end
+                            upos = nxt + 1
+                        end
+                        if best ~= nil then
+                            emit_post(best, "resolved-script-post",
+                                "heuristically discovered options-object POST in resolved page")
+                        end
+                    end
+                end
+            end
+        end
+    end
     return out
 end
 

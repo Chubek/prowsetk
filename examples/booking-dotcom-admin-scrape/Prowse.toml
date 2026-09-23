@@ -17,9 +17,6 @@ libraries = ["lprowse", "lprowsext"]
 allow_extensions = true
 execution_timeout_ms = 60000
 
-[sessions]
-cookies_json = "../../_scraped/booking-dotcom-admin/cookies.json"
-
 [assistant-browser]
 enabled = true
 command = "firefox"
@@ -96,5 +93,6 @@ arguments = [
     { name = "assistant_browser_cookie_command", type = "string", required = false, default = "" },
     { name = "no-xcors", type = "boolean", required = false, default = false },
     { name = "no_xcors", type = "boolean", required = false, default = false },
+    { name = "script_origins", type = "string", required = false, default = "bstatic.com" },
     { name = "html", type = "string", required = false, default = "" }
 ]

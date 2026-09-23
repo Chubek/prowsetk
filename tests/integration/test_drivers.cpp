@@ -192,13 +192,15 @@ TEST(Drivers, BookingDotcomOfflinePicksUpPostEndpoints) {
          "<script>navigator.sendBeacon("
          "'/__challenge_h78IRKX3kpQxScCExxShBNwRUlb/d8c14d4960ca/"
          "3e0e3952d8f6/telemetry', JSON.stringify({t: 1}));"
-         "fetch('/api/notes', {method: 'POST'});</script>"},
+         "fetch('/api/notes', {method: 'POST'});"
+         "fresa({uri: '/fresa/extranet/inbox/send_message', method: 'POST'});</script>"},
         {"output", "path", output},
         {"postman", "path", postman_output}});
     ASSERT_TRUE(result.ok) << result.error;
     const auto yaml = read_file(output);
     EXPECT_NE(yaml.find("__challenge"), std::string::npos);
     EXPECT_NE(yaml.find("/api/notes"), std::string::npos);
+    EXPECT_NE(yaml.find("/fresa/extranet/inbox/send_message"), std::string::npos);
     EXPECT_NE(yaml.find("post:"), std::string::npos);
     EXPECT_NE(yaml.find("has-post: true"), std::string::npos);
 }

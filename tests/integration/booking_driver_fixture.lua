@@ -39,6 +39,7 @@ end
 local dashboard = [[<a href="/logout">Log out</a><a href="/reservations">Reservations</a>
 <a href="/api/hotels?token=fixture-token">Hotels</a><a href="/hotel/hoteladmin">Hotel admin</a>
 <a href="/partner-settings/security">Partner security</a><script src="/app.js"></script>
+<script src="https://r-xx.bstatic.com/static/app-extra.js"></script>
 <script>fetch('/api/inline')</script>]]
 if scenario == 'js-dashboard' then
     dashboard = dashboard:gsub('<a href="/logout">Log out</a>',
@@ -124,6 +125,8 @@ function wrapper:request(method, url, options)
             '<a href="/logout">Log out</a>' or dashboard, headers={}}
     elseif url == 'https://admin.booking.com/app.js' then
         return {status=200, body=[[fetch('/api/external'); import('/static/chunk.js'); fetch('/api/checkin',{method:'POST'}); $.post('/api/activity',{visit:1}); $.ajax({url:'/api/legacy',type:'POST'}); navigator.sendBeacon('/__challenge_fixture/telemetry', 't=1'); fetch('https://booking.com/__challenge_fixture/telemetry',{method:"POST"})]], headers={['Content-Type']='application/javascript'}}
+    elseif url == 'https://r-xx.bstatic.com/static/app-extra.js' then
+        return {status=200, body=[[var APP_URLS={CHECKOUT:"/api/checkout"}; fresa({uri:"/fresa/extranet/inbox/send_message",method:"POST",data:e}); c.axios.request({method:"POST",url:APP_URLS.CHECKOUT}); fresa({uri:"https://booking.com/__challenge_bundle/telemetry",method:"POST"})]], headers={['Content-Type']='application/javascript'}}
     elseif url == 'https://admin.booking.com/static/chunk.js' then
         return {status=200, body=[[fetch('/gateway/rates')]], headers={['Content-Type']='application/javascript'}}
     elseif url == 'https://admin.booking.com/reservations' then
@@ -218,6 +221,12 @@ if scenario == 'success' or scenario == 'js-built-form' or scenario == 'two-step
     for _, path in ipairs({'/api/checkin','/api/activity','/api/legacy',
                            '/__challenge_fixture/telemetry'}) do
         assert(yaml:find(path, 1, true), 'missing POST endpoint ' .. path)
+    end
+    -- POST endpoints from the trusted cross-origin CDN bundle: options-object
+    -- clients (fresa, axios.request) plus constant-reference resolution.
+    for _, path in ipairs({'/fresa/extranet/inbox/send_message','/api/checkout',
+                           '__challenge_bundle/telemetry'}) do
+        assert(yaml:find(path, 1, true), 'missing CDN bundle POST endpoint ' .. path)
     end
     assert(yaml:find('post:', 1, true), 'missing post method in YAML')
     assert(yaml:find('has-post: true', 1, true), 'restful status missing has-post')

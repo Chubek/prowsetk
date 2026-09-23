@@ -319,6 +319,39 @@ local function no_xcors_requested(args)
     return false
 end
 
+-- Hosts (besides the page origin itself) whose `<script src>` bundles may be
+-- fetched for static endpoint scanning. The extranet app serves its real
+-- client code from Booking's static CDN, so same-origin-only fetching would
+-- ignore nearly every bundle. Entries match exactly or as a parent domain
+-- ("bstatic.com" covers "r-xx.bstatic.com"). Fetched bytes are only scanned
+-- as text, never executed; session cookies stay domain-scoped by the jar, so
+-- page cookies are not sent to these hosts.
+local function extra_script_hosts(args)
+    args = args or {}
+    local raw = args.script_origins
+    if raw == nil or raw == "" then raw = "bstatic.com" end
+    local hosts = {}
+    for entry in tostring(raw):gmatch("[^,%s]+") do
+        hosts[#hosts + 1] = entry:lower()
+    end
+    return hosts
+end
+
+local function host_matches_entry(host, entry)
+    if host == entry then return true end
+    return host:sub(-(#entry + 1)) == "." .. entry
+end
+
+local function script_fetch_allowed(page_url, src, args)
+    if same_origin(page_url, src) then return true end
+    local host = (url_host(src) or ""):lower()
+    if host == "" then return false end
+    for _, entry in ipairs(extra_script_hosts(args)) do
+        if host_matches_entry(host, entry) then return true end
+    end
+    return false
+end
+
 local function filter_booking_tld(endpoints)
     local out = {}
     for _, ep in ipairs(endpoints or {}) do
@@ -717,6 +750,26 @@ local function scan_urls(text, base_url)
     return found
 end
 
+-- Collects quoted `.js` references (webpack chunks, dynamic imports by
+-- path) resolved against a base URL, for bundle-following. Origin gating
+-- is left to the caller via script_fetch_allowed.
+local function scan_js_refs(text, base_url)
+    local found, seen = {}, {}
+    local function add(candidate)
+        local bare = candidate:gsub("[?#].*$", "")
+        if not bare:lower():match("%.js$") then return end
+        local resolved = resolve_url(base_url, candidate)
+        if resolved and not seen[resolved] then
+            seen[resolved] = true
+            found[#found + 1] = resolved
+        end
+    end
+    text = text or ""
+    for quoted in text:gmatch('"([^"]+)"') do add(quoted) end
+    for quoted in text:gmatch("'([^']+)'") do add(quoted) end
+    return found
+end
+
 -- Method-aware POST scan over a fetched body (external script bundle or API
 -- response page). Detects POST forms, fetch/XHR POSTs, sendBeacon calls,
 -- shorthand POST helpers ($.post / axios.post / minified equivalents) and
@@ -727,11 +780,15 @@ end
 -- --no-xcors filter still restricts output to the booking.com TLD when asked.
 -- API-pattern gating is intentionally absent: an explicit non-GET method
 -- outweighs the path heuristic, mirroring the plugin filter rule.
-local function scan_post_endpoints(text, base_url)
+local function scan_post_endpoints(text, base_url, source_url)
+    source_url = source_url or base_url
     local found, seen = {}, {}
     local function add_post(candidate, discovery_method, note, content_type, confidence)
         local resolved = resolve_url(base_url, candidate)
         if not resolved or resolved == "" then return end
+        -- Reject scheme-only fragments from string concatenation
+        -- (e.g. "https://" .. host): absolute URLs need a real host.
+        if resolved:match("^https?://") and (url_host(resolved) or "") == "" then return end
         if no_xcors_only and not is_booking_tld_url(resolved) then return end
         local key = "post\0" .. resolved
         if seen[key] then return end
@@ -740,7 +797,7 @@ local function scan_post_endpoints(text, base_url)
             url = resolved,
             path = path_from_url(resolved),
             method = "post",
-            source = base_url,
+            source = source_url,
             discovery_method = discovery_method,
             confidence = confidence,
             parameters = {},
@@ -867,17 +924,127 @@ local function scan_post_endpoints(text, base_url)
         end
     end
 
+    -- Generic options-object POST scan: anchors on each method:/type: "POST"
+    -- literal and pairs it with the nearest url:/uri: literal within a
+    -- bounded window. Catches config-object clients of any name
+    -- (axios.request, fresa, ...) regardless of key order; pairs farther
+    -- apart are left alone to avoid matching unrelated literals in dense
+    -- bundles. Dotted constant references (url: NS.VALIDATE_URL) resolve
+    -- through the per-body constant map built below.
+    local consts = {}
+    for name, val in text:gmatch('([A-Za-z_$][%w$_]*)%s*:%s*"(/[^"]+)"') do
+        if consts[name] == nil and not val:match("%.js$") then consts[name] = val end
+    end
+    for name, val in text:gmatch("([A-Za-z_$][%w$_]*)%s*:%s*'(/[^']+)'") do
+        if consts[name] == nil and not val:match("%.js$") then consts[name] = val end
+    end
+    for name, val in text:gmatch('([A-Za-z_$][%w$_]*)%s*:%s*"(https?://[^"]+)"') do
+        if consts[name] == nil then consts[name] = val end
+    end
+    local lowered_all = text:lower()
+    local function key_start_ok(at)
+        if at <= 1 then return true end
+        local prev = lowered_all:sub(at - 1, at - 1)
+        return prev == '"' or prev == "'" or prev == "{" or prev == "," or
+               prev == " " or prev == "\t" or prev == "\n" or prev == "("
+    end
+    local function read_literal(at)
+        local q = at
+        while q <= #text and text:sub(q, q):match("%s") do q = q + 1 end
+        local quote = text:sub(q, q)
+        if quote ~= '"' and quote ~= "'" and quote ~= "`" then return nil end
+        local close = text:find(quote, q + 1, true)
+        if close == nil then return nil end
+        return text:sub(q + 1, close - 1)
+    end
+    local function url_literal_ok(url)
+        if type(url) ~= "string" or url == "" then return false end
+        if url:sub(1, 1) == "/" then
+            return not url:match("%.js$") and not url:match("%.css$")
+        end
+        return url:lower():match("^https?://") ~= nil
+    end
+    do
+        local pos = 1
+        while true do
+            local ms = lowered_all:find("method", pos, true)
+            local ts = lowered_all:find("type", pos, true)
+            local ks
+            if ms == nil then ks = ts
+            elseif ts == nil then ks = ms
+            else ks = (ms < ts) and ms or ts end
+            if ks == nil then break end
+            pos = ks + 6
+            if key_start_ok(ks) then
+                local colon = lowered_all:find(":", ks + 6, true)
+                if colon ~= nil and colon - ks <= 14 then
+                    local value = read_literal(colon + 1)
+                    if value ~= nil and value:lower() == "post" then
+                        local from = math.max(1, ks - 800)
+                        local upto = math.min(#text, ks + 400)
+                        local best, best_dist, best_const = nil, nil, false
+                        local function consider(name_at)
+                            if not key_start_ok(name_at) then return end
+                            local ucolon = lowered_all:find(":", name_at + 3, true)
+                            if ucolon == nil or ucolon - name_at > 14 or ucolon > upto then return end
+                            local uval = read_literal(ucolon + 1)
+                            local resolved_val, via_const = nil, false
+                            if url_literal_ok(uval) then
+                                resolved_val = uval
+                            elseif uval == nil then
+                                local r = ucolon + 1
+                                while r <= #text and text:sub(r, r):match("%s") do r = r + 1 end
+                                local ref = text:sub(r, r + 200):match("^([A-Za-z_$][%w$._]*[%w$_])")
+                                if ref ~= nil then
+                                    local leaf = ref:match("[%w$_]+$")
+                                    if leaf ~= nil and consts[leaf] ~= nil then
+                                        resolved_val, via_const = consts[leaf], true
+                                    end
+                                end
+                            end
+                            if resolved_val ~= nil then
+                                local dist = (name_at > ks) and (name_at - ks) or (ks - name_at)
+                                if best_dist == nil or dist < best_dist then
+                                    best, best_dist, best_const = resolved_val, dist, via_const
+                                end
+                            end
+                        end
+                        local upos = from
+                        while true do
+                            local um = lowered_all:find("url", upos, true)
+                            local im = lowered_all:find("uri", upos, true)
+                            local nxt
+                            if um == nil then nxt = im
+                            elseif im == nil then nxt = um
+                            else nxt = (um < im) and um or im end
+                            if nxt == nil or nxt >= upto then break end
+                            consider(nxt)
+                            upos = nxt + 1
+                        end
+                        if best ~= nil then
+                            add_post(best, "script-post",
+                                "heuristically discovered options-object POST in script by Booking.com admin driver" ..
+                                (best_const and " (via constant reference)" or ""),
+                                nil, best_const and 0.55 or 0.65)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     return found
 end
 
-local function inspect_scripts(session, document, page_url, endpoints, seen_endpoints, authenticated_flag)
+local function inspect_scripts(session, document, page_url, endpoints, seen_endpoints, authenticated_flag, args)
     if not document or type(document.query_selector_all) ~= "function" then return end
+    args = args or {}
     local fetched_scripts = 0
     local max_scripts = 32
     local queue, seen_scripts = {}, {}
     for _, script in ipairs(document:query_selector_all("script[src]")) do
         local src = resolve_url(page_url, script:attribute("src"))
-        if src and same_origin(page_url, src) and not seen_scripts[src] then
+        if src and script_fetch_allowed(page_url, src, args) and not seen_scripts[src] then
             if not no_xcors_only or is_booking_tld_url(src) then
                 seen_scripts[src] = true
                 queue[#queue + 1] = src
@@ -891,31 +1058,43 @@ local function inspect_scripts(session, document, page_url, endpoints, seen_endp
         if ok then
             for import_ref in body:gmatch("import%s*%(%s*['\"]([^'\"]+)['\"]%s*%)") do
                 local imported = resolve_url(script_url, import_ref)
-                if imported and same_origin(page_url, imported) and not seen_scripts[imported] then
+                if imported and script_fetch_allowed(page_url, imported, args) and not seen_scripts[imported] then
                     if not no_xcors_only or is_booking_tld_url(imported) then
                         seen_scripts[imported] = true
                         queue[#queue + 1] = imported
                     end
                 end
             end
+            -- Follow further same-bundle-relative chunks (webpack code
+            -- splitting). Resolved against the bundle URL, since chunks live
+            -- next to their parent bundle rather than the page.
+            for _, chunk in ipairs(scan_js_refs(body, script_url)) do
+                if script_fetch_allowed(page_url, chunk, args) and not seen_scripts[chunk] then
+                    if not no_xcors_only or is_booking_tld_url(chunk) then
+                        if fetched_scripts + #queue < max_scripts then
+                            seen_scripts[chunk] = true
+                            queue[#queue + 1] = chunk
+                        end
+                    end
+                end
+            end
             -- Method-aware POST scan first: bundle POST calls are strong
             -- evidence, so a URL explicitly POSTed here must not also be
             -- recorded as a low-evidence GET twin from the blind scan below.
+            -- Relative references resolve against the page (execution
+            -- origin); the bundle URL is kept as provenance source.
             local post_urls = {}
-            for _, ep in ipairs(scan_post_endpoints(body, script_url)) do
+            for _, ep in ipairs(scan_post_endpoints(body, page_url, script_url)) do
                 add_endpoint(endpoints, seen_endpoints, ep, authenticated_flag)
                 post_urls[ep.url] = true
             end
-            for _, url in ipairs(scan_urls(body, script_url)) do
+            for _, url in ipairs(scan_urls(body, page_url)) do
                 if no_xcors_only and not is_booking_tld_url(url) then
                     -- skip: --no-xcors keeps booking.com TLD endpoints only
                 elseif post_urls[url] then
                     -- skip: already recorded as POST from this same body
                 elseif is_api_like(url) then
                     add_endpoint(endpoints, seen_endpoints, make_endpoint(url, script_url), authenticated_flag)
-                elseif path_from_url(url):match("%.js$") and not seen_scripts[url] and fetched_scripts < max_scripts then
-                    seen_scripts[url] = true
-                    queue[#queue + 1] = url
                 end
             end
         end
@@ -1002,7 +1181,7 @@ local function crawl(session, start_url, args, authenticated_flag)
             pages = pages + 1
             local body = select(1, fetch_page(session, item.url))
             local document = load_page(session, item.url, body)
-            inspect_scripts(session, document, item.url, endpoints, seen_endpoints, authenticated_flag)
+            inspect_scripts(session, document, item.url, endpoints, seen_endpoints, authenticated_flag, args)
             local page_spec = add_assistant_browser_options({
                 url = item.url,
                 follow_links = true,

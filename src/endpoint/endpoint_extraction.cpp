@@ -305,21 +305,34 @@ std::vector<ScriptEndpoint> script_endpoints(std::string_view script) {
             ++pos;
         }
         if (says_post) {
-            std::size_t key = lower_window.find("url");
-            while (key != std::string::npos) {
-                const bool key_start =
-                    key == 0 ||
-                    lower_window[key - 1] == '"' ||
-                    lower_window[key - 1] == '\'' ||
-                    lower_window[key - 1] == '{' ||
-                    lower_window[key - 1] == ',' ||
-                    lower_window[key - 1] == ' ' ||
-                    lower_window[key - 1] == '\t' ||
-                    lower_window[key - 1] == '\n';
-                if (key_start) {
-                    break;
+            // Accept a `url:` or a `uri:` sibling key (rpc-style clients
+            // such as fresa use `uri`). Guard against matching inside
+            // longer identifiers (e.g. "security", "fresa_urls").
+            const auto find_key = [&lower_window](const char* name) {
+                std::size_t key = lower_window.find(name);
+                while (key != std::string::npos) {
+                    const bool key_start =
+                        key == 0 ||
+                        lower_window[key - 1] == '"' ||
+                        lower_window[key - 1] == '\'' ||
+                        lower_window[key - 1] == '{' ||
+                        lower_window[key - 1] == ',' ||
+                        lower_window[key - 1] == ' ' ||
+                        lower_window[key - 1] == '\t' ||
+                        lower_window[key - 1] == '\n' ||
+                        lower_window[key - 1] == '(';
+                    if (key_start) {
+                        return key;
+                    }
+                    key = lower_window.find(name, key + 1);
                 }
-                key = lower_window.find("url", key + 1);
+                return std::string::npos;
+            };
+            std::size_t key = find_key("url");
+            const std::size_t uri_key = find_key("uri");
+            if (uri_key != std::string::npos &&
+                (key == std::string::npos || uri_key < key)) {
+                key = uri_key;
             }
             if (key != std::string::npos) {
                 const std::size_t colon = lower_window.find(':', key);
@@ -340,6 +353,123 @@ std::vector<ScriptEndpoint> script_endpoints(std::string_view script) {
             }
         }
         cursor += 6;
+    }
+
+    // Generic options-object POST calls (`axios.request({method: "POST",
+    // url: ...})`, `fresa({uri: ..., method: "POST"})`, and similar
+    // config-object clients). Anchor on each `method:`/`type:` key whose
+    // value is the literal "post", then pair it with the nearest `url:` or
+    // `uri:` quoted literal inside a bounded window. Key order is
+    // irrelevant; pairs farther apart are left alone to avoid matching
+    // unrelated literals in dense bundles.
+    {
+        const auto has_host = [](const std::string& url) {
+            if (url.empty() || url[0] == '/') {
+                return true;
+            }
+            if (url.rfind("http", 0) != 0) {
+                return false;
+            }
+            // Reject scheme-only fragments from string concatenation
+            // (e.g. "https://" + host): absolute URLs need a real host.
+            const std::size_t scheme = url.find("://");
+            if (scheme == std::string::npos) {
+                return false;
+            }
+            const std::size_t host_end =
+                url.find_first_of("/?#:", scheme + 3);
+            return host_end != scheme + 3;
+        };
+        const std::string lower_script = to_lower(std::string(script));
+        const auto is_key_start = [&lower_script](std::size_t at) {
+            if (at == 0) {
+                return true;
+            }
+            const char prev = lower_script[at - 1];
+            return prev == '"' || prev == '\'' || prev == '{' ||
+                   prev == ',' || prev == ' ' || prev == '\t' ||
+                   prev == '\n' || prev == '(';
+        };
+        const auto read_literal_at = [&script, &read_quoted](
+                                         std::size_t at,
+                                         std::string& out) -> bool {
+            std::size_t q = at;
+            while (q < script.size() &&
+                   std::isspace(static_cast<unsigned char>(script[q]))) {
+                ++q;
+            }
+            return read_quoted(q, out) != std::string::npos;
+        };
+        std::size_t pos = 0;
+        while (pos < lower_script.size()) {
+            const std::size_t method_at = lower_script.find("method", pos);
+            const std::size_t type_at = lower_script.find("type", pos);
+            std::size_t key_at = std::string::npos;
+            if (method_at != std::string::npos) {
+                key_at = method_at;
+            }
+            if (type_at != std::string::npos &&
+                (key_at == std::string::npos || type_at < key_at)) {
+                key_at = type_at;
+            }
+            if (key_at == std::string::npos) {
+                break;
+            }
+            pos = key_at + 6;
+            if (!is_key_start(key_at)) {
+                continue;
+            }
+            const std::size_t colon = lower_script.find(':', key_at + 6);
+            if (colon == std::string::npos || colon - key_at > 14) {
+                continue;
+            }
+            std::string value;
+            if (!read_literal_at(colon + 1, value) ||
+                to_lower(value) != "post") {
+                continue;
+            }
+            // Pair with the nearest url:/uri: literal around the anchor.
+            const std::size_t from =
+                key_at > 800 ? key_at - 800 : 0;
+            const std::size_t to =
+                std::min(lower_script.size(), key_at + 400);
+            std::string best;
+            std::size_t best_distance = std::string::npos;
+            for (const char* name : {"url", "uri"}) {
+                std::size_t candidate = lower_script.find(name, from);
+                while (candidate != std::string::npos &&
+                       candidate < to) {
+                    if (is_key_start(candidate)) {
+                        const std::size_t url_colon =
+                            lower_script.find(':', candidate + 3);
+                        if (url_colon != std::string::npos &&
+                            url_colon - candidate <= 14 &&
+                            url_colon < to) {
+                            std::string url;
+                            if (read_literal_at(url_colon + 1, url) &&
+                                !url.empty() &&
+                                (url[0] == '/' ||
+                                 url.rfind("http", 0) == 0) &&
+                                has_host(url)) {
+                                const std::size_t distance =
+                                    candidate > key_at
+                                        ? candidate - key_at
+                                        : key_at - candidate;
+                                if (distance < best_distance) {
+                                    best_distance = distance;
+                                    best = url;
+                                }
+                            }
+                        }
+                    }
+                    candidate =
+                        lower_script.find(name, candidate + 1);
+                }
+            }
+            if (!best.empty()) {
+                endpoints.push_back(ScriptEndpoint{"post", best});
+            }
+        }
     }
 
     // Scan for standalone quoted URL-path strings. Many SPA bundles embed
