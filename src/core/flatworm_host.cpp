@@ -58,6 +58,11 @@ std::shared_ptr<fw::Node> FlatwormScriptHost::resolve(
     return found == registry_.end() ? nullptr : found->second;
 }
 
+ElementHandle FlatwormScriptHost::handle_for_node(
+    const std::shared_ptr<fw::Node>& node) const {
+    return intern(node);
+}
+
 ElementHandle FlatwormScriptHost::intern(
     const std::shared_ptr<fw::Node>& node) const {
     if (node == nullptr) return kNoElement;

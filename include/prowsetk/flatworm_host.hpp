@@ -120,6 +120,16 @@ public:
     ElementHandle create_element(std::string_view tag_name) override;
     ElementHandle create_text_node(std::string_view text) override;
     ElementHandle create_comment(std::string_view text) override;
+
+    // Returns the stable script handle for `node`, interning it on first use.
+    // Lets session-mediated helpers (Session::click_element/type_element)
+    // address C++-side Elements from page script without exposing engine
+    // internals to JavaScript. Handles are invalidated when the document is
+    // reinstalled; interning a stale node yields a detached wrapper whose
+    // events reach no live listeners.
+    ElementHandle handle_for_node(
+        const std::shared_ptr<flatworm::Node>& node) const;
+
     bool append_child(ElementHandle parent, ElementHandle child) override;
     bool remove_child(ElementHandle parent, ElementHandle child) override;
     bool insert_before(ElementHandle parent, ElementHandle node,

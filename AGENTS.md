@@ -295,36 +295,37 @@ the work is not done.
 - Letting `README.md`, `AGENTS.md`, `.gitmodules`, and `cmake/Dependencies.cmake`
   drift apart.
 
-# Additions & Revisions
+---
 
-This section discusses the additions and revisions made to ProwseTk during implementation.
+# Additions & Revisions
 
 ## The IR Emitters
 
-Although ProwseTk is a headles browser and it does not render anything, however, we could opt to have the engine generate an *intermediate representation* for the page it has rendered. By default, ProwseTk support four IRs, but more can be added via the plugin interface. The Lua extensibility engine has a library called `lprowseir` which offers toolsets for handling them. For example, it offers a function-based visitor for ProwseDOM, and it offers a listener for ProwseXAS.
+Although ProwseTk is a headless browser and it does not render anything, the engine can generate an *intermediate representation* for the page. By default, ProwseTk supports four IRs, with more extensible via plugins. The Lua engine exposes `lprowseir` for handling IR pipelines:
 
-- ProwseXAS: An event stream which can be listened to;
-- ProwseDOM: A document object model which can be walked;
-- ProwseVTD: A binary virtual token format which can be dumped;
-- ProwseIML: A S-Expression language with macros which can be expanded;
+- **ProwseXAS:** An event stream which can be listened to.
+- **ProwseDOM:** A document object model which can be walked.
+- **ProwseVTD:** A binary virtual token format which can be dumped.
+- **ProwseIML:** An S-Expression language with macros which can be expanded.
 
-Example of listening to an event stream:
+Example of listening to an event stream in Lua:
 
 ```lua
 lprowseir.xax:AddListener("//tag/td", function() ... end)
 ```
 
-All the listeners and walkers use XPath. We use Pugixml's XPath engine.
+All listeners and walkers use XPath powered by Pugixml's XPath engine.
 
+---
 
 ## The Flatworm Web Platform (Page JS Bindings)
 
 Page JavaScript executes against the **web platform shim**
 (`src/core/web_platform_shim.hpp`), a JavaScript bootstrap installed by the
 QuickJS runtime over handle-based, host-mediated primitives
-(`DocumentScriptHost` in `javascript_runtime.hpp`, implemented by
-`FlatwormScriptHost` in `flatworm_host.hpp`, owned per `Session`). It provides
-`document` (queries, traversal, mutation, `innerHTML`/`outerHTML`,
+(`DocumentScriptHost` in `include/prowsetk/javascript_runtime.hpp`, implemented
+by `FlatwormScriptHost` in `src/core/flatworm_host.hpp`, owned per `Session`).
+It provides `document` (queries, traversal, mutation, `innerHTML`/`outerHTML`,
 `classList`, `dataset`, `style`), element wrappers with listeners and
 synthetic events, synchronous and asynchronous `XMLHttpRequest`, `fetch` with
 `Headers`/`Response`, timers, `navigator`, `location` (assignment and link
@@ -355,12 +356,93 @@ Rules:
 - The plugin ABI and the Lua layer are unaffected: this is page scripting
   only (README "JavaScript Execution").
 
+---
+
+## Synthetic Interaction Driver & SPA Event Cascades
+
+Flatworm does not have a layout tree, rasterizer, or hit-testing subsystem. Modern
+Single Page Applications (React, Vue, Angular, Svelte) attach event listeners
+globally to the document root and track controlled component values via native
+descriptors. In order for synthetic actions executed by Lua drivers (`lprowse`) or
+C++ host controllers to trigger state changes, form validations, and subsequent
+network POST/PUT operations, Flatworm implements a dedicated **Synthetic
+Interaction Driver** inside `web_platform_shim.hpp` and `FlatwormScriptHost`.
+
+### 1. Pointer & Click Cascade Contract
+Never dispatch an isolated `click` event. Calling `element.click()` or
+`element:click()` must execute the standard browser event sequence in exact order:
+
+1. `pointerover` (`bubbles: true`, `cancelable: true`, `composed: true`)
+2. `pointerenter` (`bubbles: false`, `cancelable: false`)
+3. `pointerdown` (`bubbles: true`, `cancelable: true`, `composed: true`)
+4. `mousedown` (`bubbles: true`, `cancelable: true`, `composed: true`)
+5. `focus` (if element is focusable and not already active)
+6. `pointerup` (`bubbles: true`, `cancelable: true`, `composed: true`)
+7. `mouseup` (`bubbles: true`, `cancelable: true`, `composed: true`)
+8. `click` (`bubbles: true`, `cancelable: true`, `composed: true`)
+
+If the target is a submit control (`<button type="submit">`, `<input type="submit">`,
+or `<button>` within a `<form>`), the shim must trigger a bubbling `submit` event
+on the enclosing `<form>` unless `event.preventDefault()` was invoked during the
+click cascade.
+
+### 2. Controlled Input & Keyboard Cascade (React / Framework Setters)
+Direct assignment (`element.value = "..."`) modifies the DOM property without
+triggering React fiber or Vue reactive trackers. Synthetic input interactions
+(`element:type(text)` or `element:set_value(text)`) must invoke the native
+prototype setter before firing the input stream:
+
+```javascript
+// Native descriptor bypass inside web_platform_shim.hpp
+function __prowsetkSetValue(element, value) {
+  const proto = Object.getPrototypeOf(element);
+  const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+  if (descriptor && descriptor.set) {
+    descriptor.set.call(element, value);
+  } else {
+    element.value = value;
+  }
+}
+```
+
+The keyboard/typing cascade must execute:
+1. `focus`
+2. For each character / chunk:
+   - `keydown` (`key`, `code`, `bubbles: true`)
+   - `keypress` (if printable)
+   - Update value via `__prowsetkSetValue`
+   - `input` (`bubbles: true`, `composed: true`, `inputType: 'insertText'`)
+   - `keyup` (`key`, `code`, `bubbles: true`)
+3. `change` (`bubbles: true`, `cancelable: false` on commit/blur)
+4. `blur` (on focus lost)
+
+### 3. Layout-Free Visibility & Interactability Heuristics
+Because CSS layout is a stub, physical coordinate hit-testing is unavailable. The
+shim and host determine element interactability through semantic DOM heuristics:
+
+- **Visibility:** Evaluated via inline styles and attributes. An element is
+  considered non-interactable if `style.display === 'none'`,
+  `style.visibility === 'hidden'`, `hasAttribute('hidden')`, or if any ancestor
+  matches these conditions.
+- **Disabled:** An element is non-interactable if `disabled` or `aria-disabled="true"`.
+- Interacting with an element that fails heuristic interactability must fail fast
+  with a documented error code rather than silently dropping events.
+
+### 4. Microtask & Network Draining Lifecycle
+Every synthetic action dispatched via C++ (`Element::click`, `Element::type`) or
+Lua (`elem:click()`, `elem:type()`) must conclude with a bounded call to
+`__prowsetkFlush()`. This drains pending QuickJS promise jobs, timer queues,
+and microtasks, ensuring network requests (`fetch`/`XHR`) triggered by the
+framework reach the host `Session` and `NetworkClient` before the host action
+returns.
+
+---
+
 ## Booking.com example and HTTPS
 
 `examples/booking-dotcom-admin-scrape/scrape-booking-dotcom-admin.lua` is an example driver
 registered by `examples/booking-dotcom-admin-scrape/Prowse.toml`. It follows the `main(args)` and
-offline `html`
-contracts despite living in `examples/`. Load dotenv before looking up its
+offline `html` contracts despite living in `examples/`. Load dotenv before looking up its
 Booking.com credentials; never log those values. Require positive login
 evidence before exporting a live page. Try imported session cookies before
 requiring credentials, follow bounded trusted HTTPS redirects for confirmation,
@@ -378,6 +460,8 @@ Keep TLS dependency discovery in `cmake/Dependencies.cmake`, default trust and
 hostname verification enabled, and the HTTP-only build usable without OpenSSL.
 TLS tests use a local test CA and loopback peer; no public network is required.
 
+---
+
 ## Assistant Browser Handoff
 
 `Prowse.toml` may define `[assistant-browser]` (or `[assistant_browser]`) with
@@ -392,10 +476,12 @@ session or plugin. Do not treat a successful handoff as authoritative proof of
 coverage, and do not log or export cookies, tokens, form values, or challenge
 content.
 
+---
+
 ## Anti-bot detection and Captcha Handler
 
 Core anti-bot detection is heuristic and reports provenance, confidence, and
-signals through `AntiBotDetector`, `Session::anti_bot_detection()`, and the
+signals through `AntiBotDetector`, `Session:detect_anti_bot`, and the
 `anti_bot_detected` event. Do not present detections as authoritative proof.
 
 `plugins/captcha-handler` builds on that subsystem and exposes host-mediated
@@ -403,6 +489,40 @@ handling plans only. It may prompt a user, call a configured solver API, dispatc
 a webhook, invoke a Lua callback, reuse a pre-solved token, reuse a cookie
 session, wait for clearance, or abort and report. Solver keys, cookies, tokens,
 and form values remain secret-bearing inputs and must not be logged or emitted.
+
+---
+
+## RESTful resolver and Booking.com application
+
+`plugins/restful-resolver` resolves scraped endpoints iteratively through the
+owning `Session` until a full RESTful surface (at least one GET and at least
+one POST) is discovered, or until `max_rounds`/`max_requests` is exhausted.
+Seeds come from `EndpointExtractor`; each round issues host-mediated GET
+probes, follows API-like JSON references, and re-parses HTML bodies so POST
+forms and script POST calls surface with native methods and provenance. A POST
+for an already-fetched URL counts without refetching; cross-origin URLs are
+rejected unless `allow_cross_origin` is set from the current document. The handoff is user-approved by default:
+prompt on the CLI, launch the configured browser command with the page URL, wait
+for the user to finish, then continue with the data explicitly available to the
+session or plugin. Do not treat a successful handoff as authoritative proof of
+coverage, and do not log or export cookies, tokens, form values, or challenge
+content.
+
+---
+
+## Anti-bot detection and Captcha Handler
+
+Core anti-bot detection is heuristic and reports provenance, confidence, and
+signals through `AntiBotDetector`, `Session:detect_anti_bot`, and the
+`anti_bot_detected` event. Do not present detections as authoritative proof.
+
+`plugins/captcha-handler` builds on that subsystem and exposes host-mediated
+handling plans only. It may prompt a user, call a configured solver API, dispatch
+a webhook, invoke a Lua callback, reuse a pre-solved token, reuse a cookie
+session, wait for clearance, or abort and report. Solver keys, cookies, tokens,
+and form values remain secret-bearing inputs and must not be logged or emitted.
+
+---
 
 ## RESTful resolver and Booking.com application
 
@@ -420,8 +540,4 @@ Discovery is heuristic, never authoritative.
 
 `examples/booking-dotcom-admin-scrape` registers the plugin in its
 `Prowse.toml` and applies it after the crawl via
-`lua/restful_resolver.lua`: `resolve_until_restful` merges probed endpoints
-under the existing `max_api_depth`/`max_api_requests` budget plus
-`max_resolve_rounds`, never throws (seeds are kept on failure), and records
-the outcome in `x-prowsetk-restful`. Offline `html` runs skip probing and
-report seed-level GET/POST status only.
+`lua/restful_resolver.lua`: `resolve_until

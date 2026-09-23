@@ -1,6 +1,8 @@
 #include "prowsetk/document.hpp"
+#include "prowsetk/browser.hpp"
 
 #include <algorithm>
+#include <cctype>
 
 #include "flatworm/css_selector.hpp"
 #include "flatworm/dom_internal.hpp"
@@ -20,6 +22,65 @@ std::shared_ptr<Element> wrap(const std::shared_ptr<fw::Node>& node) {
 
 bool is_element_node(const std::shared_ptr<fw::Node>& node) {
     return node != nullptr && node->is_element();
+}
+
+// Layout-free interactability heuristic shared by Element::click and
+// Element::type (README "Synthetic Interaction Driver & SPA Event Cascades",
+// section 3). Mirrors the web platform shim's `isInteractable`: an element is
+// non-interactable when it or any ancestor carries `display: none` or
+// `visibility: hidden` inline styles, a `hidden` attribute, or
+// `disabled`/`aria-disabled="true"`. Style matching is ASCII
+// case-insensitive and tolerates whitespace around the colon.
+bool node_interactable(const std::shared_ptr<fw::Node>& node) {
+    auto current = node;
+    while (current != nullptr && current->is_element()) {
+        if (current->attribute("hidden") != nullptr ||
+            current->attribute("disabled") != nullptr) {
+            return false;
+        }
+        const std::string* aria = current->attribute("aria-disabled");
+        if (aria != nullptr && *aria == "true") {
+            return false;
+        }
+        const std::string* style = current->attribute("style");
+        if (style != nullptr) {
+            std::string folded;
+            folded.reserve(style->size());
+            for (char c : *style) {
+                folded.push_back(static_cast<char>(
+                    std::tolower(static_cast<unsigned char>(c))));
+            }
+            auto declaration_hides = [&](std::string_view property,
+                                         std::string_view value) {
+                std::size_t pos = 0;
+                while ((pos = folded.find(property, pos)) != std::string::npos) {
+                    // Require a declaration boundary before the property name.
+                    if (pos != 0 && folded[pos - 1] != ';' &&
+                        folded[pos - 1] != ' ' && folded[pos - 1] != '\t') {
+                        ++pos;
+                        continue;
+                    }
+                    std::size_t colon = pos + property.size();
+                    while (colon < folded.size() &&
+                           (folded[colon] == ' ' || folded[colon] == '\t')) {
+                        ++colon;
+                    }
+                    if (colon < folded.size() && folded[colon] == ':' &&
+                        folded.compare(colon + 1, value.size(), value) == 0) {
+                        return true;
+                    }
+                    pos += property.size();
+                }
+                return false;
+            };
+            if (declaration_hides("display", "none") ||
+                declaration_hides("visibility", "hidden")) {
+                return false;
+            }
+        }
+        current = current->shared_parent();
+    }
+    return true;
 }
 
 }  // namespace
@@ -273,6 +334,37 @@ void Element::set_text(std::string_view value) {
     node_->children.push_back(text);
     node_->report_mutation(
         fw::MutationInfo{"text-set", node_->name, {}, std::string(value)});
+}
+
+bool Element::click() {
+    // Fail-fast interactability gate (README "Synthetic Interaction Driver &
+    // SPA Event Cascades", section 3). A standalone Element carries no script
+    // host, so the full pointer cascade is dispatched through
+    // Session::click_element; here a non-interactable element fails fast and
+    // an interactable one reports false to signal that no script dispatch
+    // occurred without a session.
+    if (node_ == nullptr || !node_interactable(node_)) {
+        return false;
+    }
+    return false;
+}
+
+bool Element::type(std::string_view /*text*/) {
+    // Same fail-fast contract as Element::click. The keyboard cascade with
+    // native-setter bypass and microtask draining runs through
+    // Session::type_element.
+    if (node_ == nullptr || !node_interactable(node_)) {
+        return false;
+    }
+    return false;
+}
+
+bool Element::click(class Session& session) {
+    return session.click_element(shared_from_this());
+}
+
+bool Element::type(class Session& session, std::string_view text) {
+    return session.type_element(shared_from_this(), text);
 }
 
 Document::Document(std::shared_ptr<flatworm::Node> root)

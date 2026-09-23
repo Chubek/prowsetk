@@ -47,10 +47,12 @@ struct LuaSession {
 
 struct LuaDocument {
     std::shared_ptr<Document>* document = nullptr;
+    std::shared_ptr<Session>* session = nullptr;
 };
 
 struct LuaElement {
     std::shared_ptr<Element>* element = nullptr;
+    std::shared_ptr<Session>* session = nullptr;
 };
 
 struct LuaExtractor {
@@ -148,8 +150,10 @@ LuaEndpointResult* check_endpoint_result(lua_State* L, int index) {
         luaL_checkudata(L, index, kEndpointResultMeta));
 }
 
-void push_element(lua_State* L, const std::shared_ptr<Element>& element);
-void push_document(lua_State* L, const std::shared_ptr<Document>& document);
+void push_element(lua_State* L, const std::shared_ptr<Element>& element,
+                   const std::shared_ptr<Session>* session = nullptr);
+void push_document(lua_State* L, const std::shared_ptr<Document>& document,
+                    const std::shared_ptr<Session>* session = nullptr);
 LuaSession* check_session(lua_State* L, int index);
 LuaDocument* check_document(lua_State* L, int index);
 
@@ -161,7 +165,8 @@ void push_endpoint_result(lua_State* L, EndpointExtractionResult result) {
     luaL_setmetatable(L, kEndpointResultMeta);
 }
 
-void push_xpath_value(lua_State* L, const XPathValue& value) {
+void push_xpath_value(lua_State* L, const XPathValue& value,
+                    const std::shared_ptr<Session>* session = nullptr) {
     switch (value.type) {
         case XPathValueType::String:
             lua_pushlstring(L, value.string_value.c_str(),
@@ -177,7 +182,7 @@ void push_xpath_value(lua_State* L, const XPathValue& value) {
         default:
             lua_createtable(L, static_cast<int>(value.nodes.size()), 0);
             for (std::size_t i = 0; i < value.nodes.size(); ++i) {
-                push_element(L, value.nodes[i]);
+                push_element(L, value.nodes[i], session);
                 lua_rawseti(L, -2, static_cast<int>(i) + 1);
             }
             return;
@@ -329,7 +334,8 @@ void push_session(lua_State* L, const std::shared_ptr<Session>& session) {
     luaL_setmetatable(L, kSessionMeta);
 }
 
-void push_document(lua_State* L, const std::shared_ptr<Document>& document) {
+void push_document(lua_State* L, const std::shared_ptr<Document>& document,
+                   const std::shared_ptr<Session>* session) {
     if (document == nullptr) {
         lua_pushnil(L);
         return;
@@ -338,10 +344,17 @@ void push_document(lua_State* L, const std::shared_ptr<Document>& document) {
         static_cast<LuaDocument*>(lua_newuserdatauv(L, sizeof(LuaDocument), 0));
     ::new (static_cast<void*>(userdata)) LuaDocument{};
     userdata->document = new std::shared_ptr<Document>(document);
+    // Owning copy: elements and documents obtained through a session keep
+    // the session alive so session-mediated helpers (element click/type)
+    // never dereference a collected session userdata.
+    if (session != nullptr && *session != nullptr) {
+        userdata->session = new std::shared_ptr<Session>(*session);
+    }
     luaL_setmetatable(L, kDocumentMeta);
 }
 
-void push_element(lua_State* L, const std::shared_ptr<Element>& element) {
+void push_element(lua_State* L, const std::shared_ptr<Element>& element,
+                  const std::shared_ptr<Session>* session) {
     if (element == nullptr) {
         lua_pushnil(L);
         return;
@@ -350,6 +363,9 @@ void push_element(lua_State* L, const std::shared_ptr<Element>& element) {
         static_cast<LuaElement*>(lua_newuserdatauv(L, sizeof(LuaElement), 0));
     ::new (static_cast<void*>(userdata)) LuaElement{};
     userdata->element = new std::shared_ptr<Element>(element);
+    if (session != nullptr && *session != nullptr) {
+        userdata->session = new std::shared_ptr<Session>(*session);
+    }
     luaL_setmetatable(L, kElementMeta);
 }
 
@@ -505,7 +521,7 @@ int lprowseir_dom_walk(lua_State* L) {
         if (value.type == XPathValueType::NodeSet) {
             for (const auto& node : value.nodes) {
                 lua_pushvalue(L, callback_index);
-                push_element(L, node);
+                push_element(L, node, nullptr);
                 if (lua_pcall(L, 1, 0, 0) == LUA_OK) {
                     ++invoked;
                 } else {
@@ -630,7 +646,7 @@ int browser_install_extension(lua_State* L) {
                 lua_pop(L, 1);
                 return;
             }
-            push_document(L, document);
+            push_document(L, document, nullptr);
             if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
                 lua_pop(L, 1);
             }
@@ -736,7 +752,7 @@ int session_load_html(lua_State* L) {
 int session_document(lua_State* L) {
     return protect(L, [&]() -> int {
         auto* userdata = check_session(L, 1);
-        push_document(L, (*userdata->session)->document());
+        push_document(L, (*userdata->session)->document(), userdata->session);
         return 1;
     });
 }
@@ -948,6 +964,8 @@ int document_gc(lua_State* L) {
     auto* userdata = check_document(L, 1);
     delete userdata->document;
     userdata->document = nullptr;
+    delete userdata->session;
+    userdata->session = nullptr;
     return 0;
 }
 
@@ -983,7 +1001,8 @@ int document_query_selector(lua_State* L) {
     return protect(L, [&]() -> int {
         auto* userdata = check_document(L, 1);
         const char* selector = luaL_checkstring(L, 2);
-        push_element(L, (*userdata->document)->query_selector(selector));
+        push_element(L, (*userdata->document)->query_selector(selector),
+                     userdata->session);
         return 1;
     });
 }
@@ -997,7 +1016,7 @@ int document_query_selector_all(lua_State* L) {
         lua_createtable(L, static_cast<int>(elements.size()), 0);
         int index = 1;
         for (const auto& element : elements) {
-            push_element(L, element);
+            push_element(L, element, userdata->session);
             lua_rawseti(L, -2, index++);
         }
         return 1;
@@ -1007,7 +1026,8 @@ int document_query_selector_all(lua_State* L) {
 int document_get_element_by_id(lua_State* L) {
     auto* userdata = check_document(L, 1);
     const char* id = luaL_checkstring(L, 2);
-    push_element(L, (*userdata->document)->get_element_by_id(id));
+    push_element(L, (*userdata->document)->get_element_by_id(id),
+                 userdata->session);
     return 1;
 }
 
@@ -1028,7 +1048,7 @@ int document_links(lua_State* L) {
     lua_createtable(L, static_cast<int>(links.size()), 0);
     int index = 1;
     for (const auto& link : links) {
-        push_element(L, link);
+        push_element(L, link, userdata->session);
         lua_rawseti(L, -2, index++);
     }
     return 1;
@@ -1036,7 +1056,7 @@ int document_links(lua_State* L) {
 
 int document_root(lua_State* L) {
     auto* userdata = check_document(L, 1);
-    push_element(L, (*userdata->document)->root());
+    push_element(L, (*userdata->document)->root(), userdata->session);
     return 1;
 }
 
@@ -1046,7 +1066,7 @@ int document_get_elements_by_tag_name(lua_State* L) {
     const auto elements = (*userdata->document)->get_elements_by_tag_name(tag);
     lua_createtable(L, static_cast<int>(elements.size()), 0);
     for (std::size_t i = 0; i < elements.size(); ++i) {
-        push_element(L, elements[i]);
+        push_element(L, elements[i], userdata->session);
         lua_rawseti(L, -2, static_cast<int>(i) + 1);
     }
     return 1;
@@ -1057,7 +1077,7 @@ int document_forms(lua_State* L) {
     const auto forms = (*userdata->document)->forms();
     lua_createtable(L, static_cast<int>(forms.size()), 0);
     for (std::size_t i = 0; i < forms.size(); ++i) {
-        push_element(L, forms[i]);
+        push_element(L, forms[i], userdata->session);
         lua_rawseti(L, -2, static_cast<int>(i) + 1);
     }
     return 1;
@@ -1068,7 +1088,7 @@ int document_scripts(lua_State* L) {
     const auto scripts = (*userdata->document)->scripts();
     lua_createtable(L, static_cast<int>(scripts.size()), 0);
     for (std::size_t i = 0; i < scripts.size(); ++i) {
-        push_element(L, scripts[i]);
+        push_element(L, scripts[i], userdata->session);
         lua_rawseti(L, -2, static_cast<int>(i) + 1);
     }
     return 1;
@@ -1088,7 +1108,7 @@ int document_resource_urls(lua_State* L) {
 int document_create_element(lua_State* L) {
     auto* userdata = check_document(L, 1);
     const char* tag = luaL_checkstring(L, 2);
-    push_element(L, (*userdata->document)->create_element(tag));
+    push_element(L, (*userdata->document)->create_element(tag), userdata->session);
     return 1;
 }
 
@@ -1096,6 +1116,8 @@ int element_gc(lua_State* L) {
     auto* userdata = check_element(L, 1);
     delete userdata->element;
     userdata->element = nullptr;
+    delete userdata->session;
+    userdata->session = nullptr;
     return 0;
 }
 
@@ -1202,7 +1224,8 @@ int element_query_selector(lua_State* L) {
     return protect(L, [&]() -> int {
         auto* userdata = check_element(L, 1);
         const char* selector = luaL_checkstring(L, 2);
-        push_element(L, (*userdata->element)->query_selector(selector));
+        push_element(L, (*userdata->element)->query_selector(selector),
+                     userdata->session);
         return 1;
     });
 }
@@ -1215,7 +1238,7 @@ int element_query_selector_all(lua_State* L) {
         lua_createtable(L, static_cast<int>(elements.size()), 0);
         int index = 1;
         for (const auto& element : elements) {
-            push_element(L, element);
+            push_element(L, element, userdata->session);
             lua_rawseti(L, -2, index++);
         }
         return 1;
@@ -1228,7 +1251,7 @@ int element_children(lua_State* L) {
     lua_createtable(L, static_cast<int>(children.size()), 0);
     int index = 1;
     for (const auto& child : children) {
-        push_element(L, child);
+        push_element(L, child, userdata->session);
         lua_rawseti(L, -2, index++);
     }
     return 1;
@@ -1236,25 +1259,25 @@ int element_children(lua_State* L) {
 
 int element_parent(lua_State* L) {
     auto* userdata = check_element(L, 1);
-    push_element(L, (*userdata->element)->parent());
+    push_element(L, (*userdata->element)->parent(), userdata->session);
     return 1;
 }
 
 int element_first_child(lua_State* L) {
     auto* userdata = check_element(L, 1);
-    push_element(L, (*userdata->element)->first_child());
+    push_element(L, (*userdata->element)->first_child(), userdata->session);
     return 1;
 }
 
 int element_next_sibling(lua_State* L) {
     auto* userdata = check_element(L, 1);
-    push_element(L, (*userdata->element)->next_sibling());
+    push_element(L, (*userdata->element)->next_sibling(), userdata->session);
     return 1;
 }
 
 int element_previous_sibling(lua_State* L) {
     auto* userdata = check_element(L, 1);
-    push_element(L, (*userdata->element)->previous_sibling());
+    push_element(L, (*userdata->element)->previous_sibling(), userdata->session);
     return 1;
 }
 
@@ -1295,6 +1318,69 @@ int element_matches(lua_State* L) {
     });
 }
 
+// Synthetic interactions (README "Synthetic Interaction Driver & SPA Event
+// Cascades"). Elements obtained through a session carry an owning session
+// reference, so elem:click() and elem:type() dispatch the full shim cascade
+// with microtask draining. Detached elements fall back to the DOM-level
+// fail-fast gates on Element, which report false without a script host.
+int element_click(lua_State* L) {
+    return protect(L, [&]() -> int {
+        auto* userdata = check_element(L, 1);
+        bool dispatched = false;
+        if (userdata->session != nullptr && *userdata->session != nullptr) {
+            dispatched = (*userdata->session)
+                             ->click_element(*userdata->element);
+        } else {
+            dispatched = (*userdata->element)->click();
+        }
+        lua_pushboolean(L, dispatched ? 1 : 0);
+        return 1;
+    });
+}
+
+int element_type(lua_State* L) {
+    return protect(L, [&]() -> int {
+        auto* userdata = check_element(L, 1);
+        const char* text = luaL_checkstring(L, 2);
+        bool dispatched = false;
+        if (userdata->session != nullptr && *userdata->session != nullptr) {
+            dispatched =
+                (*userdata->session)->type_element(*userdata->element, text);
+        } else {
+            dispatched = (*userdata->element)->type(text);
+        }
+        lua_pushboolean(L, dispatched ? 1 : 0);
+        return 1;
+    });
+}
+
+int session_click_element(lua_State* L) {
+    return protect(L, [&]() -> int {
+        auto* session_userdata = check_session(L, 1);
+        auto* element_userdata = check_element(L, 2);
+        lua_pushboolean(
+            L, (*session_userdata->session)
+                       ->click_element(*element_userdata->element)
+                   ? 1
+                   : 0);
+        return 1;
+    });
+}
+
+int session_type_element(lua_State* L) {
+    return protect(L, [&]() -> int {
+        auto* session_userdata = check_session(L, 1);
+        auto* element_userdata = check_element(L, 2);
+        const char* text = luaL_checkstring(L, 3);
+        lua_pushboolean(
+            L, (*session_userdata->session)
+                       ->type_element(*element_userdata->element, text)
+                   ? 1
+                   : 0);
+        return 1;
+    });
+}
+
 int lprowsext_dom_xpath(lua_State* L) {
     return protect(L, [&]() -> int {
         const auto document = document_from(L, 1);
@@ -1303,7 +1389,13 @@ int lprowsext_dom_xpath(lua_State* L) {
             lua_pushnil(L);
             return 1;
         }
-        push_xpath_value(L, evaluate_xpath(*document, expression));
+        const std::shared_ptr<Session>* session = nullptr;
+        if (luaL_testudata(L, 1, kSessionMeta) != nullptr) {
+            session = check_session(L, 1)->session;
+        } else if (luaL_testudata(L, 1, kDocumentMeta) != nullptr) {
+            session = check_document(L, 1)->session;
+        }
+        push_xpath_value(L, evaluate_xpath(*document, expression), session);
         return 1;
     });
 }
@@ -1312,7 +1404,8 @@ int lprowsext_dom_xpath_on_element(lua_State* L) {
     return protect(L, [&]() -> int {
         auto* userdata = check_element(L, 1);
         const char* expression = luaL_checkstring(L, 2);
-        push_xpath_value(L, evaluate_xpath(*(*userdata->element), expression));
+        push_xpath_value(L, evaluate_xpath(*(*userdata->element), expression),
+                         userdata->session);
         return 1;
     });
 }
@@ -1637,6 +1730,8 @@ const luaL_Reg session_methods[] = {
     {"on", session_on},
     {"off", session_off},
     {"capabilities", session_capabilities},
+    {"click_element", session_click_element},
+    {"type_element", session_type_element},
     {"close", session_close},
     {nullptr, nullptr},
 };
@@ -1666,6 +1761,8 @@ const luaL_Reg element_methods[] = {
     {"remove_child", element_remove_child},
     {"set_text", element_set_text},
     {"matches", element_matches},
+    {"click", element_click},
+    {"type", element_type},
     {"xpath", lprowsext_dom_xpath_on_element},
     {nullptr, nullptr},
 };

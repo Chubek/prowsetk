@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cctype>
+#include <cstdio>
 #include <ctime>
 #include <iomanip>
 #include <limits>
@@ -928,6 +929,63 @@ std::string Session::evaluate_js(std::string_view script,
         throw Error(ErrorCode::JavaScriptError, result.error);
     }
     return result.value;
+}
+
+bool Session::click_element(std::shared_ptr<Element> element) {
+    if (closed_ || javascript_ == nullptr || element == nullptr ||
+        !element->valid() || script_host_ == nullptr) {
+        return false;
+    }
+    const ElementHandle handle = script_host_->handle_for_node(element->node());
+    if (handle == kNoElement) {
+        return false;
+    }
+    const std::string script = "(function(){var el=__prowsetk.wrap(" +
+                               std::to_string(handle) +
+                               "); return el ? el.click() : false;})()";
+    const ScriptResult result = javascript_->evaluate(script, ScriptOptions{});
+    return result.ok && result.value == "true";
+}
+
+bool Session::type_element(std::shared_ptr<Element> element,
+                           std::string_view text) {
+    if (closed_ || javascript_ == nullptr || element == nullptr ||
+        !element->valid() || script_host_ == nullptr) {
+        return false;
+    }
+    const ElementHandle handle = script_host_->handle_for_node(element->node());
+    if (handle == kNoElement) {
+        return false;
+    }
+    // Escape the text for JavaScript string literal
+    std::string escaped;
+    escaped.reserve(text.size() * 2);
+    for (char c : text) {
+        switch (c) {
+            case '\\': escaped += "\\\\"; break;
+            case '"': escaped += "\\\""; break;
+            case '\'': escaped += "\\'"; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            case '\b': escaped += "\\b"; break;
+            case '\f': escaped += "\\f"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char buf[7];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x",
+                                  static_cast<unsigned char>(c));
+                    escaped += buf;
+                } else {
+                    escaped += c;
+                }
+        }
+    }
+    const std::string script = "(function(){var el=__prowsetk.wrap(" +
+                               std::to_string(handle) +
+                               "); return el ? el.type(\"" + escaped + "\") : false;})()";
+    const ScriptResult result = javascript_->evaluate(script, ScriptOptions{});
+    return result.ok && result.value == "true";
 }
 
 CookieJar& Session::cookies() noexcept {

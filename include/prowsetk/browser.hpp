@@ -181,6 +181,17 @@ public:
 
     void close();
 
+    // Synthetic interactions for SPA automation (README "Synthetic Interaction
+    // Driver & SPA Event Cascades"). These intern the element's node and
+    // evaluate the web platform shim's click() or type() method on its
+    // wrapper, dispatching the full browser event sequences and concluding
+    // with a bounded __prowsetkFlush() that drains microtasks and network
+    // requests triggered by framework handlers. Return false when the
+    // session is closed, JavaScript is unavailable, the handle is invalid,
+    // or the element is not interactable (hidden, disabled, etc.).
+    bool click_element(std::shared_ptr<Element> element);
+    bool type_element(std::shared_ptr<Element> element, std::string_view text);
+
 private:
     friend class Browser;
     Session(Browser* browser, SessionConfig config, std::string id);

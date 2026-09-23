@@ -1092,15 +1092,182 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     dispatchDOMEvent(this, new FocusEvent('focusout', { bubbles: true }));
   };
   ElementNode.prototype.click = function () {
-    var event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
-    var proceed = dispatchDOMEvent(this, event);
-    if (proceed) runDefaultAction(this, event);
+    if (!isInteractable(this)) {
+      return false;
+    }
+    var clickEvent = dispatchClickCascade(this);
+    if (clickEvent) runDefaultAction(this, clickEvent);
+    try { __prowsetkFlush(); } catch (e) { reportError(e); }
+    return !!clickEvent && !clickEvent.defaultPrevented;
   };
-  ElementNode.prototype.getBoundingClientRect = function () {
-    return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 };
+
+  ElementNode.prototype.type = function (text) {
+    if (!isInteractable(this)) {
+      return false;
+    }
+    var proceed = dispatchTypeCascade(this, String(text == null ? '' : text));
+    try { __prowsetkFlush(); } catch (e) { reportError(e); }
+    return proceed;
   };
-  ElementNode.prototype.scrollIntoView = function () {};
-  ElementNode.prototype.attachShadow = function () { return document.createElement('shadow-root'); };
+
+  // Layout-free interactability heuristics (README "Synthetic Interaction
+  // Driver & SPA Event Cascades" section 3). An element is non-interactable
+  // if it or any ancestor has display:none, visibility:hidden, hidden attribute,
+  // or disabled/aria-disabled="true".
+  function isInteractable(element) {
+    if (!element || !element.__h) return false;
+    var node = element;
+    while (node && node.__h) {
+      var style = H.attr(node.__h, 'style') || '';
+      if (/\bdisplay\s*:\s*none\b/.test(style)) return false;
+      if (/\bvisibility\s*:\s*hidden\b/.test(style)) return false;
+      if (H.hasAttr(node.__h, 'hidden')) return false;
+      if (H.hasAttr(node.__h, 'disabled')) return false;
+      if (H.attr(node.__h, 'aria-disabled') === 'true') return false;
+      var parent = H.parentNode(node.__h);
+      node = parent ? wrap(parent) : null;
+    }
+    return true;
+  }
+
+  // Native prototype setter bypass for controlled inputs (React/Vue/etc.).
+  // See README "Synthetic Interaction Driver & SPA Event Cascades" section 2.
+  // The shim's `value` setter emits its own `input` event; suppress it here so
+  // the type cascade below emits exactly one canonical `input`
+  // (`inputType: 'insertText'`) per character.
+  function __prowsetkSetValue(element, value) {
+    var proto = Object.getPrototypeOf(element);
+    var descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+    element.__settingValue = true;
+    try {
+      if (descriptor && descriptor.set) {
+        descriptor.set.call(element, value);
+      } else {
+        element.value = value;
+      }
+    } finally {
+      element.__settingValue = false;
+    }
+  }
+
+  // Pointer & Click Cascade Contract (README section 1).
+  // Dispatches: pointerover, pointerenter, pointerdown, mousedown, focus,
+  // pointerup, mouseup, click. Returns the click event, or null when an
+  // earlier cancelable stage was canceled. Submit handling is left to the
+  // click default action (`runDefaultAction` -> `requestSubmitForm`), which
+  // fires a cancelable `submit` on the enclosing form only when the click
+  // itself was not canceled.
+  function dispatchClickCascade(element) {
+    var pointerId = 1;
+    var commonInit = { bubbles: true, cancelable: true, composed: true,
+                       pointerId: pointerId, pointerType: 'mouse', isPrimary: true,
+                       button: 0, buttons: 1, clientX: 0, clientY: 0 };
+    var enterInit = { bubbles: false, cancelable: false,
+                      pointerId: pointerId, pointerType: 'mouse', isPrimary: true };
+    var focusInit = { relatedTarget: null };
+    var upInit = { bubbles: true, cancelable: true, composed: true,
+                   pointerId: pointerId, pointerType: 'mouse', isPrimary: true,
+                   button: 0, buttons: 0, clientX: 0, clientY: 0 };
+    var clickInit = { bubbles: true, cancelable: true, composed: true, button: 0 };
+
+    // 1. pointerover
+    if (!dispatchDOMEvent(element, new PointerEvent('pointerover', commonInit))) return null;
+    // 2. pointerenter
+    dispatchDOMEvent(element, new PointerEvent('pointerenter', enterInit));
+    // 3. pointerdown
+    if (!dispatchDOMEvent(element, new PointerEvent('pointerdown', commonInit))) return null;
+    // 4. mousedown
+    if (!dispatchDOMEvent(element, new MouseEvent('mousedown', commonInit))) return null;
+    // 5. focus (if focusable and not already active)
+    var isFocusable = (function (el) {
+      var tag = H.tagName(el.__h);
+      var type = (el.getAttribute('type') || '').toLowerCase();
+      if (tag === 'a' || tag === 'button' || tag === 'input' || tag === 'select' ||
+          tag === 'textarea' || el.hasAttribute('tabindex') || el.hasAttribute('contenteditable')) {
+        return true;
+      }
+      return false;
+    })(element);
+    if (isFocusable && document.activeElement !== element) {
+      var prevActive = document.activeElement;
+      document.activeElement = element;
+      if (prevActive && prevActive !== element && prevActive.__h) {
+        dispatchDOMEvent(prevActive, new FocusEvent('blur', focusInit));
+        dispatchDOMEvent(prevActive, new FocusEvent('focusout', { bubbles: true, relatedTarget: element }));
+      }
+      dispatchDOMEvent(element, new FocusEvent('focus', focusInit));
+      dispatchDOMEvent(element, new FocusEvent('focusin', { bubbles: true, relatedTarget: prevActive || null }));
+    }
+    // 6. pointerup
+    if (!dispatchDOMEvent(element, new PointerEvent('pointerup', upInit))) return null;
+    // 7. mouseup
+    if (!dispatchDOMEvent(element, new MouseEvent('mouseup', upInit))) return null;
+    // 8. click
+    var clickEvent = new MouseEvent('click', clickInit);
+    dispatchDOMEvent(element, clickEvent);
+    return clickEvent;
+  }
+
+  // Controlled Input & Keyboard Cascade (README section 2).
+  // For each character/chunk: focus, keydown, keypress (if printable),
+  // update value via __prowsetkSetValue, input, keyup. Then change and blur.
+  function dispatchTypeCascade(element, text) {
+    var tag = H.tagName(element.__h);
+    var type = (element.getAttribute('type') || '').toLowerCase();
+    var isInput = tag === 'input' || tag === 'textarea' || element.hasAttribute('contenteditable');
+    if (!isInput) return false;
+
+    // Focus first
+    var focusInit = { relatedTarget: null };
+    var prevActive = document.activeElement;
+    document.activeElement = element;
+    if (prevActive && prevActive !== element && prevActive.__h) {
+      dispatchDOMEvent(prevActive, new FocusEvent('blur', focusInit));
+      dispatchDOMEvent(prevActive, new FocusEvent('focusout', { bubbles: true, relatedTarget: element }));
+    }
+    dispatchDOMEvent(element, new FocusEvent('focus', focusInit));
+    dispatchDOMEvent(element, new FocusEvent('focusin', { bubbles: true, relatedTarget: prevActive || null }));
+
+    // Type each character
+    for (var i = 0; i < text.length; ++i) {
+      var ch = text.charAt(i);
+      var code = ch.charCodeAt(0);
+      var key = ch;
+      var keyCode = code;
+      var which = code;
+      var isPrintable = code >= 32 && code <= 126;
+
+      // keydown
+      var keyInit = { key: key, code: 'Key' + key.toUpperCase(), bubbles: true,
+                      ctrlKey: false, shiftKey: false, altKey: false, metaKey: false,
+                      charCode: isPrintable ? code : 0, keyCode: keyCode, which: which };
+      dispatchDOMEvent(element, new KeyboardEvent('keydown', keyInit));
+      // keypress (if printable)
+      if (isPrintable) {
+        dispatchDOMEvent(element, new KeyboardEvent('keypress', keyInit));
+      }
+      // Update value via native setter
+      var currentValue = element.value || '';
+      var newValue = currentValue + ch;
+      __prowsetkSetValue(element, newValue);
+      // input event
+      dispatchDOMEvent(element, new InputEvent('input', { bubbles: true, composed: true,
+                           inputType: 'insertText', data: ch }));
+      // keyup
+      dispatchDOMEvent(element, new KeyboardEvent('keyup', keyInit));
+    }
+
+    // change event on commit
+    dispatchDOMEvent(element, new Event('change', { bubbles: true, cancelable: false }));
+
+    // blur (simulate focus lost after typing)
+    document.activeElement = document.body || null;
+    dispatchDOMEvent(element, new FocusEvent('blur'));
+    dispatchDOMEvent(element, new FocusEvent('focusout', { bubbles: true }));
+
+    return true;
+  }
+
   ElementNode.prototype.getBoundingClientRect = function () {
     return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 };
   };
