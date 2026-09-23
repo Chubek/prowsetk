@@ -175,3 +175,65 @@ TEST(EndpointExtraction, ConfidenceThresholdFiltersResults) {
     EXPECT_TRUE(result.endpoints.empty());
     EXPECT_FALSE(result.warnings.empty());
 }
+
+TEST(EndpointExtraction, DiscoversBeaconAndShorthandPostCalls) {
+    const auto document = parse_html(R"HTML(
+        <script>
+          navigator.sendBeacon('/__challenge_abc123/telemetry', JSON.stringify({t: 1}));
+          fetch("https://booking.com/__challenge_xyz/telemetry", {method: "POST"});
+          $.post('/api/activity', {event: 'click'});
+          $.ajax({url: '/api/legacy', type: 'POST', data: {a: 1}});
+        </script>
+    )HTML",
+                                     "https://example.com/");
+    EndpointExtractor extractor;
+    const auto result = extractor.extract(*document);
+
+    bool found_beacon = false;
+    bool found_fetch = false;
+    bool found_post_helper = false;
+    bool found_ajax = false;
+    for (const auto& endpoint : result.endpoints) {
+        if (endpoint.path == "/__challenge_abc123/telemetry") {
+            found_beacon = true;
+            EXPECT_EQ(endpoint.method, "post");
+        }
+        if (endpoint.path == "/__challenge_xyz/telemetry") {
+            found_fetch = true;
+            EXPECT_EQ(endpoint.method, "post");
+        }
+        if (endpoint.path == "/api/activity") {
+            found_post_helper = true;
+            EXPECT_EQ(endpoint.method, "post");
+        }
+        if (endpoint.path == "/api/legacy") {
+            found_ajax = true;
+            EXPECT_EQ(endpoint.method, "post");
+        }
+    }
+    EXPECT_TRUE(found_beacon);
+    EXPECT_TRUE(found_fetch);
+    EXPECT_TRUE(found_post_helper);
+    EXPECT_TRUE(found_ajax);
+}
+
+TEST(EndpointExtraction, QuotedLiteralAcceptsUnderscorePrefix) {
+    EndpointExtractionOptions options;
+    options.minimum_confidence = 0.25;
+    const auto document = parse_html(R"HTML(
+        <script>
+          var telemetryPath = "/__challenge_abc123/telemetry";
+        </script>
+    )HTML",
+                                     "https://example.com/");
+    EndpointExtractor extractor(options);
+    const auto result = extractor.extract(*document);
+
+    bool found = false;
+    for (const auto& endpoint : result.endpoints) {
+        if (endpoint.path == "/__challenge_abc123/telemetry") {
+            found = true;
+        }
+    }
+    EXPECT_TRUE(found);
+}

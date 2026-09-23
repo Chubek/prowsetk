@@ -178,6 +178,31 @@ TEST(Drivers, BookingDotcomOfflineExtraction) {
     EXPECT_NE(yaml.find("authenticated: false"), std::string::npos);
 }
 
+TEST(Drivers, BookingDotcomOfflinePicksUpPostEndpoints) {
+    if (!LuaRuntime::available()) GTEST_SKIP();
+    LuaRuntime lua;
+    ASSERT_TRUE(lua.run_file(std::string(PROWSETK_SOURCE_DIR) +
+        "/examples/booking-dotcom-admin-scrape/scrape-booking-dotcom-admin.lua").ok) << lua.last_error();
+    const std::string output = std::string(TEST_BINARY_DIR) + "/booking-offline-post.yaml";
+    const std::string postman_output = output + ".postman.json";
+    const auto result = lua.call_function("main", {
+        {"html", "string",
+         "<a href='/reservations'>Reservations</a>"
+         "<script>fetch('/api/hotels')</script>"
+         "<script>navigator.sendBeacon("
+         "'/__challenge_h78IRKX3kpQxScCExxShBNwRUlb/d8c14d4960ca/"
+         "3e0e3952d8f6/telemetry', JSON.stringify({t: 1}));"
+         "fetch('/api/notes', {method: 'POST'});</script>"},
+        {"output", "path", output},
+        {"postman", "path", postman_output}});
+    ASSERT_TRUE(result.ok) << result.error;
+    const auto yaml = read_file(output);
+    EXPECT_NE(yaml.find("__challenge"), std::string::npos);
+    EXPECT_NE(yaml.find("/api/notes"), std::string::npos);
+    EXPECT_NE(yaml.find("post:"), std::string::npos);
+    EXPECT_NE(yaml.find("has-post: true"), std::string::npos);
+}
+
 TEST(Drivers, BookingDotcomLoginAndFailureBoundaries) {
     if (!LuaRuntime::available()) GTEST_SKIP();
     for (const std::string scenario : {

@@ -4,7 +4,8 @@ Native ProwseTk plugin that resolves scraped endpoints iteratively until a
 full RESTful API surface is discovered.
 
 - **Seed:** static discovery through `EndpointExtractor` (links, POST forms,
-  `fetch`/`XMLHttpRequest` methods including `POST`).
+  `fetch`/`XMLHttpRequest` methods including `POST`, `navigator.sendBeacon`,
+  shorthand POST helpers such as `$.post` / `axios.post` / `$.ajax`).
 - **Resolve:** breadth-first GET probes through the owning `Session`
   (`Session::request`, host-mediated `NetworkClient`). JSON bodies that
   reference further API URLs are enqueued; HTML bodies are re-parsed so POST
@@ -36,8 +37,8 @@ print(result.is_complete, result.has_post, #result.endpoints)
 | Key | Default | Meaning |
 |---|---|---|
 | `url` / `html` / `base_url` | `""` | Navigation source (mirrors scrape2oapi) |
-| `api_patterns` | `/api`, `/v1`… `/hotel/hoteladmin`, `/partner-settings` | API-like path markers |
-| `require_api_pattern` | `true` | Drop non-API paths |
+| `api_patterns` | `/api`, `/v1`… `/hotel/hoteladmin`, `/partner-settings`, `/telemetry`, `challenge`, `/beacon`, `/collect` | API-like path markers |
+| `require_api_pattern` | `true` | Drop non-API paths (explicit non-GET methods are always kept) |
 | `max_rounds` | `4` | BFS round budget |
 | `max_requests` | `64` | Network fetch budget |
 | `follow_json_links` | `true` | Enqueue API URLs found in bodies |

@@ -19,9 +19,16 @@ std::string to_lower(std::string value) {
 }
 
 bool looks_like_api_path(const std::string& path) {
-    static const char* const markers[] = {"/api", "/v1", "/v2", "/v3",
-                                          "/graphql", "/rest", "/rpc",
-                                          "/json", ".json", "/data"};
+    static const char* const markers[] = {
+        "/api",       "/v1",         "/v2",
+        "/v3",        "/graphql",    "/rest",
+        "/rpc",       "/json",       ".json",
+        "/data",      "/ajax",       "/gateway",
+        "/service",   "/backend",    "/bff",
+        "/dml",       "/internal",   "/private",
+        "/hotel/hoteladmin",         "/partner-settings",
+        "/telemetry", "challenge",   "/beacon",
+        "/collect"};
     for (const char* marker : markers) {
         if (path.find(marker) != std::string::npos) {
             return true;
@@ -228,6 +235,113 @@ std::vector<ScriptEndpoint> script_endpoints(std::string_view script) {
         cursor += 6;
     }
 
+    // `navigator.sendBeacon(url, ...)` always issues a POST. Challenge and
+    // telemetry beacons (e.g. `/__challenge_.../telemetry`) are typically
+    // sent this way rather than via fetch/XHR, so a dedicated scan keeps
+    // them from being missed or demoted to GET literals.
+    cursor = 0;
+    while ((cursor = script.find("sendBeacon(", cursor)) !=
+           std::string_view::npos) {
+        std::size_t i = cursor + 11;
+        while (i < script.size() &&
+               std::isspace(static_cast<unsigned char>(script[i]))) {
+            ++i;
+        }
+        std::string url;
+        if (read_quoted(i, url) != std::string::npos && !url.empty()) {
+            endpoints.push_back(ScriptEndpoint{"post", url});
+        }
+        cursor += 11;
+    }
+
+    // Shorthand POST helpers (`$.post(url)`, `jQuery.post(url)`,
+    // `axios.post(url)`, ...). The first quoted argument is the target URL
+    // and the call is a POST by construction.
+    cursor = 0;
+    while ((cursor = script.find(".post(", cursor)) != std::string_view::npos) {
+        std::size_t i = cursor + 6;
+        while (i < script.size() &&
+               std::isspace(static_cast<unsigned char>(script[i]))) {
+            ++i;
+        }
+        std::string url;
+        if (read_quoted(i, url) != std::string::npos && !url.empty()) {
+            endpoints.push_back(ScriptEndpoint{"post", url});
+        }
+        cursor += 6;
+    }
+
+    // `$.ajax({url: "...", type: "POST"})` (or `method: "POST"`). Scan a
+    // bounded window for a quoted "post" value tied to a type/method key and
+    // emit the sibling url value as a POST endpoint.
+    cursor = 0;
+    while ((cursor = script.find(".ajax(", cursor)) != std::string_view::npos) {
+        const std::size_t head = cursor + 6;
+        const std::size_t remaining =
+            head < script.size() ? script.size() - head : 0;
+        const std::string_view window =
+            script.substr(head, std::min<std::size_t>(2048, remaining));
+        const std::string lower_window = to_lower(std::string(window));
+        bool says_post = false;
+        std::size_t pos = 0;
+        while ((pos = lower_window.find("post", pos)) != std::string::npos) {
+            const bool quoted_value =
+                pos > 0 && pos + 4 < lower_window.size() &&
+                (lower_window[pos - 1] == '\'' ||
+                 lower_window[pos - 1] == '"') &&
+                (lower_window[pos + 4] == '\'' ||
+                 lower_window[pos + 4] == '"');
+            if (quoted_value) {
+                const std::size_t from =
+                    pos > 32 ? pos - 32 : 0;
+                const std::string context =
+                    lower_window.substr(from, pos - from);
+                if (context.rfind("type") != std::string::npos ||
+                    context.rfind("method") != std::string::npos) {
+                    says_post = true;
+                    break;
+                }
+            }
+            ++pos;
+        }
+        if (says_post) {
+            std::size_t key = lower_window.find("url");
+            while (key != std::string::npos) {
+                const bool key_start =
+                    key == 0 ||
+                    lower_window[key - 1] == '"' ||
+                    lower_window[key - 1] == '\'' ||
+                    lower_window[key - 1] == '{' ||
+                    lower_window[key - 1] == ',' ||
+                    lower_window[key - 1] == ' ' ||
+                    lower_window[key - 1] == '\t' ||
+                    lower_window[key - 1] == '\n';
+                if (key_start) {
+                    break;
+                }
+                key = lower_window.find("url", key + 1);
+            }
+            if (key != std::string::npos) {
+                const std::size_t colon = lower_window.find(':', key);
+                if (colon != std::string::npos) {
+                    std::size_t q = head + colon + 1;
+                    while (q < script.size() &&
+                           std::isspace(
+                               static_cast<unsigned char>(script[q]))) {
+                        ++q;
+                    }
+                    std::string url;
+                    if (read_quoted(q, url) != std::string::npos &&
+                        !url.empty()) {
+                        endpoints.push_back(
+                            ScriptEndpoint{"post", url});
+                    }
+                }
+            }
+        }
+        cursor += 6;
+    }
+
     // Scan for standalone quoted URL-path strings. Many SPA bundles embed
     // routing tables and endpoint references as bare strings (e.g.
     // `"/api/v1/..."` in a switch statement) that are not preceded by
@@ -248,8 +362,14 @@ std::vector<ScriptEndpoint> script_endpoints(std::string_view script) {
     const auto looks_like_quoted_path = [](const std::string& candidate) {
         if (candidate.size() < 4) return false;
         if (candidate[0] != '/') return false;
-        // Must start with a letter after the leading slash.
-        if (!std::isalpha(static_cast<unsigned char>(candidate[1]))) return false;
+        // Must start with a path-ish character after the leading slash.
+        // Letters and digits cover `/api/...`; underscore covers challenge
+        // paths such as `/__challenge_.../telemetry`.
+        const auto first =
+            static_cast<unsigned char>(candidate[1]);
+        if (!std::isalnum(first) && first != '_' && first != '.' &&
+            first != '-' && first != '~')
+            return false;
         // All characters must be valid URL-path characters.
         for (char c : candidate) {
             if (c == '\0') return false;

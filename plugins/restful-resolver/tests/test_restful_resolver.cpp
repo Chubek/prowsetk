@@ -63,12 +63,27 @@ TEST(RestfulResolverApiPath, RecognizesBookingAdminFallbacks) {
     EXPECT_TRUE(restful::is_restful_api_path("/partner-settings/security", {}));
 }
 
+TEST(RestfulResolverApiPath, RecognizesTelemetryAndChallengeFallbacks) {
+    EXPECT_TRUE(restful::is_restful_api_path(
+        "/__challenge_h78IRKX3kpQxScCExxShBNwRUlb/d8c14d4960ca/"
+        "3e0e3952d8f6/telemetry",
+        {}));
+    EXPECT_TRUE(restful::is_restful_api_path("/beacon/collect", {}));
+}
+
 TEST(RestfulResolverApiPath, RejectsOrdinaryPage) {
     EXPECT_FALSE(restful::is_restful_api_path("/products", {}));
 }
 
 TEST(RestfulResolverFilter, KeepsApiEndpointByDefault) {
     EXPECT_EQ(restful::filter_to_api({endpoint()}, {}).size(), 1u);
+}
+
+TEST(RestfulResolverFilter, KeepsPostWithoutApiPatternByDefault) {
+    const auto values =
+        restful::filter_to_api({endpoint("/__challenge_abc/telemetry", "post")}, {});
+    ASSERT_EQ(values.size(), 1u);
+    EXPECT_EQ(values[0].method, "post");
 }
 
 TEST(RestfulResolverFilter, DropsOrdinaryEndpointByDefault) {
@@ -108,6 +123,23 @@ TEST(RestfulResolverDocument, SeedGetPlusPostIsComplete) {
     EXPECT_TRUE(result.has_post);
     EXPECT_TRUE(result.is_complete);
     EXPECT_EQ(result.request_count, 0u);
+}
+
+TEST(RestfulResolverDocument, SeedBeaconPostWithTelemetryPathIsKept) {
+    const auto result = resolve_doc(
+        "<script>fetch('/api/items')</script>"
+        "<script>navigator.sendBeacon('/__challenge_abc/telemetry', 't=1')</script>");
+    EXPECT_TRUE(result.has_get);
+    EXPECT_TRUE(result.has_post);
+    EXPECT_TRUE(result.is_complete);
+    bool found_telemetry = false;
+    for (const auto& endpoint : result.endpoints) {
+        if (endpoint.path == "/__challenge_abc/telemetry") {
+            found_telemetry = true;
+            EXPECT_EQ(endpoint.method, "post");
+        }
+    }
+    EXPECT_TRUE(found_telemetry);
 }
 
 TEST(RestfulResolverDocument, YamlMarksRestfulExtension) {

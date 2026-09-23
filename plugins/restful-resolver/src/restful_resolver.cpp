@@ -27,9 +27,13 @@ bool builtin_api_marker(const std::string& path) {
     static const char* const markers[] = {"/api", "/v1", "/v2", "/v3",
                                           "/graphql", "/rest", "/rpc",
                                           "/json", ".json", "/data",
+                                          "/ajax", "/gateway", "/service",
+                                          "/backend", "/bff", "/dml",
                                           "/internal", "/private",
                                           "/hotel/hoteladmin",
-                                          "/partner-settings"};
+                                          "/partner-settings",
+                                          "/telemetry", "challenge",
+                                          "/beacon", "/collect"};
     const std::string lower = to_lower(path);
     for (const char* m : markers) {
         if (lower.find(m) != std::string::npos) return true;
@@ -199,7 +203,17 @@ std::vector<DiscoveredEndpoint> filter_to_api(
     std::vector<DiscoveredEndpoint> out;
     out.reserve(endpoints.size());
     for (const auto& e : endpoints) {
-        if (is_restful_api_path(e.path, options.api_patterns)) out.push_back(e);
+        if (is_restful_api_path(e.path, options.api_patterns)) {
+            out.push_back(e);
+            continue;
+        }
+        // An explicit non-GET method (POST form, fetch/XHR POST, beacon) is
+        // itself evidence of a backend surface, so it is kept even when the
+        // path carries no API marker. Discovery stays heuristic: provenance
+        // and confidence still mark the endpoint as inferred.
+        if (to_lower(e.method) != "get") {
+            out.push_back(e);
+        }
     }
     return out;
 }
@@ -339,7 +353,8 @@ RestfulResolverResult resolve_from_session(Session& session,
         ep.url = absolute(ep.url);
         if (!origin_allowed(ep.url)) return;
         if (options.require_api_pattern &&
-            !is_restful_api_path(ep.path, options.api_patterns)) {
+            !is_restful_api_path(ep.path, options.api_patterns) &&
+            to_lower(ep.method) == "get") {
             return;
         }
         note_discovered(ep);
@@ -448,7 +463,8 @@ RestfulResolverResult resolve_from_session(Session& session,
                 for (auto& ne :
                      extract_from_html_body(body, call.final_url, options)) {
                     if (options.require_api_pattern &&
-                        !is_restful_api_path(ne.path, options.api_patterns))
+                        !is_restful_api_path(ne.path, options.api_patterns) &&
+                        to_lower(ne.method) == "get")
                         continue;
                     enqueue(ne, item.round + 1);
                 }

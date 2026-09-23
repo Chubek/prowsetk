@@ -26,6 +26,7 @@ local DEFAULT_PATTERNS = {
     "/api", "/v1", "/v2", "/v3", "/graphql", "/rest", "/internal", "/data",
     "/ajax", "/rpc", "/json", "/xml", "/gateway", "/service", "/backend", "/bff",
     "/dml", "/hotel/hoteladmin", "/partner-settings",
+    "/telemetry", "challenge", "/beacon", "/collect",
 }
 
 local function lower(value)
@@ -47,7 +48,8 @@ local function is_api_path(path, patterns)
     end
     for _, m in ipairs({ "/api", "/v1", "/v2", "/v3", "/graphql", "/rest",
         "/rpc", ".json", "/data", "/internal", "/hotel/hoteladmin",
-        "/partner-settings" }) do
+        "/partner-settings", "/telemetry", "challenge", "/beacon",
+        "/collect" }) do
         if pl:find(m, 1, true) then return true end
     end
     return false
@@ -139,6 +141,11 @@ local function filter_to_api(endpoints, opts)
     for _, ep in ipairs(endpoints or {}) do
         if is_api_path(ep.path or path_from_url(ep.url), opts.api_patterns) then
             out[#out + 1] = ep
+        elseif lower(ep.method) ~= "get" then
+            -- An explicit non-GET method (POST form, fetch/XHR POST, beacon)
+            -- is itself evidence of a backend surface; keep it even when the
+            -- path carries no API marker.
+            out[#out + 1] = ep
         end
     end
     return out
@@ -174,16 +181,36 @@ local function api_urls_in_body(body, base_url, opts)
     return found
 end
 
--- Detects POST endpoints declared in an HTML body: form method=post plus
--- fetch/XHR calls with an explicit POST method. Heuristic; never treated as
--- authoritative without the host response.
+-- Detects POST endpoints declared in an HTML body: POST forms, fetch/XHR
+-- calls with an explicit POST method, `navigator.sendBeacon` calls (always
+-- POST, the usual carrier for challenge/telemetry beacons), shorthand POST
+-- helpers (`$.post`, `axios.post`, `$.ajax` with type/method POST).
+-- Heuristic; never treated as authoritative without the host response.
+-- POST endpoints are emitted regardless of the API-pattern gate: an explicit
+-- POST method is itself backend evidence, and the seed filter keeps non-GET
+-- methods unconditionally.
 local function post_endpoints_in_html(body, page_url, opts)
     local out = {}
     if type(body) ~= "string" or body == "" then return out end
     local lowered = body:lower()
     if not lowered:find("<form", 1, true) and not lowered:find("fetch(", 1, true)
-        and not lowered:find(".open(", 1, true) then
+        and not lowered:find(".open(", 1, true)
+        and not lowered:find("sendbeacon(", 1, true)
+        and not lowered:find(".post(", 1, true)
+        and not lowered:find(".ajax(", 1, true) then
         return out
+    end
+    local function emit_post(url, discovery_method, note, content_type)
+        if type(url) ~= "string" or url == "" then return end
+        local resolved = resolve_url(page_url, url) or url
+        local path = path_from_url(resolved)
+        out[#out + 1] = {
+            url = resolved, path = path, method = "post",
+            source = page_url, discovery_method = discovery_method,
+            confidence = 0.65, parameters = {},
+            request_content_type = content_type,
+            notes = { note },
+        }
     end
     for tag in body:gmatch("<[Ff][Oo][Rr][Mm][^>]*>") do
         local action = tag:match('[Aa][Cc][Tt][Ii][Oo][Nn]%s*=%s*"([^"]+)"')
@@ -195,40 +222,80 @@ local function post_endpoints_in_html(body, page_url, opts)
         if lower(method or "") == "post" then
             local url = resolve_url(page_url, action or page_url) or (action or page_url)
             local path = path_from_url(url)
-            if not opts.require_api_pattern or is_api_path(path, opts.api_patterns) then
-                out[#out + 1] = {
-                    url = url, path = path, method = "post",
-                    source = page_url, discovery_method = "resolved-html-form",
-                    confidence = 0.75, parameters = {},
-                    request_content_type = "application/x-www-form-urlencoded",
-                    notes = { "heuristically discovered POST form in resolved page" },
-                }
-            end
-        end
-    end
-    for url in body:gmatch('[Ff][Ee][Tt][Cc][Hh]%s*%(%s*"([^"]+)"[^)]*[Mm][Ee][Tt][Hh][Oo][Dd]%s*"%s*:%s*"[Pp][Oo][Ss][Tt]"') do
-        local resolved = resolve_url(page_url, url) or url
-        local path = path_from_url(resolved)
-        if not opts.require_api_pattern or is_api_path(path, opts.api_patterns) then
             out[#out + 1] = {
-                url = resolved, path = path, method = "post",
-                source = page_url, discovery_method = "resolved-script-post",
-                confidence = 0.65, parameters = {},
-                notes = { "heuristically discovered fetch POST in resolved page" },
+                url = url, path = path, method = "post",
+                source = page_url, discovery_method = "resolved-html-form",
+                confidence = 0.75, parameters = {},
+                request_content_type = "application/x-www-form-urlencoded",
+                notes = { "heuristically discovered POST form in resolved page" },
             }
         end
     end
+    -- fetch(url, {...method: "POST"...}): double- and single-quoted URLs with
+    -- quoted or unquoted option keys.
+    for url in body:gmatch('[Ff][Ee][Tt][Cc][Hh]%s*%(%s*"([^"]+)"[^)]-[Mm][Ee][Tt][Hh][Oo][Dd]%s-:%s-["\'][Pp][Oo][Ss][Tt]') do
+        emit_post(url, "resolved-script-post",
+            "heuristically discovered fetch POST in resolved page")
+    end
+    for url in body:gmatch("[Ff][Ee][Tt][Cc][Hh]%s*%(%s*'([^']+)'[^)]-[Mm][Ee][Tt][Hh][Oo][Dd]%s-:%s-['\"][Pp][Oo][Ss][Tt]") do
+        emit_post(url, "resolved-script-post",
+            "heuristically discovered fetch POST in resolved page")
+    end
+    -- Legacy double-quoted pattern retained for compatibility.
+    for url in body:gmatch('[Ff][Ee][Tt][Cc][Hh]%s*%(%s*"([^"]+)"[^)]*[Mm][Ee][Tt][Hh][Oo][Dd]%s*"%s*:%s*"[Pp][Oo][Ss][Tt]"') do
+        emit_post(url, "resolved-script-post",
+            "heuristically discovered fetch POST in resolved page")
+    end
+    -- XHR open(method, url): double- and single-quoted forms.
     for method, url in body:gmatch('%.[Oo][Pp][Ee][Nn]%s*%(%s*"([^"]+)"%s*,%s*"([^"]+)"') do
         if lower(method) == "post" then
-            local resolved = resolve_url(page_url, url) or url
-            local path = path_from_url(resolved)
-            if not opts.require_api_pattern or is_api_path(path, opts.api_patterns) then
-                out[#out + 1] = {
-                    url = resolved, path = path, method = "post",
-                    source = page_url, discovery_method = "resolved-xhr-post",
-                    confidence = 0.65, parameters = {},
-                    notes = { "heuristically discovered XHR POST in resolved page" },
-                }
+            emit_post(url, "resolved-xhr-post",
+                "heuristically discovered XHR POST in resolved page")
+        end
+    end
+    for method, url in body:gmatch("%.[Oo][Pp][Ee][Nn]%s*%(%s*'([^']+)'%s*,%s*'([^']+)'") do
+        if lower(method) == "post" then
+            emit_post(url, "resolved-xhr-post",
+                "heuristically discovered XHR POST in resolved page")
+        end
+    end
+    -- navigator.sendBeacon(url, ...): always POST.
+    for url in body:gmatch('[Ss][Ee][Nn][Dd][Bb][Ee][Aa][Cc][Oo][Nn]%s*%(%s*"([^"]+)"') do
+        emit_post(url, "resolved-beacon-post",
+            "heuristically discovered sendBeacon POST in resolved page")
+    end
+    for url in body:gmatch("[Ss][Ee][Nn][Dd][Bb][Ee][Aa][Cc][Oo][Nn]%s*%(%s*'([^']+)'") do
+        emit_post(url, "resolved-beacon-post",
+            "heuristically discovered sendBeacon POST in resolved page")
+    end
+    -- Shorthand POST helpers: $.post(url), jQuery.post(url), axios.post(url).
+    for url in body:gmatch('%$%.[Pp][Oo][Ss][Tt]%s*%(%s*"([^"]+)"') do
+        emit_post(url, "resolved-script-post",
+            "heuristically discovered shorthand POST in resolved page")
+    end
+    for url in body:gmatch("%$%.[Pp][Oo][Ss][Tt]%s*%(%s*'([^']+)'") do
+        emit_post(url, "resolved-script-post",
+            "heuristically discovered shorthand POST in resolved page")
+    end
+    for url in body:gmatch('[Aa][Xx][Ii][Oo][Ss]%.[Pp][Oo][Ss][Tt]%s*%(%s*"([^"]+)"') do
+        emit_post(url, "resolved-script-post",
+            "heuristically discovered shorthand POST in resolved page")
+    end
+    for url in body:gmatch("[Aa][Xx][Ii][Oo][Ss]%.[Pp][Oo][Ss][Tt]%s*%(%s*'([^']+)'") do
+        emit_post(url, "resolved-script-post",
+            "heuristically discovered shorthand POST in resolved page")
+    end
+    -- $.ajax({url: "...", type: "POST"}): balanced-brace window, either key
+    -- order, either quote style.
+    for opts in body:gmatch('%$%.[Aa][Jj][Aa][Xx]%s*%((%b{})') do
+        local lowered_opts = lower(opts)
+        if lowered_opts:find('["\']?type["\']?%s*:%s*["\']post["\']')
+            or lowered_opts:find('["\']?method["\']?%s*:%s*["\']post["\']') then
+            local url = opts:match('[Uu][Rr][Ll]%s*:%s*"([^"]+)"')
+                or opts:match("[Uu][Rr][Ll]%s*:%s*'([^']+)'")
+            if url then
+                emit_post(url, "resolved-script-post",
+                    "heuristically discovered ajax POST in resolved page")
             end
         end
     end
@@ -354,7 +421,8 @@ function restful_resolver.resolve(session, spec)
         if visited[resolved_url] ~= nil then return end
         local path = path_from_url(resolved_url)
         if opts.require_api_pattern
-            and not is_api_path(path, opts.api_patterns) then
+            and not is_api_path(path, opts.api_patterns)
+            and lower((template or {}).method or "get") == "get" then
             return
         end
         visited[resolved_url] = false

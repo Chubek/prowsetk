@@ -252,7 +252,8 @@ local function is_api_like(url)
     for _, marker in ipairs({
         "/api", "/v1", "/v2", "/v3", "/graphql", "/rest", "/rpc", "/json",
         "/data", "/internal", "/ajax", "/gateway", "/service", "/backend",
-        "/bff", "/dml", "/hotel/hoteladmin", "/partner-settings"
+        "/bff", "/dml", "/hotel/hoteladmin", "/partner-settings",
+        "/telemetry", "challenge", "/beacon", "/collect"
     }) do
         if lower:find(marker, 1, true) then return true end
     end

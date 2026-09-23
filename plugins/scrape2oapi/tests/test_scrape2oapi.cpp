@@ -113,6 +113,16 @@ TEST(Scrape2OapiApiPath, RecognizesBookingAdminFallbacks) {
     EXPECT_TRUE(scrape::is_api_path("/partner-settings/security", {}));
 }
 
+TEST(Scrape2OapiApiPath, RecognizesTelemetryAndChallengeFallbacks) {
+    EXPECT_TRUE(scrape::is_api_path(
+        "/__challenge_h78IRKX3kpQxScCExxShBNwRUlb/d8c14d4960ca/"
+        "3e0e3952d8f6/telemetry",
+        {}));
+    EXPECT_TRUE(scrape::is_api_path("/challenge/telemetry", {}));
+    EXPECT_TRUE(scrape::is_api_path("/beacon/collect", {}));
+    EXPECT_TRUE(scrape::is_api_path("/collect/events", {}));
+}
+
 TEST(Scrape2OapiApiPath, IsCaseInsensitive) {
     EXPECT_TRUE(scrape::is_api_path("/API/Users", {}));
 }
@@ -135,6 +145,18 @@ TEST(Scrape2OapiApiPath, RejectsOrdinaryPage) {
 
 TEST(Scrape2OapiFilter, KeepsApiEndpointByDefault) {
     auto values = scrape::filter_to_api({endpoint()}, {});
+    ASSERT_EQ(values.size(), 1u);
+}
+
+TEST(Scrape2OapiFilter, KeepsPostWithoutApiPatternByDefault) {
+    auto values = scrape::filter_to_api(
+        {endpoint("/__challenge_abc/telemetry", "post")}, {});
+    ASSERT_EQ(values.size(), 1u);
+    EXPECT_EQ(values[0].method, "post");
+}
+
+TEST(Scrape2OapiFilter, KeepsPutWithoutApiPatternByDefault) {
+    auto values = scrape::filter_to_api({endpoint("/settings", "put")}, {});
     ASSERT_EQ(values.size(), 1u);
 }
 
@@ -333,6 +355,15 @@ TEST(Scrape2OapiDocument, FindsScriptFetch) {
     const auto result = scrape_html("<script>fetch('/api/users')</script>");
     ASSERT_EQ(result.endpoints.size(), 1u);
     EXPECT_EQ(result.endpoints[0].path, "/api/users");
+}
+
+TEST(Scrape2OapiDocument, FindsBeaconPostWithoutApiPattern) {
+    const auto result = scrape_html(
+        "<script>navigator.sendBeacon('/__challenge_abc/telemetry', "
+        "JSON.stringify({t: 1}))</script>");
+    ASSERT_EQ(result.endpoints.size(), 1u);
+    EXPECT_EQ(result.endpoints[0].path, "/__challenge_abc/telemetry");
+    EXPECT_EQ(result.endpoints[0].method, "post");
 }
 
 TEST(Scrape2OapiDocument, FiltersOrdinaryLinks) {

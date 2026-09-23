@@ -24,11 +24,16 @@ struct RestfulResolverOptions {
     std::string base_url;
 
     // Heuristic markers for suspected internal APIs. Mirrors scrape2oapi so
-    // the two plugins agree on what "API-like" means.
+    // the two plugins agree on what "API-like" means. Beacon/challenge
+    // markers keep telemetry-style POST endpoints (e.g.
+    // `/__challenge_.../telemetry`) API-like. An explicit non-GET method is
+    // additionally kept regardless of path (see filter_to_api).
     std::vector<std::string> api_patterns = {"/api", "/v1", "/v2", "/v3",
                                              "/graphql", "/rest", "/internal",
                                              "/data", "/hotel/hoteladmin",
-                                             "/partner-settings"};
+                                             "/partner-settings",
+                                             "/telemetry", "challenge",
+                                             "/beacon", "/collect"};
     bool require_api_pattern = true;
 
     // Resolution budget. Each BFS round fetches one URL through the owning
@@ -83,8 +88,9 @@ bool is_restful_api_path(const std::string& path,
                          const std::vector<std::string>& patterns);
 
 // Filters endpoints to suspected internal APIs. When require_api_pattern is
-// false every endpoint is retained; otherwise only paths matching one of the
-// patterns (or the built-in heuristic markers) are kept.
+// false every endpoint is retained; otherwise paths matching one of the
+// patterns (or the built-in heuristic markers) are kept, as is any endpoint
+// with an explicit non-GET method (POST forms, fetch/XHR POSTs, beacons).
 std::vector<DiscoveredEndpoint> filter_to_api(
     const std::vector<DiscoveredEndpoint>& endpoints,
     const RestfulResolverOptions& options);

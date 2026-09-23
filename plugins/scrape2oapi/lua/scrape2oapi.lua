@@ -22,10 +22,13 @@ local scrape2oapi = {
 }
 
 -- Default API/backend pattern set. Callers may override via spec.api_patterns.
+-- Beacon/challenge markers keep telemetry-style POST endpoints (e.g.
+-- `/__challenge_.../telemetry`, `navigator.sendBeacon` targets) API-like.
 local DEFAULT_PATTERNS = {
     "/api", "/v1", "/v2", "/v3", "/graphql", "/rest", "/internal", "/data",
     "/ajax", "/rpc", "/json", "/xml", "/gateway", "/service", "/backend", "/bff",
-    "/dml", "/hotel/hoteladmin", "/partner-settings"
+    "/dml", "/hotel/hoteladmin", "/partner-settings",
+    "/telemetry", "challenge", "/beacon", "/collect"
 }
 
 local function is_api_path(path, patterns)
@@ -37,7 +40,8 @@ local function is_api_path(path, patterns)
     end
     -- fallback markers from the core extractor
     for _, m in ipairs({ "/api", "/v1", "/v2", "/v3", "/graphql", "/rest", "/rpc", ".json",
-        "/data", "/internal", "/ajax", "/gateway", "/service", "/backend", "/bff", "/dml" }) do
+        "/data", "/internal", "/ajax", "/gateway", "/service", "/backend", "/bff", "/dml",
+        "/telemetry", "challenge", "/beacon", "/collect" }) do
         if string.find(lower, m, 1, true) ~= nil then return true end
     end
     for _, m in ipairs({ "/hotel/hoteladmin", "/partner-settings" }) do
@@ -98,7 +102,9 @@ local function normalize_spec(spec)
     return opts
 end
 
--- Filters a result:endpoints() list to suspected internal APIs.
+-- Filters a result:endpoints() list to suspected internal APIs. An explicit
+-- non-GET method (POST form, fetch/XHR POST, beacon) is kept even when the
+-- path carries no API marker: the method signal outweighs the path heuristic.
 local function filter_api_endpoints(endpoints, spec)
     local patterns = spec.api_patterns or DEFAULT_PATTERNS
     local require = spec.require_api_pattern ~= false
@@ -106,6 +112,8 @@ local function filter_api_endpoints(endpoints, spec)
     local filtered = {}
     for _, ep in ipairs(endpoints) do
         if is_api_path(ep.path, patterns) then
+            filtered[#filtered + 1] = ep
+        elseif string.lower(tostring(ep.method or "get")) ~= "get" then
             filtered[#filtered + 1] = ep
         end
     end
