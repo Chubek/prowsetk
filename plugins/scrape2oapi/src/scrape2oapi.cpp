@@ -243,6 +243,11 @@ Scrape2OapiResult scrape_from_session(Session& session,
                               call.content_type);
         }
     }
+    if (options.inspect_scripts) {
+        for (const auto& text : session.page_script_texts()) {
+            extractor.observe_script(text.url, text.body);
+        }
+    }
 
     EndpointExtractionResult raw = extractor.extract(*document);
     auto filtered = filter_to_api(raw.endpoints, options);

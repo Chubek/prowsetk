@@ -251,3 +251,95 @@ TEST(SessionScripts, ExecutesExternalScripts) {
     session->navigate("http://example.com/");
     EXPECT_EQ(session->evaluate_js("loaded"), "42");
 }
+
+TEST(SessionScripts, ExternalScriptPostIsScannedStatically) {
+    BrowserConfig config;
+    config.javascript = true;
+    Browser browser(config);
+    auto client = std::make_unique<MemoryNetworkClient>();
+    client->set_handler([](const HttpRequest& request) {
+        HttpResponse response;
+        response.status = 200;
+        if (request.url == "http://example.com/") {
+            response.body =
+                "<html><head><script src='/bundle.js'></script></head>"
+                "<body><a href='/api/list'>list</a></body></html>";
+        } else if (request.url == "http://example.com/bundle.js") {
+            // Never executed on load (function is defined but not called),
+            // so only static scanning can surface the POST.
+            response.headers.emplace_back("Content-Type",
+                                          "application/javascript");
+            response.body =
+                "function submitOrder() {"
+                "  return fetch('/api/bundle-orders', {method: 'POST',"
+                "    body: 'q=1'});"
+                "}";
+        } else {
+            response.status = 404;
+        }
+        return response;
+    });
+    browser.set_network_client(std::move(client));
+
+    auto session = browser.create_session();
+    session->navigate("http://example.com/");
+
+    ASSERT_FALSE(session->page_script_texts().empty());
+    EndpointExtractionOptions options;
+    options.observe_network = false;
+    options.inspect_scripts = true;
+    options.minimum_confidence = 0.5;
+    EndpointExtractor extractor(options);
+    for (const auto& text : session->page_script_texts()) {
+        extractor.observe_script(text.url, text.body);
+    }
+    const auto result = extractor.extract(*session->document());
+    bool saw_post = false;
+    for (const auto& endpoint : result.endpoints) {
+        if (endpoint.method == "post" &&
+            endpoint.path.find("bundle-orders") != std::string::npos) {
+            saw_post = true;
+            EXPECT_EQ(endpoint.discovery_method, "inline-script");
+        }
+    }
+    EXPECT_TRUE(saw_post);
+}
+
+TEST(SessionScripts, ScriptPostSurvivesScriptNavigation) {
+    BrowserConfig config;
+    config.javascript = true;
+    Browser browser(config);
+    auto client = std::make_unique<MemoryNetworkClient>();
+    client->set_handler([](const HttpRequest& request) {
+        HttpResponse response;
+        response.status = 200;
+        response.headers.emplace_back("Content-Type", "text/html");
+        if (request.url == "http://example.com/") {
+            response.body =
+                "<html><body><script>"
+                "fetch('/api/orders', {method: 'POST', body: 'q=1'});"
+                "location.assign('/next');"
+                "</script></body></html>";
+        } else if (request.url == "http://example.com/next") {
+            response.body = "<html><body>next</body></html>";
+        } else if (request.url.find("/api/orders") != std::string::npos) {
+            response.body = "{}";
+        } else {
+            response.status = 404;
+        }
+        return response;
+    });
+    browser.set_network_client(std::move(client));
+
+    auto session = browser.create_session();
+    session->navigate("http://example.com/");
+    EXPECT_EQ(session->current_url(), "http://example.com/next");
+    bool saw_post = false;
+    for (const auto& call : session->page_script_requests()) {
+        if (call.method == "POST" &&
+            call.url.find("/api/orders") != std::string::npos) {
+            saw_post = true;
+        }
+    }
+    EXPECT_TRUE(saw_post);
+}

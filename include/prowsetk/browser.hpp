@@ -108,6 +108,17 @@ struct PageScriptRequest {
     std::string content_type;
 };
 
+// Text of an external script fetched host-mediated during document install
+// (static `<script src>` in `Session::install_document`, or a dynamic load
+// through the page host). Endpoint extraction scans these with
+// `EndpointExtractor::observe_script` when `inspect_scripts` is set, so
+// `fetch`/`XMLHttpRequest` POSTs defined in bundles surface even when the
+// page never calls them during load.
+struct PageScriptText {
+    std::string url;
+    std::string body;
+};
+
 // Represents an isolated browsing context: URL, cookies, storage, headers, and
 // the currently loaded document.
 class Session {
@@ -142,9 +153,17 @@ public:
                             const ScriptOptions& options = {});
 
     // Requests issued by the current document's scripts since it was
-    // installed. Cleared when the next document is installed.
+    // installed. Cleared when the next document is installed, except that
+    // script-initiated navigations preserve pre-navigation observations
+    // (see `follow_script_navigations`).
     const std::vector<PageScriptRequest>& page_script_requests() const noexcept {
         return page_script_requests_;
+    }
+
+    // Bodies of external scripts fetched for the current document.
+    // Cleared on the same schedule as `page_script_requests_`.
+    const std::vector<PageScriptText>& page_script_texts() const noexcept {
+        return page_script_texts_;
     }
 
     // Sends an HTTP request through the browser's NetworkClient, applying the
@@ -198,6 +217,7 @@ private:
     std::unique_ptr<JavaScriptRuntime> javascript_;
     std::optional<AntiBotDetection> anti_bot_detection_;
     std::vector<PageScriptRequest> page_script_requests_;
+    std::vector<PageScriptText> page_script_texts_;
     bool closed_ = false;
 };
 

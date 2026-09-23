@@ -1599,6 +1599,15 @@ WebResponse handle_endpoints(Browser& browser,
             extractor.observe(entry.method, entry.url, status,
                               entry.content_type);
         }
+        for (const auto& call : session->page_script_requests()) {
+            extractor.observe(call.method, call.url, call.status,
+                              call.content_type);
+        }
+    }
+    if (options.inspect_scripts) {
+        for (const auto& text : session->page_script_texts()) {
+            extractor.observe_script(text.url, text.body);
+        }
     }
     const EndpointExtractionResult result = extractor.extract(*document);
 

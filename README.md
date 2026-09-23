@@ -1053,9 +1053,20 @@ current document's scripts actually issued (`fetch`, `XMLHttpRequest`,
 `sendBeacon`, dynamic script and image loads), exposed as
 `Session::page_script_requests()`. This surfaces methods and URLs assembled at
 runtime that static script inspection cannot see, with `observed-network`
-provenance. The list is cleared when the next document is installed; document
-navigations are not included. Extracting from a bare `Document` never observes
+provenance. Pre-navigation script observations are preserved across
+script-initiated navigations (form submits, link clicks, `location` writes),
+and the navigation itself is recorded, so a POST issued before a navigation
+is not lost. Document navigations started outside page script are not
+included. Extracting from a bare `Document` never observes
 requests.
+
+With `inspect_scripts`, the same `Session` paths additionally scan the bodies
+of external scripts fetched host-mediated for the current document (static
+`<script src>` plus dynamic script loads), exposed as
+`Session::page_script_texts()` and fed to `EndpointExtractor::observe_script`.
+This surfaces `fetch`/`XMLHttpRequest` POSTs defined in bundles that the page
+never calls during load. Extracting from a bare `Document` still scans inline
+scripts only.
 
 Configurable behavior:
 

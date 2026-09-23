@@ -362,6 +362,37 @@ Session::Session(Browser* browser, SessionConfig config, std::string id)
             observed.status = response.status;
             observed.content_type = response.header("Content-Type");
             page_script_requests_.push_back(std::move(observed));
+            // Retain dynamic script bodies (e.g. `<script src>` injected or
+            // loaded by page script) for static endpoint scanning. Only
+            // successful GETs with a script-like target or content type are
+            // kept, bounded to avoid unbounded memory growth.
+            if (host_request.method == "GET" && response.status >= 200 &&
+                response.status < 300 && response.body.size() <= 2u * 1024u * 1024u) {
+                const std::string content_type =
+                    response.header("Content-Type");
+                std::string lowered;
+                lowered.reserve(content_type.size());
+                for (char c : content_type) {
+                    lowered.push_back(static_cast<char>(std::tolower(
+                        static_cast<unsigned char>(c))));
+                }
+                const bool script_type =
+                    lowered.find("javascript") != std::string::npos ||
+                    lowered.find("ecmascript") != std::string::npos ||
+                    lowered.empty();
+                std::string path = host_request.url;
+                try {
+                    path = parse_url(host_request.url).path;
+                } catch (...) {
+                }
+                const bool script_path =
+                    path.size() >= 3 &&
+                    path.compare(path.size() - 3, 3, ".js") == 0;
+                if (script_type || script_path) {
+                    page_script_texts_.push_back(
+                        PageScriptText{host_request.url, response.body});
+                }
+            }
         } catch (const std::exception& error) {
             out.error = error.what();
         }
@@ -494,6 +525,11 @@ void Session::follow_script_navigations() {
         if (navigation.url.empty()) {
             continue;
         }
+        // Preserve pre-navigation script observations: install_document
+        // clears them, but a POST issued before a form/link navigation is
+        // still backend evidence for endpoint discovery.
+        const auto prior_requests = page_script_requests_;
+        const auto prior_texts = page_script_texts_;
         try {
             HttpRequest request;
             request.method = navigation.method;
@@ -506,11 +542,44 @@ void Session::follow_script_navigations() {
             }
             const HttpResponse response = this->request(std::move(request));
             if (response.status >= 400) {
+                page_script_requests_ = prior_requests;
+                page_script_texts_ = prior_texts;
                 break;
             }
             install_document(response.body, response.final_url,
                              response.final_url);
+            // Merge prior observations back, deduplicated, then record the
+            // navigation itself (a POST navigation is endpoint evidence).
+            for (const auto& prior : prior_requests) {
+                const auto duplicate = std::find_if(
+                    page_script_requests_.begin(), page_script_requests_.end(),
+                    [&](const PageScriptRequest& current) {
+                        return current.method == prior.method &&
+                               current.url == prior.url;
+                    });
+                if (duplicate == page_script_requests_.end()) {
+                    page_script_requests_.push_back(prior);
+                }
+            }
+            for (const auto& prior : prior_texts) {
+                const auto duplicate = std::find_if(
+                    page_script_texts_.begin(), page_script_texts_.end(),
+                    [&](const PageScriptText& current) {
+                        return current.url == prior.url;
+                    });
+                if (duplicate == page_script_texts_.end()) {
+                    page_script_texts_.push_back(prior);
+                }
+            }
+            PageScriptRequest nav;
+            nav.method = navigation.method.empty() ? "GET" : navigation.method;
+            nav.url = navigation.url;
+            nav.status = response.status;
+            nav.content_type = response.header("Content-Type");
+            page_script_requests_.push_back(std::move(nav));
         } catch (const std::exception&) {
+            page_script_requests_ = prior_requests;
+            page_script_texts_ = prior_texts;
             break;
         }
     }
@@ -685,6 +754,7 @@ void Session::navigate(std::string_view url) {
 void Session::install_document(std::string_view html, std::string url,
                                std::string base_url) {
     page_script_requests_.clear();
+    page_script_texts_.clear();
     std::string previous_url = std::move(current_url_);
     document_ = parse_html(html, std::move(url), std::move(base_url));
     current_url_ = document_->url();
@@ -765,6 +835,7 @@ void Session::install_document(std::string_view html, std::string url,
         }
     }
     for (const auto& script : document_->scripts()) {
+        std::string script_url;
         const std::string script_text = [&]() -> std::string {
             if (!script->has_attribute("src")) {
                 return script->text();
@@ -773,10 +844,18 @@ void Session::install_document(std::string_view html, std::string url,
             // pages behave like real browsers and endpoint discovery can see
             // their network calls (README "Parsing HTML and CSS").
             try {
-                const std::string script_url =
+                script_url =
                     resolve_url(base_url.empty() ? current_url_ : base_url,
                                 script->attribute("src"));
-                return request(build_request(script_url)).body;
+                const HttpResponse script_response =
+                    request(build_request(script_url));
+                if (script_response.status >= 200 &&
+                    script_response.status < 300 &&
+                    script_response.body.size() <= 2u * 1024u * 1024u) {
+                    page_script_texts_.push_back(
+                        PageScriptText{script_url, script_response.body});
+                }
+                return script_response.body;
             } catch (const std::exception&) {
                 return {};
             }

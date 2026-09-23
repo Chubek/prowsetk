@@ -1348,6 +1348,11 @@ int lprowsext_endpoints_extract(lua_State* L) {
                                   call.content_type);
             }
         }
+        if (session != nullptr && extractor.options().inspect_scripts) {
+            for (const auto& text : session->page_script_texts()) {
+                extractor.observe_script(text.url, text.body);
+            }
+        }
         push_endpoint_result(L, extractor.extract(*document));
         return 1;
     });
