@@ -123,7 +123,7 @@ function wrapper:request(method, url, options)
         return {status=200, body=(scenario == 'script-marker' or scenario == 'js-dashboard') and
             '<a href="/logout">Log out</a>' or dashboard, headers={}}
     elseif url == 'https://admin.booking.com/app.js' then
-        return {status=200, body=[[fetch('/api/external'); import('/static/chunk.js')]], headers={['Content-Type']='application/javascript'}}
+        return {status=200, body=[[fetch('/api/external'); import('/static/chunk.js'); fetch('/api/checkin',{method:'POST'}); $.post('/api/activity',{visit:1}); $.ajax({url:'/api/legacy',type:'POST'}); navigator.sendBeacon('/__challenge_fixture/telemetry', 't=1'); fetch('https://booking.com/__challenge_fixture/telemetry',{method:"POST"})]], headers={['Content-Type']='application/javascript'}}
     elseif url == 'https://admin.booking.com/static/chunk.js' then
         return {status=200, body=[[fetch('/gateway/rates')]], headers={['Content-Type']='application/javascript'}}
     elseif url == 'https://admin.booking.com/reservations' then
@@ -213,6 +213,14 @@ if scenario == 'success' or scenario == 'js-built-form' or scenario == 'two-step
                            '/partner-settings/users'}) do
         assert(yaml:find(path, 1, true), 'missing endpoint ' .. path)
     end
+    -- POST endpoints discovered method-aware in the fetched /app.js bundle
+    -- (fetch POST, $.post, $.ajax POST, sendBeacon, cross-origin telemetry).
+    for _, path in ipairs({'/api/checkin','/api/activity','/api/legacy',
+                           '/__challenge_fixture/telemetry'}) do
+        assert(yaml:find(path, 1, true), 'missing POST endpoint ' .. path)
+    end
+    assert(yaml:find('post:', 1, true), 'missing post method in YAML')
+    assert(yaml:find('has-post: true', 1, true), 'restful status missing has-post')
     assert(yaml:find('authenticated: true', 1, true))
     assert(yaml:find('complete: false', 1, true))
     for _, secret in ipairs({'fixture-token','fixture#pass&word','fixture@example.com','fixture-csrf'}) do

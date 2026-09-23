@@ -717,6 +717,159 @@ local function scan_urls(text, base_url)
     return found
 end
 
+-- Method-aware POST scan over a fetched body (external script bundle or API
+-- response page). Detects POST forms, fetch/XHR POSTs, sendBeacon calls,
+-- shorthand POST helpers ($.post / axios.post / minified equivalents) and
+-- $.ajax with type/method POST. Returns POST endpoint tables only.
+--
+-- Unlike scan_urls (which is same-origin GET-only), cross-origin POST targets
+-- are kept: an explicit POST to any URL is backend evidence, and the final
+-- --no-xcors filter still restricts output to the booking.com TLD when asked.
+-- API-pattern gating is intentionally absent: an explicit non-GET method
+-- outweighs the path heuristic, mirroring the plugin filter rule.
+local function scan_post_endpoints(text, base_url)
+    local found, seen = {}, {}
+    local function add_post(candidate, discovery_method, note, content_type, confidence)
+        local resolved = resolve_url(base_url, candidate)
+        if not resolved or resolved == "" then return end
+        if no_xcors_only and not is_booking_tld_url(resolved) then return end
+        local key = "post\0" .. resolved
+        if seen[key] then return end
+        seen[key] = true
+        found[#found + 1] = {
+            url = resolved,
+            path = path_from_url(resolved),
+            method = "post",
+            source = base_url,
+            discovery_method = discovery_method,
+            confidence = confidence,
+            parameters = {},
+            request_content_type = content_type,
+            notes = {note}
+        }
+    end
+    text = text or ""
+
+    -- POST forms (fetched HTML bodies).
+    for tag in text:gmatch("<[Ff][Oo][Rr][Mm][^>]*>") do
+        local action = tag:match('[Aa][Cc][Tt][Ii][Oo][Nn]%s*=%s*"([^"]+)"')
+            or tag:match("[Aa][Cc][Tt][Ii][Oo][Nn]%s*=%s*'([^']+)'")
+            or tag:match("[Aa][Cc][Tt][Ii][Oo][Nn]%s*=%s*([^%s>]+)")
+        local method = tag:match('[Mm][Ee][Tt][Hh][Oo][Dd]%s*=%s*"([^"]+)"')
+            or tag:match("[Mm][Ee][Tt][Hh][Oo][Dd]%s*=%s*'([^']+)'")
+            or tag:match("[Mm][Ee][Tt][Hh][Oo][Dd]%s*=%s*([^%s>]+)")
+        if trim(method or ""):lower() == "post" then
+            add_post(action or base_url, "html-form",
+                "heuristically discovered POST form in fetched body by Booking.com admin driver",
+                "application/x-www-form-urlencoded", 0.75)
+        end
+    end
+
+    -- fetch(url, {... method: "POST" ...}): double-, single- and backtick-
+    -- quoted URLs, quoted or bare option keys. The options window is bounded
+    -- so an unrelated POST mention further down cannot flip a GET fetch.
+    -- Also covers fetch(new Request("url", {method: "POST"})).
+    do
+        local pos = 1
+        while true do
+            local _, e = text:find("[Ff][Ee][Tt][Cc][Hh]%s*%(", pos)
+            if not e then break end
+            local window = text:sub(e + 1, e + 1500)
+            local url = window:match('^%s*"([^"]+)"')
+                or window:match("^%s*'([^']+)'")
+                or window:match("^%s*`([^`]+)`")
+                or window:match('^[Nn][Ee][Ww]%s+[Rr][Ee][Qq][Uu][Ee][Ss][Tt]%s*%(%s*"([^"]+)"')
+                or window:match("^[Nn][Ee][Ww]%s+[Rr][Ee][Qq][Uu][Ee][Ss][Tt]%s*%(%s*'([^']+)'")
+            if url then
+                local check = window:sub(1, #url + 320):lower()
+                if check:find('["\']?method["\']?%s*:%s*["\']post["\']') then
+                    add_post(url, "script-post",
+                        "heuristically discovered fetch POST in script by Booking.com admin driver",
+                        nil, 0.65)
+                end
+            end
+            pos = e + 1
+        end
+    end
+
+    -- XHR open(method, url): double- and single-quoted forms.
+    for method, url in text:gmatch('%.[Oo][Pp][Ee][Nn]%s*%(%s*"([^"]+)"%s*,%s*"([^"]+)"') do
+        if trim(method):lower() == "post" then
+            add_post(url, "script-post",
+                "heuristically discovered XHR POST in script by Booking.com admin driver",
+                nil, 0.65)
+        end
+    end
+    for method, url in text:gmatch("%.[Oo][Pp][Ee][Nn]%s*%(%s*'([^']+)'%s*,%s*'([^']+)'") do
+        if trim(method):lower() == "post" then
+            add_post(url, "script-post",
+                "heuristically discovered XHR POST in script by Booking.com admin driver",
+                nil, 0.65)
+        end
+    end
+
+    -- navigator.sendBeacon(url, ...): always POST; the usual carrier for
+    -- challenge/telemetry beacons.
+    for url in text:gmatch('[Ss][Ee][Nn][Dd][Bb][Ee][Aa][Cc][Oo][Nn]%s*%(%s*"([^"]+)"') do
+        add_post(url, "script-post",
+            "heuristically discovered sendBeacon POST in script by Booking.com admin driver",
+            nil, 0.65)
+    end
+    for url in text:gmatch("[Ss][Ee][Nn][Dd][Bb][Ee][Aa][Cc][Oo][Nn]%s*%(%s*'([^']+)'") do
+        add_post(url, "script-post",
+            "heuristically discovered sendBeacon POST in script by Booking.com admin driver",
+            nil, 0.65)
+    end
+    for url in text:gmatch("[Ss][Ee][Nn][Dd][Bb][Ee][Aa][Cc][Oo][Nn]%s*%(%s*`([^`]+)`") do
+        add_post(url, "script-post",
+            "heuristically discovered sendBeacon POST in script by Booking.com admin driver",
+            nil, 0.65)
+    end
+
+    -- Shorthand POST helpers: $.post(url), axios.post(url) and minified
+    -- equivalents (any receiver). Double-, single- and backtick-quoted.
+    for url in text:gmatch('%.[Pp][Oo][Ss][Tt]%s*%(%s*"([^"]+)"') do
+        add_post(url, "script-post",
+            "heuristically discovered shorthand POST in script by Booking.com admin driver",
+            nil, 0.65)
+    end
+    for url in text:gmatch("%.[Pp][Oo][Ss][Tt]%s*%(%s*'([^']+)'") do
+        add_post(url, "script-post",
+            "heuristically discovered shorthand POST in script by Booking.com admin driver",
+            nil, 0.65)
+    end
+    for url in text:gmatch("%.[Pp][Oo][Ss][Tt]%s*%(%s*`([^`]+)`") do
+        add_post(url, "script-post",
+            "heuristically discovered shorthand POST in script by Booking.com admin driver",
+            nil, 0.65)
+    end
+
+    -- $.ajax({url: "...", type: "POST"}) (or method: "POST"), either key
+    -- order, either quote style.
+    do
+        local pos = 1
+        while true do
+            local _, e = text:find("%.[Aa][Jj][Aa][Xx]%s*%(", pos)
+            if not e then break end
+            local window = text:sub(e + 1, e + 1200)
+            local lowered = window:lower()
+            if lowered:find('["\']?type["\']?%s*:%s*["\']post["\']', 1)
+                or lowered:find('["\']?method["\']?%s*:%s*["\']post["\']', 1) then
+                local url = window:match('[Uu][Rr][Ll]%s*:%s*"([^"]+)"')
+                    or window:match("[Uu][Rr][Ll]%s*:%s*'([^']+)'")
+                if url then
+                    add_post(url, "script-post",
+                        "heuristically discovered ajax POST in script by Booking.com admin driver",
+                        nil, 0.65)
+                end
+            end
+            pos = e + 1
+        end
+    end
+
+    return found
+end
+
 local function inspect_scripts(session, document, page_url, endpoints, seen_endpoints, authenticated_flag)
     if not document or type(document.query_selector_all) ~= "function" then return end
     local fetched_scripts = 0
@@ -745,9 +898,19 @@ local function inspect_scripts(session, document, page_url, endpoints, seen_endp
                     end
                 end
             end
+            -- Method-aware POST scan first: bundle POST calls are strong
+            -- evidence, so a URL explicitly POSTed here must not also be
+            -- recorded as a low-evidence GET twin from the blind scan below.
+            local post_urls = {}
+            for _, ep in ipairs(scan_post_endpoints(body, script_url)) do
+                add_endpoint(endpoints, seen_endpoints, ep, authenticated_flag)
+                post_urls[ep.url] = true
+            end
             for _, url in ipairs(scan_urls(body, script_url)) do
                 if no_xcors_only and not is_booking_tld_url(url) then
                     -- skip: --no-xcors keeps booking.com TLD endpoints only
+                elseif post_urls[url] then
+                    -- skip: already recorded as POST from this same body
                 elseif is_api_like(url) then
                     add_endpoint(endpoints, seen_endpoints, make_endpoint(url, script_url), authenticated_flag)
                 elseif path_from_url(url):match("%.js$") and not seen_scripts[url] and fetched_scripts < max_scripts then
@@ -780,9 +943,16 @@ local function resolve_api_chains(session, endpoints, seen_endpoints, start_url,
             count = count + 1
             local ok, body = pcall(function() return select(1, fetch_page(session, item.url)) end)
             if ok and item.depth < max_depth then
+                local post_urls = {}
+                for _, ep in ipairs(scan_post_endpoints(body, item.url)) do
+                    add_endpoint(endpoints, seen_endpoints, ep, authenticated_flag)
+                    post_urls[ep.url] = true
+                end
                 for _, url in ipairs(scan_urls(body, item.url)) do
                     if no_xcors_only and not is_booking_tld_url(url) then
                         -- skip: --no-xcors keeps booking.com TLD endpoints only
+                    elseif post_urls[url] then
+                        -- skip: already recorded as POST from this same body
                     elseif is_api_like(url) and same_origin(start_url, url) then
                         add_endpoint(endpoints, seen_endpoints, make_endpoint(url, item.url), authenticated_flag)
                         if not visited[url] then
