@@ -516,17 +516,34 @@ int lprowseir_dom_walk(lua_State* L) {
             return 0;
         }
         const char* expression = lua_tostring(L, expression_index);
+        // Legality stratum first: an invalid expression is a driver bug and
+        // must fail fast with a diagnostic, not silently walk nothing.
+        const XPathLegality legality = check_xpath_legality(*document, expression);
+        if (!legality.ok) {
+            luaL_error(L, "lprowseir.dom.walk: invalid XPath: %s",
+                       legality.error.c_str());
+            return 0;
+        }
+        // Thread the owning session (when present) so walked elements keep
+        // session affinity for session-mediated helpers.
+        const std::shared_ptr<Session>* session = nullptr;
+        if (luaL_testudata(L, document_index, kSessionMeta) != nullptr) {
+            session = check_session(L, document_index)->session;
+        } else if (luaL_testudata(L, document_index, kDocumentMeta) != nullptr) {
+            session = check_document(L, document_index)->session;
+        }
         const XPathValue value = evaluate_xpath(*document, expression);
         std::size_t invoked = 0;
         if (value.type == XPathValueType::NodeSet) {
             for (const auto& node : value.nodes) {
                 lua_pushvalue(L, callback_index);
-                push_element(L, node, nullptr);
-                if (lua_pcall(L, 1, 0, 0) == LUA_OK) {
-                    ++invoked;
-                } else {
-                    lua_pop(L, 1);
+                push_element(L, node, session);
+                if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
+                    // Propagate the callback failure; the message stays on
+                    // top of the stack for lua_error.
+                    return lua_error(L);
                 }
+                ++invoked;
             }
         }
         lua_pushinteger(L, static_cast<lua_Integer>(invoked));
@@ -562,18 +579,76 @@ int lprowseir_xas_add_listener(lua_State* L) {
         }
 
         const char* expression = lua_tostring(L, expression_index);
+        // Legality stratum first: fail fast on driver bugs instead of
+        // silently invoking nothing.
+        const XPathLegality legality = check_xpath_legality(*document, expression);
+        if (!legality.ok) {
+            luaL_error(L, "lprowseir.xas.AddListener: invalid XPath: %s",
+                       legality.error.c_str());
+            return 0;
+        }
         const auto events = filter_prowse_xas(*document, expression);
         std::size_t invoked = 0;
         for (const auto& event : events) {
             lua_pushvalue(L, callback_index);
             push_ir_xas_event(L, event);
-            if (lua_pcall(L, 1, 0, 0) == LUA_OK) {
-                ++invoked;
-            } else {
-                lua_pop(L, 1);
+            if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
+                return lua_error(L);
             }
+            ++invoked;
         }
         lua_pushinteger(L, static_cast<lua_Integer>(invoked));
+        return 1;
+    });
+}
+
+// Uniform pipeline over the plugin-extensible IrEmitterRegistry:
+// `lprowseir.emit(document_or_session, name)` returns the named IR as a Lua
+// string (binary IRs such as "vtd" are byte strings). Unknown names raise.
+int lprowseir_emit_named(lua_State* L) {
+    return protect(L, [&]() -> int {
+        int document_index = 0;
+        const auto document = read_document_argument(L, &document_index);
+        if (document == nullptr) {
+            luaL_error(L, "lprowseir.emit requires a document or session");
+            return 0;
+        }
+        const int top = lua_gettop(L);
+        const char* name = nullptr;
+        for (int i = 1; i <= top; ++i) {
+            if (i != document_index && lua_isstring(L, i)) {
+                name = lua_tostring(L, i);
+                break;
+            }
+        }
+        if (name == nullptr || *name == '\0') {
+            luaL_error(L, "lprowseir.emit expects (document_or_session, name)");
+            return 0;
+        }
+        auto& registry = IrEmitterRegistry::global();
+        if (auto text = registry.emit_text(*document, name)) {
+            lua_pushlstring(L, text->c_str(), text->size());
+            return 1;
+        }
+        if (auto binary = registry.emit_binary(*document, name)) {
+            lua_pushlstring(L, reinterpret_cast<const char*>(binary->data()),
+                            binary->size());
+            return 1;
+        }
+        luaL_error(L, "lprowseir.emit: unknown IR '%s'", name);
+        return 0;
+    });
+}
+
+// `lprowseir.emitters()` lists every registered IR name, built-ins included.
+int lprowseir_emitters(lua_State* L) {
+    return protect(L, [&]() -> int {
+        const auto names = IrEmitterRegistry::global().names();
+        lua_createtable(L, static_cast<int>(names.size()), 0);
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            lua_pushlstring(L, names[i].c_str(), names[i].size());
+            lua_rawseti(L, -2, static_cast<int>(i) + 1);
+        }
         return 1;
     });
 }
@@ -1920,6 +1995,10 @@ LuaRuntime::LuaRuntime() : impl_(std::make_unique<Impl>()) {
         lua_setfield(impl_->state, -2, "emit_vtd");
         lua_pushcfunction(impl_->state, lprowseir_emit_iml);
         lua_setfield(impl_->state, -2, "emit_iml");
+        lua_pushcfunction(impl_->state, lprowseir_emit_named);
+        lua_setfield(impl_->state, -2, "emit");
+        lua_pushcfunction(impl_->state, lprowseir_emitters);
+        lua_setfield(impl_->state, -2, "emitters");
 
         lua_newtable(impl_->state);  // lprowseir.dom
         lua_pushcfunction(impl_->state, lprowseir_dom_walk);

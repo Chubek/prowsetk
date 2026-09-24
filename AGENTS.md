@@ -316,6 +316,29 @@ lprowseir.xax:AddListener("//tag/td", function() ... end)
 
 All listeners and walkers use XPath powered by Pugixml's XPath engine.
 
+The implementation is stratified into five concerns with hard boundaries
+(Architecture Rules §7), each in its own translation unit:
+
+- **Semantics** (`src/core/ir_model.cpp`) — lowers the Flatworm DOM to the
+  canonical event/node model. Knows nothing about XPath or encodings.
+- **Register/layout** (`src/core/ir_layout.cpp`) — the sole owner of stable
+  XPath-like paths, sibling indexes, and depths. Every IR consumes its
+  assignments verbatim.
+- **Legality** (`src/core/ir_filter.cpp`, `check_xpath_legality`) — validates
+  XPath and selects subtrees. `lprowseir.dom.walk` and
+  `lprowseir.xas:AddListener` fail fast on invalid expressions and propagate
+  callback errors instead of swallowing them.
+- **Lowering** (per emitter) — maps the canonical model to one IR shape.
+  Never reparses HTML or touches the DOM directly.
+- **Encoding** (`src/core/ir_vtd.cpp`, `src/core/ir_iml.cpp`) — VTD framing
+  and IML text/macros. VTD decoding is strict and allocation-bounded, and
+  attribute owner tags round-trip through the layout path.
+
+Further IRs register by name with `IrEmitterRegistry`
+(`src/core/ir_registry.cpp`; built-ins `"iml"`/`"vtd"`) instead of patching
+the built-ins, and drivers resolve every name uniformly through
+`lprowseir.emit(document, name)` / `lprowseir.emitters()`.
+
 ---
 
 ## The Flatworm Web Platform (Page JS Bindings)

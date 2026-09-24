@@ -18,7 +18,12 @@ set(PROWSETK_CORE_SOURCES
     core/browser.cpp
     core/lua_runtime.cpp
     core/project_config.cpp
-    core/ir.cpp
+    core/ir_model.cpp
+    core/ir_layout.cpp
+    core/ir_filter.cpp
+    core/ir_vtd.cpp
+    core/ir_iml.cpp
+    core/ir_registry.cpp
     core/web_interface.cpp
     core/playwright.cpp
     flatworm/html_parser.cpp

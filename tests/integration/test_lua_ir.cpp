@@ -112,3 +112,124 @@ TEST(Lprowseir, XaxAliasSupportsAddListener) {
     )LUA", "lprowseir_xax_alias");
     EXPECT_TRUE(result.ok) << lua.last_error();
 }
+
+TEST(Lprowseir, RegistryPipelineEmitsByName) {
+    if (!LuaRuntime::available()) {
+        GTEST_SKIP() << "ProwseTk was built without Lua support";
+    }
+    LuaRuntime lua;
+    const auto result = lua.run(R"LUA(
+        local prowse = require("lprowse")
+        local ir = require("lprowseir")
+        local browser = prowse.browser.new()
+        local session = browser:create_session()
+        session:load_html([[<html><body><a href='/go'>Go</a></body></html>]],
+                          "https://example.com/")
+
+        local names = ir.emitters()
+        local has_iml = false
+        local has_vtd = false
+        for _, name in ipairs(names) do
+            if name == "iml" then has_iml = true end
+            if name == "vtd" then has_vtd = true end
+        end
+        assert(has_iml and has_vtd)
+
+        local iml = ir.emit(session, "iml")
+        assert(type(iml) == "string" and string.find(iml, "%(document") ~= nil)
+        local vtd = ir.emit(session, "vtd")
+        assert(type(vtd) == "string" and #vtd > 5)
+
+        local ok = pcall(function() ir.emit(session, "no-such-ir") end)
+        assert(ok == false)
+    )LUA", "lprowseir_registry");
+    EXPECT_TRUE(result.ok) << lua.last_error();
+}
+
+TEST(Lprowseir, WalkRejectsInvalidXPath) {
+    if (!LuaRuntime::available()) {
+        GTEST_SKIP() << "ProwseTk was built without Lua support";
+    }
+    LuaRuntime lua;
+    const auto result = lua.run(R"LUA(
+        local prowse = require("lprowse")
+        local ir = require("lprowseir")
+        local browser = prowse.browser.new()
+        local session = browser:create_session()
+        session:load_html([[<html><body><li>a</li></body></html>]])
+
+        local ok, err = pcall(function()
+            ir.dom.walk(session, "//*[", function() end)
+        end)
+        assert(ok == false)
+        assert(string.find(err, "invalid XPath") ~= nil)
+    )LUA", "lprowseir_walk_legality");
+    EXPECT_TRUE(result.ok) << lua.last_error();
+}
+
+TEST(Lprowseir, ListenerRejectsInvalidXPath) {
+    if (!LuaRuntime::available()) {
+        GTEST_SKIP() << "ProwseTk was built without Lua support";
+    }
+    LuaRuntime lua;
+    const auto result = lua.run(R"LUA(
+        local prowse = require("lprowse")
+        local ir = require("lprowseir")
+        local browser = prowse.browser.new()
+        local session = browser:create_session()
+        session:load_html([[<html><body><td>z</td></body></html>]])
+
+        local ok, err = pcall(function()
+            ir.xas:AddListener(session, "//td[", function() end)
+        end)
+        assert(ok == false)
+        assert(string.find(err, "invalid XPath") ~= nil)
+    )LUA", "lprowseir_listener_legality");
+    EXPECT_TRUE(result.ok) << lua.last_error();
+}
+
+TEST(Lprowseir, WalkPropagatesCallbackErrors) {
+    if (!LuaRuntime::available()) {
+        GTEST_SKIP() << "ProwseTk was built without Lua support";
+    }
+    LuaRuntime lua;
+    const auto result = lua.run(R"LUA(
+        local prowse = require("lprowse")
+        local ir = require("lprowseir")
+        local browser = prowse.browser.new()
+        local session = browser:create_session()
+        session:load_html([[<html><body><ul><li>a</li><li>b</li></ul></body></html>]])
+
+        local ok, err = pcall(function()
+            ir.dom.walk(session, "//li", function(_)
+                error("walk-boom")
+            end)
+        end)
+        assert(ok == false)
+        assert(string.find(err, "walk%-boom") ~= nil)
+    )LUA", "lprowseir_walk_errors");
+    EXPECT_TRUE(result.ok) << lua.last_error();
+}
+
+TEST(Lprowseir, ListenerPropagatesCallbackErrors) {
+    if (!LuaRuntime::available()) {
+        GTEST_SKIP() << "ProwseTk was built without Lua support";
+    }
+    LuaRuntime lua;
+    const auto result = lua.run(R"LUA(
+        local prowse = require("lprowse")
+        local ir = require("lprowseir")
+        local browser = prowse.browser.new()
+        local session = browser:create_session()
+        session:load_html([[<html><body><td>z</td></body></html>]])
+
+        local ok, err = pcall(function()
+            ir.xas:AddListener(session, "//td", function(_)
+                error("listener-boom")
+            end)
+        end)
+        assert(ok == false)
+        assert(string.find(err, "listener%-boom") ~= nil)
+    )LUA", "lprowseir_listener_errors");
+    EXPECT_TRUE(result.ok) << lua.last_error();
+}

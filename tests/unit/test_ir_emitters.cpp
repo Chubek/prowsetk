@@ -616,3 +616,192 @@ TEST(IrEmitters, IR54_ImlPreservesUnknownMacros) {
         });
     EXPECT_EQ(expanded, iml);
 }
+
+TEST(IrEmitters, IR55_VtdAttributeRoundTripPreservesOwnerTag) {
+    const auto doc = sample_document();
+    const auto decoded = decode_prowse_vtd(emit_prowse_vtd(*doc));
+    const auto events = emit_prowse_xas(*doc);
+    ASSERT_EQ(decoded.size(), events.size());
+    for (std::size_t i = 0; i < events.size(); ++i) {
+        if (events[i].kind != "attribute") {
+            continue;
+        }
+        EXPECT_EQ(decoded[i].kind, "attribute");
+        EXPECT_EQ(decoded[i].tag, events[i].tag)
+            << "attribute at " << events[i].xpath;
+        EXPECT_EQ(decoded[i].name, events[i].name);
+        EXPECT_EQ(decoded[i].value, events[i].value);
+    }
+}
+
+TEST(IrEmitters, IR56_VtdFullRoundTripPreservesAllFields) {
+    const auto doc = sample_document();
+    const auto decoded = decode_prowse_vtd(emit_prowse_vtd(*doc));
+    const auto events = emit_prowse_xas(*doc);
+    ASSERT_EQ(decoded.size(), events.size());
+    for (std::size_t i = 0; i < events.size(); ++i) {
+        EXPECT_EQ(decoded[i].kind, events[i].kind);
+        EXPECT_EQ(decoded[i].xpath, events[i].xpath);
+        EXPECT_EQ(decoded[i].tag, events[i].tag);
+        EXPECT_EQ(decoded[i].name, events[i].name);
+        EXPECT_EQ(decoded[i].value, events[i].value);
+        EXPECT_EQ(decoded[i].depth, events[i].depth);
+    }
+}
+
+TEST(IrEmitters, IR57_VtdRejectsCorruptEventCountWithoutHugeAllocation) {
+    // A corrupt count must fail fast on truncation, never by reserving
+    // gigabytes from a tiny input.
+    const std::vector<std::uint8_t> corrupt = {'P', 'V', 'T', 'D', '1',
+                                               0xff, 0xff, 0xff, 0xff};
+    EXPECT_TRUE(decode_prowse_vtd(corrupt).empty());
+}
+
+TEST(IrEmitters, IR58_VtdRejectsBadMagicAndUnknownTokens) {
+    auto bytes = emit_prowse_vtd(*sample_document());
+    ASSERT_GT(bytes.size(), 10u);
+    bytes[0] = 'X';
+    EXPECT_TRUE(decode_prowse_vtd(bytes).empty());
+
+    auto unknown = emit_prowse_vtd(*sample_document());
+    ASSERT_GT(unknown.size(), 10u);
+    unknown[9] = 99;  // first token type
+    EXPECT_TRUE(decode_prowse_vtd(unknown).empty());
+
+    const std::vector<std::uint8_t> trailing = {'P', 'V', 'T', 'D', '1', 0, 0,
+                                               0,    0,   'Z'};
+    EXPECT_TRUE(decode_prowse_vtd(trailing).empty());
+}
+
+TEST(IrEmitters, IR59_XpathLegalityAcceptsValidRejectsInvalid) {
+    const auto doc = sample_document();
+    const auto valid = prowsetk::check_xpath_legality(*doc, "//li");
+    EXPECT_TRUE(valid.ok);
+    EXPECT_TRUE(valid.error.empty());
+
+    const auto broken = prowsetk::check_xpath_legality(*doc, "//*[");
+    EXPECT_FALSE(broken.ok);
+    EXPECT_FALSE(broken.error.empty());
+
+    const auto empty = prowsetk::check_xpath_legality(*doc, "");
+    EXPECT_FALSE(empty.ok);
+    EXPECT_FALSE(empty.error.empty());
+}
+
+TEST(IrEmitters, IR60_IsValidXPathAgreesWithLegalityCheck) {
+    const auto doc = sample_document();
+    EXPECT_TRUE(prowsetk::is_valid_xpath_expression(*doc, "//a[@href]"));
+    EXPECT_FALSE(prowsetk::is_valid_xpath_expression(*doc, "//a[@href"));
+    EXPECT_FALSE(prowsetk::is_valid_xpath_expression(*doc, ""));
+}
+
+TEST(IrEmitters, IR61_XasFilterExcludesSiblingSubtrees) {
+    const auto doc = sample_document();
+    if (!xpath_available(*doc)) {
+        GTEST_SKIP() << "XPath support unavailable in this build";
+    }
+    const auto filtered =
+        filter_prowse_xas(*doc, "//ul[@id='list']/li[1]");
+    ASSERT_FALSE(filtered.empty());
+    for (const auto& event : filtered) {
+        EXPECT_TRUE(event.xpath.find("/li[2]") == std::string::npos)
+            << "sibling subtree leaked: " << event.xpath;
+    }
+    bool li_seen = false;
+    for (const auto& event : filtered) {
+        if (event.xpath.find("/li[1]") != std::string::npos) {
+            li_seen = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(li_seen);
+}
+
+TEST(IrEmitters, IR62_XasFilterRejectsScalarExpressions) {
+    const auto doc = sample_document();
+    if (!xpath_available(*doc)) {
+        GTEST_SKIP() << "XPath support unavailable in this build";
+    }
+    EXPECT_TRUE(filter_prowse_xas(*doc, "count(//li)").empty());
+    EXPECT_TRUE(filter_prowse_xas(*doc, "").empty());
+}
+
+TEST(IrEmitters, IR63_XasFilterIncludesTextChildrenOfSelection) {
+    const auto doc = sample_document();
+    if (!xpath_available(*doc)) {
+        GTEST_SKIP() << "XPath support unavailable in this build";
+    }
+    const auto filtered = filter_prowse_xas(*doc, "//a[@href]");
+    bool text_seen = false;
+    for (const auto& event : filtered) {
+        if (event.kind == "text" &&
+            event.value.find("Go") != std::string::npos) {
+            text_seen = true;
+        }
+    }
+    EXPECT_TRUE(text_seen);
+}
+
+TEST(IrEmitters, IR64_RegistryExposesBuiltIns) {
+    const auto doc = sample_document();
+    auto& registry = prowsetk::IrEmitterRegistry::global();
+    EXPECT_TRUE(registry.contains("iml"));
+    EXPECT_TRUE(registry.contains("vtd"));
+    EXPECT_FALSE(registry.contains("no-such-ir"));
+
+    const auto names = registry.names();
+    EXPECT_NE(std::find(names.begin(), names.end(), "iml"), names.end());
+    EXPECT_NE(std::find(names.begin(), names.end(), "vtd"), names.end());
+    EXPECT_TRUE(std::is_sorted(names.begin(), names.end()));
+
+    const auto iml = registry.emit_text(*doc, "iml");
+    ASSERT_TRUE(iml.has_value());
+    EXPECT_EQ(*iml, emit_prowse_iml(*doc));
+
+    const auto vtd = registry.emit_binary(*doc, "vtd");
+    ASSERT_TRUE(vtd.has_value());
+    EXPECT_EQ(*vtd, emit_prowse_vtd(*doc));
+
+    EXPECT_FALSE(registry.emit_text(*doc, "no-such-ir").has_value());
+    EXPECT_FALSE(registry.emit_binary(*doc, "no-such-ir").has_value());
+}
+
+TEST(IrEmitters, IR65_RegistryAcceptsCustomPluginEmitters) {
+    const auto doc = sample_document();
+    auto& registry = prowsetk::IrEmitterRegistry::global();
+    EXPECT_TRUE(registry.register_text(
+        "test-upper-tags", [](const Document& document) {
+            std::string out;
+            for (const auto& node : emit_prowse_dom(document)) {
+                std::string tag = node.tag;
+                std::transform(tag.begin(), tag.end(), tag.begin(),
+                               [](char c) {
+                                   return static_cast<char>(std::toupper(
+                                       static_cast<unsigned char>(c)));
+                               });
+                out += tag;
+                out += "\n";
+            }
+            return out;
+        }));
+    EXPECT_TRUE(registry.contains("test-upper-tags"));
+    const auto emitted = registry.emit_text(*doc, "test-upper-tags");
+    ASSERT_TRUE(emitted.has_value());
+    EXPECT_NE(emitted->find("BODY"), std::string::npos);
+
+    EXPECT_FALSE(registry.register_text("", [](const Document&) {
+        return std::string();
+    }));
+    EXPECT_TRUE(registry.unregister("test-upper-tags"));
+    EXPECT_FALSE(registry.contains("test-upper-tags"));
+    EXPECT_FALSE(registry.unregister("test-upper-tags"));
+}
+
+TEST(IrEmitters, IR66_ImlContractForEmptyAndInvalidDocuments) {
+    Document invalid;
+    EXPECT_TRUE(emit_prowse_iml(invalid).empty());
+
+    const auto whitespace = parse_html("   \n  ", "https://example.test/");
+    const std::string iml = emit_prowse_iml(*whitespace);
+    EXPECT_NE(iml.find("(document"), std::string::npos);
+}

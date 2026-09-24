@@ -7,7 +7,10 @@ ProwseTk exposes two Lua modules from `LuaRuntime`:
 - `lprowsext` provides XPath helpers, endpoint extraction, document
   processors, extractors, and managed WASM module handles.
 - `lprowseir` emits built-in IR formats (ProwseXAS/ProwseDOM/ProwseVTD/
-  ProwseIML) and provides XPath-driven walkers/listeners.
+  ProwseIML) and provides XPath-driven walkers/listeners. Named IRs resolve
+  through the plugin-extensible `IrEmitterRegistry` (`emit`, `emitters`);
+  `dom.walk` and `xas:AddListener` fail fast on invalid XPath and propagate
+  callback errors.
 
 The `init.lua` files are standalone surface mirrors and API documentation. In
 an embedded ProwseTk runtime, `require("lprowse")` and
