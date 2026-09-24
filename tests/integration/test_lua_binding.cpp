@@ -206,3 +206,70 @@ TEST(LuaBinding, CallFunctionReportsErrors) {
     EXPECT_FALSE(missing.ok);
     EXPECT_NE(lua.last_error().find("nope"), std::string::npos);
 }
+
+TEST(LuaBinding, SyntheticClickAndTypeDispatchCascades) {
+    if (!LuaRuntime::available()) {
+        GTEST_SKIP() << "ProwseTk was built without Lua support";
+    }
+    LuaRuntime lua;
+    const char* script = R"LUA(
+        local prowse = require("lprowse")
+        local browser = prowse.browser.new()
+        local session = browser:create_session()
+        session:load_html([[
+            <html><body>
+              <button id="go" type="button">Go</button>
+              <button id="ghost" type="button" style="display: none">Ghost</button>
+              <input id="q" type="text" value="">
+              <script>
+                window.__cascade = [];
+                var go = document.getElementById("go");
+                ["pointerover","pointerenter","pointerdown","mousedown",
+                 "focus","pointerup","mouseup","click"].forEach(function (t) {
+                  go.addEventListener(t, function () { window.__cascade.push(t); });
+                });
+                window.__inputs = 0;
+                document.getElementById("q").addEventListener("input", function () {
+                  window.__inputs += 1;
+                });
+              </script>
+            </body></html>]], "https://example.com/")
+
+        local document = session:document()
+        local go = document:query_selector("#go")
+        assert(go ~= nil, "button missing")
+        assert(go:click() == true, "elem:click() should dispatch")
+        local order = session:evaluate_js("window.__cascade.join('|')")
+        assert(order == "pointerover|pointerenter|pointerdown|mousedown|focus|"
+               .. "pointerup|mouseup|click",
+               "cascade order wrong: " .. order)
+
+        -- Session-mediated entry points reach the same cascade.
+        session:evaluate_js("window.__cascade = []")
+        assert(session:click_element(go) == true, "session:click_element failed")
+        assert(session:evaluate_js("window.__cascade.length") == "8",
+               "expected 8 events")
+
+        -- Typing updates the value through the native setter path.
+        local input = document:query_selector("#q")
+        assert(input ~= nil, "input missing")
+        assert(input:type("ab") == true, "elem:type() should dispatch")
+        assert(input:value() == "ab", "value mismatch: " .. input:value())
+        assert(session:evaluate_js("window.__inputs") == "2",
+               "expected one input event per char")
+        assert(session:type_element(input, "") == true, "empty type should commit")
+
+        -- Non-interactable elements fail fast instead of dropping events.
+        local ghost = document:query_selector("#ghost")
+        assert(ghost ~= nil, "ghost missing")
+        assert(ghost:click() == false, "hidden click should fail fast")
+        assert(ghost:type("x") == false, "hidden type should fail fast")
+        assert(session:click_element(ghost) == false,
+               "session hidden click should fail")
+
+        return "ok"
+    )LUA";
+
+    const auto result = lua.run(script, "lua_synthetic_interactions");
+    EXPECT_TRUE(result.ok) << lua.last_error();
+}

@@ -313,3 +313,29 @@ TEST(Element, OuterHtmlIncludesSelf) {
     EXPECT_NE(outer.find("<p>inside</p>"), std::string::npos);
     EXPECT_NE(outer.find("</div>"), std::string::npos);
 }
+
+TEST(Element, SyntheticGatesFailFastOnNonInteractable) {
+    const auto document = parse_html(
+        "<html><body>"
+        "<button id='hidden' style='display: none'>H</button>"
+        "<button id='invisible' style='visibility: hidden'>I</button>"
+        "<div hidden><button id='nested'>N</button></div>"
+        "<button id='off' disabled>O</button>"
+        "<input id='aria' aria-disabled='true'>"
+        "<button id='live'>L</button>"
+        "</body></html>",
+        "http://x.test/");
+    for (const char* selector :
+         {"#hidden", "#invisible", "#nested", "#off", "#aria"}) {
+        auto element = document->query_selector(selector);
+        ASSERT_NE(element, nullptr) << selector;
+        // Fail fast with false rather than silently dropping events; the full
+        // cascade requires Session::click_element/type_element.
+        EXPECT_FALSE(element->click()) << selector;
+        EXPECT_FALSE(element->type("x")) << selector;
+    }
+    // Invalid elements fail fast as well.
+    prowsetk::Element invalid;
+    EXPECT_FALSE(invalid.click());
+    EXPECT_FALSE(invalid.type("x"));
+}

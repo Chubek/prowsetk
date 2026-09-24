@@ -1048,7 +1048,7 @@ names from discovered URLs, respects `observe_network`, and merges duplicate
 method/path discoveries while retaining higher-confidence provenance.
 
 With `observe_network`, extraction from a `Session` (C++, `lprowsext.endpoints.extract(session, ...)`,
-`scrape2oapi`, and `scrape2postman`) also records the host-mediated requests the
+and `scrape-endpoints`) also records the host-mediated requests the
 current document's scripts actually issued (`fetch`, `XMLHttpRequest`,
 `sendBeacon`, dynamic script and image loads), exposed as
 `Session::page_script_requests()`. This surfaces methods and URLs assembled at
@@ -1612,7 +1612,7 @@ redact_query_parameters = [
 enabled = false
 
 # `$PROWSETK_ASSISTANT_BROWSER` overrides this command at runtime. When neither
-# is set, scrape2oapi/scrape2postman use `assistant-browser`.
+# is set, `scrape-endpoints` uses `assistant-browser`.
 command = "assistant-browser"
 
 # Describes how the assistant browser is controlled or observed. Supported
@@ -1784,8 +1784,10 @@ This keeps drivers deterministic and usable without a network.
 ### Booking.com example driver
 
 `examples/booking-dotcom-admin-scrape/scrape-booking-dotcom-admin.lua` uses the
-existing `plugins/scrape2oapi/` and `plugins/scrape2postman/` Lua plugins to
-write OpenAPI 3.1 YAML and a Postman collection. From the repository root:
+unified `plugins/scrape-endpoints/` Lua plugin to write OpenAPI 3.1 YAML and a
+Postman collection. The former `plugins/scrape2oapi/` and
+`plugins/scrape2postman/` trees are retained under `plugins/.deprecated/` for
+reference only. From the repository root:
 
 ```sh
 build/default/src/cli/prowsetk run booking-dotcom-admin \

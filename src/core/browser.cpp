@@ -940,9 +940,8 @@ bool Session::click_element(std::shared_ptr<Element> element) {
     if (handle == kNoElement) {
         return false;
     }
-    const std::string script = "(function(){var el=__prowsetk.wrap(" +
-                               std::to_string(handle) +
-                               "); return el ? el.click() : false;})()";
+    const std::string script =
+        "__prowsetkClick(" + std::to_string(handle) + ");";
     const ScriptResult result = javascript_->evaluate(script, ScriptOptions{});
     return result.ok && result.value == "true";
 }
@@ -981,9 +980,8 @@ bool Session::type_element(std::shared_ptr<Element> element,
                 }
         }
     }
-    const std::string script = "(function(){var el=__prowsetk.wrap(" +
-                               std::to_string(handle) +
-                               "); return el ? el.type(\"" + escaped + "\") : false;})()";
+    const std::string script =
+        "__prowsetkType(" + std::to_string(handle) + ",\"" + escaped + "\");";
     const ScriptResult result = javascript_->evaluate(script, ScriptOptions{});
     return result.ok && result.value == "true";
 }

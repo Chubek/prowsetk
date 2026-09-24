@@ -1118,12 +1118,12 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     if (!element || !element.__h) return false;
     var node = element;
     while (node && node.__h) {
-      var style = H.attr(node.__h, 'style') || '';
+      var style = String(H.attr(node.__h, 'style') || '').toLowerCase();
       if (/\bdisplay\s*:\s*none\b/.test(style)) return false;
       if (/\bvisibility\s*:\s*hidden\b/.test(style)) return false;
       if (H.hasAttr(node.__h, 'hidden')) return false;
       if (H.hasAttr(node.__h, 'disabled')) return false;
-      if (H.attr(node.__h, 'aria-disabled') === 'true') return false;
+      if (String(H.attr(node.__h, 'aria-disabled') || '').toLowerCase() === 'true') return false;
       var parent = H.parentNode(node.__h);
       node = parent ? wrap(parent) : null;
     }
@@ -2429,6 +2429,23 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   install('cancelAnimationFrame', cancelAnimationFrame, true);
   install('webkitRequestAnimationFrame', requestAnimationFrame, true);
   install('__prowsetkFlush', __prowsetkFlush, true);
+
+  // Session-mediated automation bridge (README "Synthetic Interaction
+  // Driver & SPA Event Cascades", section 4). Host controllers (C++
+  // Session::click_element/type_element, Lua elem:click()/elem:type())
+  // address C++-side Elements by script handle; the handle is wrapped
+  // internally so engine internals never cross into page script. Page code
+  // calling these observes the same cascade as element.click()/type().
+  function __prowsetkClick(handle) {
+    var el = wrap(Number(handle));
+    return el ? el.click() : false;
+  }
+  function __prowsetkType(handle, text) {
+    var el = wrap(Number(handle));
+    return el ? el.type(String(text == null ? '' : text)) : false;
+  }
+  install('__prowsetkClick', __prowsetkClick, true);
+  install('__prowsetkType', __prowsetkType, true);
 
   var nav = H.navigatorInfo();
   var ua = String(nav.userAgent || '');

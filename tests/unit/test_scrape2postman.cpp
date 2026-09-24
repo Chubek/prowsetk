@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+#include "prowsetk/browser.hpp"
+#include "prowsetk/network_client.hpp"
 #include "prowsetk/plugins/scrape2postman.hpp"
 #include <fstream>
 #include <limits>
@@ -115,6 +117,30 @@ TEST(Postman, DiscoveryFiltersAndConfidenceOptionsAreForwarded) {
     options.inspect_scripts = true;
     options.minimum_confidence = 1.0;
     EXPECT_TRUE(postman::scrape_from_document(*document, options).endpoints.empty());
+}
+
+TEST(Postman, SessionScrapeProbesSpaInteractionsBeforeExport) {
+    auto network = std::make_unique<prowsetk::MemoryNetworkClient>();
+    prowsetk::HttpResponse response;
+    response.status = 204;
+    response.final_url = "https://example.test/api/spa";
+    network->set_response("https://example.test/api/spa", response);
+
+    prowsetk::Browser browser;
+    browser.set_network_client(std::move(network));
+    auto session = browser.create_session();
+    postman::Scrape2PostmanOptions options;
+    options.html =
+        "<button id='load'>Load</button>"
+        "<script>document.getElementById('load').addEventListener('click',"
+        "function(){fetch('/api/spa',{method:'POST',body:'{}'});});</script>";
+    options.base_url = "https://example.test/app";
+
+    const auto result = postman::scrape(*session, options);
+    ASSERT_EQ(result.endpoints.size(), 1u);
+    EXPECT_EQ(result.endpoints.front().path, "/api/spa");
+    EXPECT_NE(result.openapi_yaml.find("/api/spa"), std::string::npos);
+    EXPECT_NE(result.postman_json.find("/api/spa"), std::string::npos);
 }
 
 TEST(Postman, WritesExactJsonAndReportsOutputErrors) {

@@ -148,15 +148,15 @@ function main(args)
     -- Prefer the dedicated Lua plugin layer when available; fall back to raw
     -- endpoint extraction + local filtering so the driver works even when the
     -- native plugin is not installed.
-    local ok, mod = pcall(require, "scrape2oapi")
+    local ok, mod = pcall(require, "scrape_endpoints")
     local result = nil
     local yaml = nil
     if ok and type(mod.scrape) == "function" then
         result = mod.scrape(session, spec)
         yaml = result.openapi_yaml
     else
-        -- Fallback: try plugins/scrape2oapi Lua path
-        local ok2, mod2 = pcall(require, "plugins.scrape2oapi.lua.scrape2oapi")
+        -- Fallback: try unified scrape-endpoints Lua path
+        local ok2, mod2 = pcall(require, "plugins.scrape-endpoints.lua.scrape_endpoints")
         if ok2 and type(mod2.scrape) == "function" then
             result = mod2.scrape(session, spec)
             yaml = result.openapi_yaml

@@ -335,6 +335,56 @@ TEST(JavaScriptPlatform, DomEventsCaptureBubbleAndSubmit) {
     EXPECT_FALSE(platform.host->consume_pending_navigation(navigation));
 }
 
+TEST(JavaScriptPlatform, SyntheticInteractionCascadeIsOrderedAndGuarded) {
+    auto platform = make_platform(
+        "<html><body>"
+        "<button id='go'>go</button>"
+        "<button id='hidden' hidden>no</button>"
+        "<button id='styled' style='DISPLAY: none'>no</button>"
+        "<button id='aria' aria-disabled='TRUE'>no</button>"
+        "<input id='name'>"
+        "</body></html>");
+
+    ASSERT_TRUE(platform
+                    .run("globalThis.events = [];"
+                         "var go = document.getElementById('go');"
+                         "['pointerover','pointerenter','pointerdown','mousedown',"
+                         " 'focus','focusin','pointerup','mouseup','click'].forEach(function (type) {"
+                         "  go.addEventListener(type, function () { events.push(type); });"
+                         "});"
+                         "globalThis.clicked = go.click();")
+                    .ok);
+    EXPECT_EQ(platform.value("events.join(',')"),
+              "pointerover,pointerenter,pointerdown,mousedown,focus,focusin,pointerup,mouseup,click");
+    EXPECT_EQ(platform.value("clicked"), "true");
+
+    ASSERT_TRUE(platform
+                    .run("globalThis.guarded = ["
+                         "  document.getElementById('hidden').click(),"
+                         "  document.getElementById('styled').click(),"
+                         "  document.getElementById('aria').click()"
+                         "];"
+                         "var hidden = document.getElementById('hidden');"
+                         "hidden.hidden = false;"
+                         "globalThis.hiddenReflected = hidden.hasAttribute('hidden') + ':' + hidden.hidden;")
+                    .ok);
+    EXPECT_EQ(platform.value("guarded.join(',')"), "false,false,false");
+    EXPECT_EQ(platform.value("hiddenReflected"), "false:false");
+
+    ASSERT_TRUE(platform
+                    .run("globalThis.typed = [];"
+                         "var input = document.getElementById('name');"
+                         "['focus','focusin','keydown','keypress','input','keyup','change','blur'].forEach(function (type) {"
+                         "  input.addEventListener(type, function (event) { typed.push(type + ':' + (event.data || event.key || '')); });"
+                         "});"
+                         "globalThis.typeOk = input.type('ab');")
+                    .ok);
+    EXPECT_EQ(platform.value("typeOk"), "true");
+    EXPECT_EQ(platform.value("document.getElementById('name').value"), "ab");
+    EXPECT_EQ(platform.value("typed.join(',')"),
+              "focus:,focusin:,keydown:a,keypress:a,input:a,keyup:a,keydown:b,keypress:b,input:b,keyup:b,change:,blur:");
+}
+
 TEST(JavaScriptPlatform, MutationObserverAndLifecycleMicrotasks) {
     auto platform = make_platform();
     ASSERT_TRUE(platform

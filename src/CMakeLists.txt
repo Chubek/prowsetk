@@ -81,8 +81,8 @@ prowsetk_install_library(prowsetk_core)
 
 add_subdirectory(session)
 
-if(EXISTS "${PROJECT_SOURCE_DIR}/plugins/scrape2oapi/CMakeLists.txt")
-    add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/scrape2oapi" "${CMAKE_BINARY_DIR}/plugins/scrape2oapi")
+if(EXISTS "${PROJECT_SOURCE_DIR}/plugins/scrape-endpoints/CMakeLists.txt")
+    add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/scrape-endpoints" "${CMAKE_BINARY_DIR}/plugins/scrape-endpoints")
 endif()
 if(EXISTS "${PROJECT_SOURCE_DIR}/plugins/ezlogin/CMakeLists.txt")
     add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/ezlogin" "${CMAKE_BINARY_DIR}/plugins/ezlogin")
@@ -93,8 +93,6 @@ endif()
 if(EXISTS "${PROJECT_SOURCE_DIR}/plugins/restful-resolver/CMakeLists.txt")
     add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/restful-resolver" "${CMAKE_BINARY_DIR}/plugins/restful-resolver")
 endif()
-
-add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/scrape2postman" "${CMAKE_BINARY_DIR}/plugins/scrape2postman")
 
 if(PROWSETK_BUILD_CLI)
     add_subdirectory(cli)

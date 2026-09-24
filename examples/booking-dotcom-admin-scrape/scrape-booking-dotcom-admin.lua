@@ -33,8 +33,7 @@ local function require_first(...)
 end
 
 local ezlogin = require_first("ezlogin", "plugins.ezlogin.lua.ezlogin")
-local scrape2oapi = require_first("scrape2oapi", "plugins.scrape2oapi.lua.scrape2oapi")
-local scrape2postman = require_first("scrape2postman", "plugins.scrape2postman.lua.scrape2postman")
+local scrape_endpoints = require_first("scrape_endpoints", "plugins.scrape-endpoints.lua.scrape_endpoints")
 local captcha_handler = require_first("captcha_handler", "plugins.captcha-handler.lua.captcha_handler")
 local restful_resolver = nil
 do
@@ -58,7 +57,7 @@ local function shell_quote(value)
     return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
--- Login can fail before scrape2oapi gets a chance to offer its handoff. Keep
+-- Login can fail before scrape_endpoints gets a chance to offer its handoff. Keep
 -- this small driver-level bridge so the configured assistant browser is still
 -- offered for MFA, human verification, or site-specific browser checks.
 local function offer_login_assistant_browser(session, url, args, reason)
@@ -1145,7 +1144,7 @@ local function resolve_api_chains(session, endpoints, seen_endpoints, start_url,
 end
 
 local function discover(session, url, spec)
-    local result = scrape2oapi.scrape(session, spec)
+    local result = scrape_endpoints.scrape(session, spec)
     return result.endpoints or {}
 end
 
@@ -1479,7 +1478,7 @@ function main(args)
             endpoints = filter_booking_tld(endpoints or {})
         end
         local safe_endpoints = redacted_endpoints(endpoints or {})
-        local yaml = scrape2oapi.render_openapi_yaml(safe_endpoints, {
+        local yaml = scrape_endpoints.render_openapi_yaml(safe_endpoints, {
             openapi_version = "3.1.0",
             redact_secrets = true,
             include_provenance = true,
@@ -1488,7 +1487,7 @@ function main(args)
         yaml = append_metadata(yaml, authenticated_flag, restful_status)
         write_file(output, yaml)
 
-        local postman_json = scrape2postman.render_postman_json(safe_endpoints, {
+        local postman_json = scrape_endpoints.render_postman_json(safe_endpoints, {
             collection_name = "Discovered API (Booking.com Admin)",
             redact_secrets = true,
             include_provenance = true

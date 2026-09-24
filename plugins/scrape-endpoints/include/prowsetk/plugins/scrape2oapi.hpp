@@ -1,0 +1,6 @@
+#ifndef PROWSETK_PLUGINS_SCRAPE2OAPI_COMPAT_HPP
+#define PROWSETK_PLUGINS_SCRAPE2OAPI_COMPAT_HPP
+
+#include "prowsetk/plugins/scrape_endpoints.hpp"
+
+#endif  // PROWSETK_PLUGINS_SCRAPE2OAPI_COMPAT_HPP

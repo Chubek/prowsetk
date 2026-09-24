@@ -59,8 +59,8 @@ TEST(PostmanIntegration, NativeRegistryExportsOnDocument) {
     const auto path = std::filesystem::path(TEST_BINARY_DIR) / "native.postman_collection.json";
     browser.plugins().load_native(POSTMAN_PLUGIN_PATH);
     ASSERT_EQ(browser.plugins().initialize_all(), 1u);
-    ASSERT_EQ(browser.plugins().configure_all({{"scrape2postman.output", path.string()},
-        {"scrape2postman.collection_name", "Native collection"}}), 1u);
+    ASSERT_EQ(browser.plugins().configure_all({{"scrape-endpoints.output_postman", path.string()},
+        {"scrape-endpoints.collection_name", "Native collection"}}), 1u);
     auto session = browser.create_session();
     session->load_html("<script>fetch('/api/users?token=private-token')</script>", "https://example.test/");
     std::ifstream file(path);
@@ -80,9 +80,9 @@ TEST(PostmanIntegration, NativeAbiValidatesInputsAndContainsErrors) {
     api.abi_version = PROWSETK_PLUGIN_ABI_VERSION;
     ASSERT_EQ(plugin->initialize(&host), 0);
     EXPECT_NE(plugin->configure(&host, nullptr, 1), 0);
-    ProwseTkConfigEntry invalid{"scrape2postman.include_provenance", "invalid"};
+    ProwseTkConfigEntry invalid{"scrape-endpoints.include_provenance", "invalid"};
     EXPECT_NE(plugin->configure(&host, &invalid, 1), 0);
-    ProwseTkConfigEntry output{"scrape2postman.output", TEST_BINARY_DIR};
+    ProwseTkConfigEntry output{"scrape-endpoints.output_postman", TEST_BINARY_DIR};
     EXPECT_EQ(plugin->configure(&host, &output, 1), 0);
     ProwseTkDocumentSnapshot document{"https://example.test/", "", "<p>test</p>", "test"};
     EXPECT_NE(plugin->on_document(&host, &document), 0);
@@ -97,12 +97,12 @@ TEST(PostmanIntegration, LuaScrapesWritesAndExposesContentTypes) {
         "'" PROWSETK_SOURCE_DIR "/?.lua;' .. package.path");
     ASSERT_TRUE(setup.ok) << lua.last_error();
     const auto result = lua.run(R"LUA(
-        local postman = require("plugins.scrape2postman.lua.scrape2postman")
+        local postman = require("plugins.scrape-endpoints.lua.scrape_endpoints")
         local session = require("lprowse").browser.new():create_session()
         local spec = {
             html = '<form action="/api/login" method="post"><input name="password" value="private-form"></form>',
             base_url = "https://example.test/", collection_name = 'Lua "collection"',
-            output = ")LUA" TEST_BINARY_DIR R"LUA(/lua.postman_collection.json"
+            output_postman = ")LUA" TEST_BINARY_DIR R"LUA(/lua.postman_collection.json"
         }
         local result = postman.scrape(session, spec)
         assert(result.endpoint_count == 1)
@@ -110,12 +110,12 @@ TEST(PostmanIntegration, LuaScrapesWritesAndExposesContentTypes) {
         assert(type(result.endpoints[1].response_content_type) == "string")
         assert(result.postman_json:find('"mode":"urlencoded"', 1, true))
         assert(not result.postman_json:find("private-form", 1, true))
-        local file = assert(io.open(spec.output, "rb"))
+        local file = assert(io.open(spec.output_postman, "rb"))
         assert(file:read("a") == result.postman_json)
         file:close()
-        result:write_postman_json(spec.output)
-        spec.output = nil
-        assert(postman.dump(session:document(), spec) == result.postman_json)
+        result:write_postman_json(spec.output_postman)
+        spec.output_postman = nil
+        assert(postman.scrape(session:document(), spec).postman_json == result.postman_json)
         assert(not pcall(function() result:write_postman_json(")LUA" TEST_BINARY_DIR R"LUA(") end))
     )LUA");
     EXPECT_TRUE(result.ok) << lua.last_error();
@@ -126,7 +126,7 @@ TEST(PostmanIntegration, LuaRedactsAndSortsWithoutMutatingSpec) {
     prowsetk::LuaRuntime lua;
     ASSERT_TRUE(lua.run("package.path = '" PROWSETK_SOURCE_DIR "/?.lua;' .. package.path").ok);
     const auto result = lua.run(R"LUA(
-        local postman = require("plugins.scrape2postman.lua.scrape2postman")
+        local postman = require("plugins.scrape-endpoints.lua.scrape_endpoints")
         local a = {url="https://user:private-pass@example.test/api/a?%74oken=private-token#private-fragment",
             source="https://example.test/?password=private-source", method="post", confidence=0.6,
             redirect_chain={"https://example.test/?apikey=private-hop"}, body="private-body",
@@ -151,7 +151,7 @@ TEST(PostmanIntegration, LuaPostmanRecursiveScrapeFollowsJsonLinks) {
     prowsetk::LuaRuntime lua;
     ASSERT_TRUE(lua.run("package.path = '" PROWSETK_SOURCE_DIR "/?.lua;' .. package.path").ok);
     const auto result = lua.run(R"LUA(
-        local postman = require("plugins.scrape2postman.lua.scrape2postman")
+        local postman = require("plugins.scrape-endpoints.lua.scrape_endpoints")
         local browser = require("lprowse").browser.new()
         local real = browser:create_session()
         local calls = {}
@@ -198,7 +198,7 @@ TEST(PostmanIntegration, LuaAssistantBrowserMetadataIsNonInteractiveWhenPromptDi
     prowsetk::LuaRuntime lua;
     ASSERT_TRUE(lua.run("package.path = '" PROWSETK_SOURCE_DIR "/?.lua;' .. package.path").ok);
     const auto result = lua.run(R"LUA(
-        local postman = require("plugins.scrape2postman.lua.scrape2postman")
+        local postman = require("plugins.scrape-endpoints.lua.scrape_endpoints")
         local browser = require("lprowse").browser.new()
         local session = browser:create_session()
         local result = postman.scrape(session, {
@@ -226,7 +226,7 @@ TEST(PostmanIntegration, LuaOpenApiRecursiveYamlIncludesResolvedEndpointsWithout
     prowsetk::LuaRuntime lua;
     ASSERT_TRUE(lua.run("package.path = '" PROWSETK_SOURCE_DIR "/?.lua;' .. package.path").ok);
     const auto result = lua.run(R"LUA(
-        local oapi = require("plugins.scrape2oapi.lua.scrape2oapi")
+        local oapi = require("plugins.scrape-endpoints.lua.scrape_endpoints")
         local browser = require("lprowse").browser.new()
         local real = browser:create_session()
         local session = {}

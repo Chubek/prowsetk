@@ -270,3 +270,280 @@ TEST(ScriptPlatform, DisabledJavascriptKeepsFallbackBehaviour) {
     EXPECT_EQ(session->document()->query_selector_all("noscript").size(), 1u);
     EXPECT_NE(session->document()->query_selector("script"), nullptr);
 }
+
+// Synthetic Interaction Driver (README "Synthetic Interaction Driver & SPA
+// Event Cascades"): Lua/C++ synthetic actions must run the full browser event
+// sequences and drain microtasks so framework handlers reach the host.
+
+namespace {
+
+void install_cascade_recorder(prowsetk::Session& session, const std::string& selector) {
+    session.evaluate_js(
+        "window.__cascade = [];"
+        "var __el = document.querySelector('" + selector + "');"
+        "['pointerover','pointerenter','pointerdown','mousedown','focus',"
+        " 'pointerup','mouseup','click'].forEach(function (t) {"
+        "  __el.addEventListener(t, function () { window.__cascade.push(t); });"
+        "});");
+}
+
+std::string cascade_log(prowsetk::Session& session) {
+    return session.evaluate_js("window.__cascade.join('|')");
+}
+
+}  // namespace
+
+TEST(ScriptPlatform, SyntheticClickDispatchesPointerCascadeInOrder) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    network->set_response("https://spa.test/", html(
+        "<html><body><button id='go' type='button'>Go</button></body></html>",
+        "https://spa.test/"));
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->navigate("https://spa.test/");
+    install_cascade_recorder(*session, "#go");
+
+    auto button = session->document()->query_selector("#go");
+    ASSERT_NE(button, nullptr);
+    EXPECT_TRUE(session->click_element(button));
+    EXPECT_EQ(cascade_log(*session),
+              "pointerover|pointerenter|pointerdown|mousedown|focus|"
+              "pointerup|mouseup|click");
+}
+
+TEST(ScriptPlatform, SyntheticClickSubmitControlFiresSubmitOnce) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    network->set_response("https://shop.test/", html(
+        "<html><body>"
+        "<form id='f' action='/search' method='get'>"
+        "<input name='q' value='red shoes'>"
+        "<button id='go' type='submit'>Search</button>"
+        "</form>"
+        "<script>"
+        "window.__submits = 0;"
+        "document.getElementById('f').addEventListener('submit', function () {"
+        "  window.__submits += 1;"
+        "});"
+        "</script></body></html>", "https://shop.test/"));
+    network->set_response("https://shop.test/search?q=red%20shoes", html(
+        "<html><head><title>Results</title></head><body></body></html>",
+        "https://shop.test/search?q=red%20shoes"));
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->navigate("https://shop.test/");
+
+    auto button = session->document()->query_selector("#go");
+    ASSERT_NE(button, nullptr);
+    EXPECT_TRUE(session->click_element(button));
+    // Exactly one submit: the click default action fires it, with no duplicate
+    // from the cascade itself.
+    EXPECT_EQ(session->evaluate_js("window.__submits"), "1");
+    EXPECT_EQ(session->document()->title(), "Results");
+}
+
+TEST(ScriptPlatform, SyntheticClickPreventDefaultSkipsSubmit) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    network->set_response("https://shop.test/", html(
+        "<html><body>"
+        "<form id='f' action='/search' method='get'>"
+        "<button id='go' type='submit'>Search</button>"
+        "</form>"
+        "<script>"
+        "window.__submits = 0;"
+        "document.getElementById('go').addEventListener('click', function (e) {"
+        "  e.preventDefault();"
+        "});"
+        "document.getElementById('f').addEventListener('submit', function () {"
+        "  window.__submits += 1;"
+        "});"
+        "</script></body></html>", "https://shop.test/"));
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->navigate("https://shop.test/");
+
+    auto button = session->document()->query_selector("#go");
+    ASSERT_NE(button, nullptr);
+    EXPECT_FALSE(session->click_element(button));
+    EXPECT_EQ(session->evaluate_js("window.__submits"), "0");
+    EXPECT_EQ(session->current_url(), "https://shop.test/");
+}
+
+TEST(ScriptPlatform, SyntheticClickFailsFastOnNonInteractable) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    network->set_response("https://spa.test/", html(
+        "<html><body>"
+        "<button id='hidden' type='button' style='display: none'>H</button>"
+        "<div id='wrap' hidden><button id='nested' type='button'>N</button></div>"
+        "<button id='off' type='button' disabled>O</button>"
+        "<button id='live' type='button'>L</button>"
+        "<script>"
+        "window.__clicks = 0;"
+        "document.querySelectorAll('button').forEach(function (b) {"
+        "  b.addEventListener('click', function () { window.__clicks += 1; });"
+        "});"
+        "</script></body></html>", "https://spa.test/"));
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->navigate("https://spa.test/");
+
+    for (const char* id : {"#hidden", "#nested", "#off"}) {
+        auto element = session->document()->query_selector(id);
+        ASSERT_NE(element, nullptr) << id;
+        EXPECT_FALSE(session->click_element(element)) << id;
+    }
+    auto live = session->document()->query_selector("#live");
+    ASSERT_NE(live, nullptr);
+    EXPECT_TRUE(session->click_element(live));
+    EXPECT_EQ(session->evaluate_js("window.__clicks"), "1");
+}
+
+TEST(ScriptPlatform, SyntheticTypeFiresKeyboardCascadeOncePerChar) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    network->set_response("https://spa.test/", html(
+        "<html><body><input id='q' type='text' value=''>"
+        "<script>"
+        "window.__keys = [];"
+        "var __input = document.getElementById('q');"
+        "['keydown','keypress','input','keyup'].forEach(function (t) {"
+        "  __input.addEventListener(t, function (e) {"
+        "    window.__keys.push(t + ':' + (e.data || e.key || ''));"
+        "  });"
+        "});"
+        "window.__changes = 0;"
+        "__input.addEventListener('change', function () { window.__changes += 1; });"
+        "</script></body></html>", "https://spa.test/"));
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->navigate("https://spa.test/");
+
+    auto input = session->document()->query_selector("#q");
+    ASSERT_NE(input, nullptr);
+    EXPECT_TRUE(session->type_element(input, "ab"));
+    EXPECT_EQ(input->value(), "ab");
+    // One canonical input event per character (no duplicate from the value
+    // setter), followed by a single change on commit.
+    EXPECT_EQ(session->evaluate_js("window.__keys.join('|')"),
+              "keydown:a|keypress:a|input:a|keyup:a|"
+              "keydown:b|keypress:b|input:b|keyup:b");
+    EXPECT_EQ(session->evaluate_js("window.__changes"), "1");
+}
+
+TEST(ScriptPlatform, SyntheticTypeInvokesNativeSetterForControlledInputs) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    network->set_response("https://spa.test/", html(
+        "<html><body><input id='q' type='text' value=''>"
+        "<script>"
+        "window.__nativeSets = [];"
+        "var __input = document.getElementById('q');"
+        "var __proto = Object.getPrototypeOf(__input);"
+        "var __desc = Object.getOwnPropertyDescriptor(__proto, 'value');"
+        "Object.defineProperty(__proto, 'value', {"
+        "  get: __desc.get,"
+        "  set: function (v) { window.__nativeSets.push(v); __desc.set.call(this, v); }"
+        "});"
+        "</script></body></html>", "https://spa.test/"));
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->navigate("https://spa.test/");
+
+    auto input = session->document()->query_selector("#q");
+    ASSERT_NE(input, nullptr);
+    EXPECT_TRUE(session->type_element(input, "hi"));
+    // Each keystroke went through the native prototype setter, so framework
+    // value trackers installed there observe every intermediate value.
+    EXPECT_EQ(session->evaluate_js("window.__nativeSets.join('|')"), "h|hi");
+    EXPECT_EQ(input->value(), "hi");
+}
+
+TEST(ScriptPlatform, SyntheticTypeRejectsNonInputsAndDisabled) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    network->set_response("https://spa.test/", html(
+        "<html><body><div id='d'>text</div>"
+        "<input id='off' type='text' disabled>"
+        "<input id='on' type='text' value=''></body></html>",
+        "https://spa.test/"));
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->navigate("https://spa.test/");
+
+    auto div = session->document()->query_selector("#d");
+    ASSERT_NE(div, nullptr);
+    EXPECT_FALSE(session->type_element(div, "x"));
+    auto disabled = session->document()->query_selector("#off");
+    ASSERT_NE(disabled, nullptr);
+    EXPECT_FALSE(session->type_element(disabled, "x"));
+    // Typing an empty string into a live input still focuses and commits.
+    auto live = session->document()->query_selector("#on");
+    ASSERT_NE(live, nullptr);
+    EXPECT_TRUE(session->type_element(live, ""));
+}
+
+TEST(ScriptPlatform, SyntheticActionDrainsFrameworkFetchBeforeReturning) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    network->set_response("https://spa.test/", html(
+        "<html><body><button id='go' type='button'>Go</button>"
+        "<script>"
+        "document.getElementById('go').addEventListener('click', function () {"
+        "  fetch('/api/clicked', { method: 'POST', body: 'x=1' });"
+        "});"
+        "</script></body></html>", "https://spa.test/"));
+    HttpResponse api;
+    api.status = 200;
+    api.body = "{}";
+    api.headers.emplace_back("Content-Type", "application/json");
+    network->set_response("https://spa.test/api/clicked", api);
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->navigate("https://spa.test/");
+
+    auto button = session->document()->query_selector("#go");
+    ASSERT_NE(button, nullptr);
+    EXPECT_TRUE(session->click_element(button));
+    // The concluding __prowsetkFlush drained the framework fetch to the host
+    // before the action returned.
+    bool observed = false;
+    for (const auto& request : session->page_script_requests()) {
+        if (request.url == "https://spa.test/api/clicked" &&
+            request.method == "POST") {
+            observed = true;
+        }
+    }
+    EXPECT_TRUE(observed);
+}
+
+TEST(ScriptPlatform, SyntheticActionsRejectInvalidAndClosedSessions) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    network->set_response("https://spa.test/", html(
+        "<html><body><button id='go' type='button'>Go</button></body></html>",
+        "https://spa.test/"));
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->navigate("https://spa.test/");
+
+    EXPECT_FALSE(session->click_element(nullptr));
+    EXPECT_FALSE(session->type_element(nullptr, "x"));
+    EXPECT_FALSE(session->click_element(std::make_shared<prowsetk::Element>()));
+    auto button = session->document()->query_selector("#go");
+    ASSERT_NE(button, nullptr);
+    session->close();
+    EXPECT_FALSE(session->click_element(button));
+    EXPECT_FALSE(session->type_element(button, "x"));
+}
