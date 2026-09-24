@@ -143,6 +143,57 @@ TEST(Scrape2OapiApiPath, RejectsOrdinaryPage) {
     EXPECT_FALSE(scrape::is_api_path("/products", {}));
 }
 
+TEST(Scrape2OapiGarbage, RejectsEmptyPath) {
+    EXPECT_FALSE(scrape::is_garbage_path("", {}));
+}
+
+TEST(Scrape2OapiGarbage, RejectsScriptBundle) {
+    EXPECT_TRUE(scrape::is_garbage_path("/static/app.js", {}));
+    EXPECT_TRUE(scrape::is_garbage_path("/assets/bundle.mjs", {}));
+}
+
+TEST(Scrape2OapiGarbage, RejectsStylesheet) {
+    EXPECT_TRUE(scrape::is_garbage_path("/css/site.css", {}));
+}
+
+TEST(Scrape2OapiGarbage, RejectsImage) {
+    EXPECT_TRUE(scrape::is_garbage_path("/img/logo.png", {}));
+    EXPECT_TRUE(scrape::is_garbage_path("/images/photo.jpg", {}));
+}
+
+TEST(Scrape2OapiGarbage, RejectsFontAndSourceMap) {
+    EXPECT_TRUE(scrape::is_garbage_path("/fonts/icons.woff2", {}));
+    EXPECT_TRUE(scrape::is_garbage_path("/static/app.js.map", {}));
+}
+
+TEST(Scrape2OapiGarbage, RejectsAssetDirectory) {
+    EXPECT_TRUE(scrape::is_garbage_path("/static/chunk.js", {}));
+    EXPECT_TRUE(scrape::is_garbage_path("/node_modules/lib/index.js", {}));
+}
+
+TEST(Scrape2OapiGarbage, IsCaseInsensitive) {
+    EXPECT_TRUE(scrape::is_garbage_path("/STATIC/APP.JS", {}));
+}
+
+TEST(Scrape2OapiGarbage, IgnoresQueryStringAndFragment) {
+    EXPECT_TRUE(scrape::is_garbage_path("/app.js?v=2", {}));
+    EXPECT_FALSE(scrape::is_garbage_path("/page?x=.js", {}));
+}
+
+TEST(Scrape2OapiGarbage, RejectsBundleUnderApiPath) {
+    EXPECT_TRUE(scrape::is_garbage_path("/api/bundle.js", {}));
+}
+
+TEST(Scrape2OapiGarbage, KeepsApiEndpoint) {
+    EXPECT_FALSE(scrape::is_garbage_path("/api/users", {}));
+}
+
+TEST(Scrape2OapiGarbage, KeepsOrdinaryPage) {
+    // Garbage matching is asset-only; plain pages are the allow-rule's job.
+    EXPECT_FALSE(scrape::is_garbage_path("/home", {}));
+    EXPECT_FALSE(scrape::is_garbage_path("/reservations", {}));
+}
+
 TEST(Scrape2OapiFilter, KeepsApiEndpointByDefault) {
     auto values = scrape::filter_to_api({endpoint()}, {});
     ASSERT_EQ(values.size(), 1u);
@@ -163,6 +214,35 @@ TEST(Scrape2OapiFilter, KeepsPutWithoutApiPatternByDefault) {
 TEST(Scrape2OapiFilter, DropsOrdinaryEndpointByDefault) {
     auto values = scrape::filter_to_api({endpoint("/home")}, {});
     EXPECT_TRUE(values.empty());
+}
+
+TEST(Scrape2OapiFilter, DropsGarbageAssetByDefault) {
+    EXPECT_TRUE(scrape::filter_to_api({endpoint("/static/app.js")}, {}).empty());
+    EXPECT_TRUE(scrape::filter_to_api({endpoint("/img/logo.png")}, {}).empty());
+}
+
+TEST(Scrape2OapiFilter, DropsGarbagePostDespiteMethodRule) {
+    // A POST to a static asset is gunk, not backend evidence.
+    EXPECT_TRUE(
+        scrape::filter_to_api({endpoint("/api/pixel.gif", "post")}, {}).empty());
+}
+
+TEST(Scrape2OapiFilter, DropsGarbageWithoutPatternRequirement) {
+    scrape::Scrape2OapiOptions options;
+    options.require_api_pattern = false;
+    EXPECT_TRUE(
+        scrape::filter_to_api({endpoint("/static/app.js")}, options).empty());
+    EXPECT_EQ(scrape::filter_to_api({endpoint("/home")}, options).size(), 1u);
+}
+
+TEST(Scrape2OapiFilter, ApiOnlyFalseKeepsEverything) {
+    scrape::Scrape2OapiOptions options;
+    options.api_only = false;
+    EXPECT_EQ(
+        scrape::filter_to_api({endpoint("/home"), endpoint("/static/app.js")},
+                              options)
+            .size(),
+        2u);
 }
 
 TEST(Scrape2OapiFilter, PreservesOrder) {

@@ -229,7 +229,8 @@ TEST(CliDriverRun, BookingDotcomOfflineOpenApi) {
     ASSERT_EQ(run_command(command), 0) << read_file(log);
     const auto yaml = read_file(output);
     EXPECT_NE(yaml.find("openapi: 3.1.0"), std::string::npos);
-    EXPECT_NE(yaml.find("/reservations"), std::string::npos);
+    // api-only is on by default: the plain page is gunk, the API call stays.
+    EXPECT_EQ(yaml.find("'/reservations':"), std::string::npos);
     EXPECT_NE(yaml.find("/api/hotels"), std::string::npos);
     EXPECT_NE(yaml.find("authenticated: false"), std::string::npos);
 #endif

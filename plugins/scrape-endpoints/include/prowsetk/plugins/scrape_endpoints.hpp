@@ -14,6 +14,12 @@
 
 namespace prowsetk::plugins::scrape_endpoints {
 
+// Default garbage/gunk patterns: static-asset suffixes and asset-directory
+// markers for endpoints that cannot serve as proper API endpoints. Shared by
+// ScrapeEndpointsOptions and the is_garbage_path empty-pattern fallback
+// (mirroring how is_api_path falls back to builtin markers).
+const std::vector<std::string>& default_garbage_patterns();
+
 // Unified options for endpoint scraping and export. The OpenAPI and Postman
 // exporters share the same host-mediated discovery and SPA probing path.
 struct ScrapeEndpointsOptions {
@@ -39,6 +45,14 @@ struct ScrapeEndpointsOptions {
                                              "/telemetry", "challenge",
                                              "/beacon", "/collect"};
     bool require_api_pattern = true;
+
+    // Garbage/gunk filtering ("api-only"): drops endpoints that cannot serve
+    // as proper API endpoints — static assets, bundles, images, fonts, media
+    // — even when their path carries an API marker or their method is not
+    // GET. Applied by filter_to_api when `api_only` is set (the default);
+    // set `api_only = false` to keep every discovered endpoint.
+    bool api_only = true;
+    std::vector<std::string> garbage_patterns = default_garbage_patterns();
 
     bool resolve_chain = false;
     bool follow_json_links = true;
@@ -106,6 +120,13 @@ using Scrape2PostmanResult = ScrapeEndpointsResult;
 bool is_api_path(const std::string& path,
                  const std::vector<std::string>& patterns);
 
+// Reports whether `path` looks like static-asset gunk rather than a proper
+// API endpoint: a known asset suffix (".js", ".css", ".png", ...) or an
+// asset-directory marker ("/static/", "/fonts/", ...). Matching is
+// case-insensitive on the path without query or fragment. Heuristic.
+bool is_garbage_path(const std::string& path,
+                     const std::vector<std::string>& patterns);
+
 std::vector<DiscoveredEndpoint> filter_to_api(
     const std::vector<DiscoveredEndpoint>& endpoints,
     const ScrapeEndpointsOptions& options);
@@ -143,8 +164,10 @@ using Scrape2OapiResult = scrape_endpoints::ScrapeEndpointsResult;
 using AssistantBrowserHandoff = scrape_endpoints::AssistantBrowserHandoff;
 using ResolvedEndpoint = scrape_endpoints::ResolvedEndpoint;
 using scrape_endpoints::detect_assistant_browser_need;
+using scrape_endpoints::default_garbage_patterns;
 using scrape_endpoints::filter_to_api;
 using scrape_endpoints::is_api_path;
+using scrape_endpoints::is_garbage_path;
 using scrape_endpoints::render_scrape_yaml;
 using scrape_endpoints::scrape;
 using scrape_endpoints::scrape_from_document;

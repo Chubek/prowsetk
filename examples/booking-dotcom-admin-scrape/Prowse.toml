@@ -109,6 +109,8 @@ arguments = [
     { name = "assistant_browser_cookie_command", type = "string", required = false, default = "" },
     { name = "no-xcors", type = "boolean", required = false, default = false },
     { name = "no_xcors", type = "boolean", required = false, default = false },
+    { name = "api-only", type = "boolean", required = false, default = true },
+    { name = "api_only", type = "boolean", required = false, default = true },
     { name = "script_origins", type = "string", required = false, default = "bstatic.com" },
     { name = "html", type = "string", required = false, default = "" }
 ]

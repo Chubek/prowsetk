@@ -208,13 +208,19 @@ if scenario == 'success' or scenario == 'js-built-form' or scenario == 'two-step
     -- Verify OpenAPI YAML
     f = assert(io.open(output_file, 'r'))
     local yaml = f:read('*a'); f:close()
-    for _, path in ipairs({'/reservations','/api/hotels','/api/inline','/api/external',
+    for _, path in ipairs({'/api/hotels','/api/inline','/api/external',
                            '/api/bookings','/api/bookings/details','/api/availability',
                            '/api/hotel-details','/gateway/rates','/service/pricing',
                            '/hotel/hoteladmin','/partner-settings/security',
                            '/partner-settings/reservations','/partner-settings/policies',
                            '/partner-settings/users'}) do
         assert(yaml:find(path, 1, true), 'missing endpoint ' .. path)
+    end
+    -- api-only is on by default: garbage/gunk that cannot serve as a proper
+    -- API endpoint (plain pages, logout links, static bundles) is filtered
+    -- out of the final specs.
+    for _, gunk in ipairs({'/reservations','/logout','/app.js','/dashboard'}) do
+        assert(not yaml:find("'" .. gunk .. "'", 1, true), 'gunk leaked into YAML: ' .. gunk)
     end
     -- POST endpoints discovered method-aware in the fetched /app.js bundle
     -- (fetch POST, $.post, $.ajax POST, sendBeacon, cross-origin telemetry).
@@ -248,6 +254,10 @@ if scenario == 'success' or scenario == 'js-built-form' or scenario == 'two-step
     for _, secret in ipairs({'fixture-token','fixture#pass&word','fixture@example.com'}) do
         assert(not postman:find(secret, 1, true), 'secret leaked in Postman: ' .. secret)
     end
+    -- api-only gunk stays out of the collection too (quoted-URL precise so
+    -- /partner-settings/reservations does not false-positive).
+    assert(not postman:find('.com/reservations"', 1, true), 'gunk leaked into Postman')
+    assert(not postman:find('.com/logout"', 1, true), 'gunk leaked into Postman')
 
     -- Schema-grabber enrichment alongside scrape-endpoints: typed URL
     -- parameters, request/response schemas, never authoritative.

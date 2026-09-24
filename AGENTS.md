@@ -455,9 +455,12 @@ Discovery is heuristic and bounded, with explicit incomplete coverage metadata.
 After the crawl the driver applies restful-resolver and then schema-grabber
 enrichment (request/response schemas, typed URL parameters; GET response
 probes are same-origin and bounded, POST is never probed), so the exported
-OpenAPI and Postman specs carry req, res, and URL parameters.
+OpenAPI and Postman specs carry req, res, and URL parameters. api-only
+garbage filtering (`--api-only`, on by default) drops endpoints that cannot
+serve as proper API endpoints — static assets, bundles, plain pages — via
+scrape-endpoints pattern lists before export.
 Tests cover the real extractor, simulated login flows, CLI, redaction,
-schema enrichment, and rejected form actions/redirects.
+schema enrichment, api-only filtering, and rejected form actions/redirects.
 
 The POSIX transport optionally uses OpenSSL 3 for certificate-verified HTTPS.
 Keep TLS dependency discovery in `cmake/Dependencies.cmake`, default trust and

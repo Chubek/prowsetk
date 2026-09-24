@@ -173,10 +173,29 @@ TEST(Drivers, BookingDotcomOfflineExtraction) {
         {"postman", "path", postman_output}});
     ASSERT_TRUE(result.ok) << result.error;
     const auto yaml = read_file(output);
-    EXPECT_NE(yaml.find("/reservations"), std::string::npos);
+    // api-only is on by default: the plain page is gunk, the API call stays.
+    EXPECT_EQ(yaml.find("'/reservations':"), std::string::npos);
     EXPECT_NE(yaml.find("/api/hotels"), std::string::npos);
     EXPECT_NE(yaml.find("authenticated: false"), std::string::npos);
     EXPECT_NE(yaml.find("x-prowsetk-schema:"), std::string::npos);
+}
+
+TEST(Drivers, BookingDotcomOfflineApiOnlyDisabledKeepsGunk) {
+    if (!LuaRuntime::available()) GTEST_SKIP();
+    LuaRuntime lua;
+    ASSERT_TRUE(lua.run_file(std::string(PROWSETK_SOURCE_DIR) +
+        "/examples/booking-dotcom-admin-scrape/scrape-booking-dotcom-admin.lua").ok) << lua.last_error();
+    const std::string output = std::string(TEST_BINARY_DIR) + "/booking-offline-noapionly.yaml";
+    const std::string postman_output = output + ".postman.json";
+    const auto result = lua.call_function("main", {
+        {"html", "string", "<a href='/reservations'>Reservations</a><script>fetch('/api/hotels')</script>"},
+        {"api_only", "boolean", "false"},
+        {"output", "path", output},
+        {"postman", "path", postman_output}});
+    ASSERT_TRUE(result.ok) << result.error;
+    const auto yaml = read_file(output);
+    EXPECT_NE(yaml.find("'/reservations':"), std::string::npos);
+    EXPECT_NE(yaml.find("/api/hotels"), std::string::npos);
 }
 
 TEST(Drivers, BookingDotcomOfflinePicksUpPostEndpoints) {

@@ -151,13 +151,69 @@ bool is_api_path(const std::string& path,
     return builtin_api_marker(path);
 }
 
+const std::vector<std::string>& default_garbage_patterns() {
+    static const std::vector<std::string> patterns = {
+        ".js",   ".mjs",  ".cjs",  ".jsx",  ".ts",   ".tsx",  ".css",
+        ".less", ".scss", ".sass", ".map",  ".png",  ".jpg",  ".jpeg",
+        ".gif",  ".svg",  ".ico",  ".webp", ".avif", ".bmp",  ".tif",
+        ".tiff", ".woff", ".woff2", ".ttf", ".otf",  ".eot",  ".mp4",
+        ".webm", ".ogv",  ".mp3",  ".wav",  ".ogg",  ".flac", ".avi",
+        ".mov",  ".pdf",  ".zip",  ".gz",   ".tar",  ".rar",  ".7z",
+        ".dmg",  ".exe",  ".msi",  ".swf",  ".flv",  "/static/", "/assets/",
+        "/fonts/", "/font/",  "/images/", "/image/", "/img/",   "/css/",
+        "/js/",    "/icons/", "/icon/",     "/logos/", "/media/", "/videos/",
+        "/thumbnails/", "/node_modules/", "/favicon", ".well-known/"};
+    return patterns;
+}
+
+// Strips any query string or fragment so "?v=1.2.js" cannot smuggle an asset
+// suffix past the matcher and "/page?x=.js" cannot fake one.
+std::string strip_query_fragment(const std::string& path) {
+    const auto end = path.find_first_of("?#");
+    return end == std::string::npos ? path : path.substr(0, end);
+}
+
+bool is_garbage_path(const std::string& path,
+                     const std::vector<std::string>& patterns) {
+    // Mirroring is_api_path: an empty pattern list selects the defaults.
+    const std::vector<std::string>& effective =
+        patterns.empty() ? default_garbage_patterns() : patterns;
+    const std::string bare = to_lower(strip_query_fragment(path));
+    if (bare.empty()) return false;
+    for (const auto& pat : effective) {
+        if (pat.empty()) continue;
+        const std::string lower_pat = to_lower(pat);
+        if (!lower_pat.empty() && lower_pat.front() == '.' &&
+            lower_pat.find('/') == std::string::npos) {
+            // Asset suffix: must match at the very end of the path.
+            if (bare.size() >= lower_pat.size() &&
+                bare.compare(bare.size() - lower_pat.size(), lower_pat.size(),
+                             lower_pat) == 0) {
+                return true;
+            }
+        } else if (bare.find(lower_pat) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::vector<DiscoveredEndpoint> filter_to_api(
     const std::vector<DiscoveredEndpoint>& endpoints,
     const ScrapeEndpointsOptions& options) {
-    if (!options.require_api_pattern) return endpoints;
+    if (!options.api_only) return endpoints;
     std::vector<DiscoveredEndpoint> out;
     out.reserve(endpoints.size());
     for (const auto& e : endpoints) {
+        // Garbage first: a static asset is gunk even when its path carries
+        // an API marker or its method is not GET.
+        if (is_garbage_path(e.path, options.garbage_patterns)) {
+            continue;
+        }
+        if (!options.require_api_pattern) {
+            out.push_back(e);
+            continue;
+        }
         if (is_api_path(e.path, options.api_patterns)) {
             out.push_back(e);
             continue;

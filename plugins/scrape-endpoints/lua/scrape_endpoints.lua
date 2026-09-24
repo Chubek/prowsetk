@@ -4,6 +4,12 @@
 -- The spec is declarative. Callers pass a table of named options; the plugin
 -- never logs secrets and redacts them in the generated OpenAPI by default.
 --
+-- api-only filtering is on by default (`api_only = false` disables it):
+-- garbage/gunk endpoints that cannot serve as proper API endpoints (static
+-- assets, bundles, images, fonts, media, and — when require_api_pattern
+-- holds — plain pages) are dropped by filter_api_endpoints before export, so
+-- the final OpenAPI YAML and Postman JSON carry proper API endpoints only.
+--
 -- Usage:
 --   local scrape_endpoints = require("plugins.scrape_endpoints.lua.scrape_endpoints")
 --   -- or via lprowsext when the native plugin is installed:
@@ -31,6 +37,23 @@ local DEFAULT_PATTERNS = {
     "/telemetry", "challenge", "/beacon", "/collect"
 }
 
+-- Garbage/gunk patterns for api-only filtering: endpoints that cannot serve
+-- as proper API endpoints. Dot-led entries match as path suffixes (so
+-- "/page?x=.js" is kept while "/app.js?v=2" is dropped); all other entries
+-- match as case-insensitive substrings (asset directories). Heuristic.
+local DEFAULT_GARBAGE_PATTERNS = {
+    ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".css",
+    ".less", ".scss", ".sass", ".map", ".png", ".jpg", ".jpeg",
+    ".gif", ".svg", ".ico", ".webp", ".avif", ".bmp", ".tif",
+    ".tiff", ".woff", ".woff2", ".ttf", ".otf", ".eot", ".mp4",
+    ".webm", ".ogv", ".mp3", ".wav", ".ogg", ".flac", ".avi",
+    ".mov", ".pdf", ".zip", ".gz", ".tar", ".rar", ".7z",
+    ".dmg", ".exe", ".msi", ".swf", ".flv",
+    "/static/", "/assets/", "/fonts/", "/font/", "/images/", "/image/",
+    "/img/", "/css/", "/js/", "/icons/", "/icon/", "/logos/", "/media/",
+    "/videos/", "/thumbnails/", "/node_modules/", "/favicon", ".well-known/",
+}
+
 local function is_api_path(path, patterns)
     if path == nil or path == "" then return false end
     patterns = patterns or DEFAULT_PATTERNS
@@ -46,6 +69,25 @@ local function is_api_path(path, patterns)
     end
     for _, m in ipairs({ "/hotel/hoteladmin", "/partner-settings" }) do
         if string.find(lower, m, 1, true) ~= nil then return true end
+    end
+    return false
+end
+
+local function is_garbage_path(path, patterns)
+    if path == nil or path == "" then return false end
+    patterns = patterns or DEFAULT_GARBAGE_PATTERNS
+    local bare = string.lower(path):gsub("[?#].*$", "")
+    for _, pat in ipairs(patterns) do
+        if pat ~= nil and pat ~= "" then
+            local lower_pat = string.lower(pat)
+            if lower_pat:sub(1, 1) == "." and not lower_pat:find("/", 1, true) then
+                if #bare >= #lower_pat and bare:sub(-#lower_pat) == lower_pat then
+                    return true
+                end
+            elseif string.find(bare, lower_pat, 1, true) ~= nil then
+                return true
+            end
+        end
     end
     return false
 end
@@ -81,6 +123,12 @@ local function normalize_spec(spec)
         opts.api_patterns = { spec.api_pattern }
     end
     opts.require_api_pattern = spec.require_api_pattern ~= false
+    -- api-only is on by default: `api_only = false` (or `["api-only"] = false`)
+    -- keeps every discovered endpoint, garbage included.
+    local api_only = spec["api-only"]
+    if api_only == nil then api_only = spec.api_only end
+    opts.api_only = api_only ~= false
+    opts.garbage_patterns = spec.garbage_patterns or shallow_copy(DEFAULT_GARBAGE_PATTERNS)
     opts.resolve_chain = spec.resolve_chain == true or spec.resolve == true or spec.recursive == true
     opts.follow_json_links = spec.follow_json_links ~= false
     opts.max_resolve_requests = tonumber(spec.max_resolve_requests) or 64
@@ -105,16 +153,28 @@ local function normalize_spec(spec)
     return opts
 end
 
--- Filters a result:endpoints() list to suspected internal APIs. An explicit
--- non-GET method (POST form, fetch/XHR POST, beacon) is kept even when the
--- path carries no API marker: the method signal outweighs the path heuristic.
+-- Filters a result:endpoints() list to proper API endpoints. Garbage paths
+-- (static assets, bundles, images, fonts) are always dropped when api-only
+-- filtering applies, even for POSTs; an explicit non-GET method is otherwise
+-- kept even when the path carries no API marker. Pass
+-- `{api_only = false}` to keep everything.
 local function filter_api_endpoints(endpoints, spec)
+    spec = spec or {}
+    local api_only = spec["api-only"]
+    if api_only == nil then api_only = spec.api_only end
+    if api_only == false then return endpoints end
     local patterns = spec.api_patterns or DEFAULT_PATTERNS
+    local garbage = spec.garbage_patterns or DEFAULT_GARBAGE_PATTERNS
     local require = spec.require_api_pattern ~= false
-    if not require then return endpoints end
     local filtered = {}
     for _, ep in ipairs(endpoints) do
-        if is_api_path(ep.path, patterns) then
+        local path = nil
+        if type(ep) == "table" then path = ep.path end
+        if is_garbage_path(path, garbage) then
+            -- skip: static-asset gunk is never a proper API endpoint
+        elseif not require then
+            filtered[#filtered + 1] = ep
+        elseif is_api_path(path, patterns) then
             filtered[#filtered + 1] = ep
         elseif string.lower(tostring(ep.method or "get")) ~= "get" then
             filtered[#filtered + 1] = ep
@@ -840,6 +900,8 @@ function scrape_endpoints.dump(session_or_document, spec)
 end
 
 scrape_endpoints.is_api_path = is_api_path
+scrape_endpoints.is_garbage_path = is_garbage_path
+scrape_endpoints.filter_api_endpoints = filter_api_endpoints
 scrape_endpoints.normalize_spec = normalize_spec
 
 return scrape_endpoints

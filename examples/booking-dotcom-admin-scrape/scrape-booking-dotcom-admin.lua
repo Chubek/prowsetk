@@ -326,6 +326,29 @@ local function no_xcors_requested(args)
     return false
 end
 
+-- `--api-only` drops garbage/gunk endpoints (static assets, bundles, plain
+-- pages) that cannot serve as proper API endpoints. The CLI maps
+-- `--api-only VALUE` onto the `api-only` driver argument; direct `main(args)`
+-- callers may use `["api-only"]` or `api_only`. On by default: only an
+-- explicit false (boolean, 0, or "false"/"0"/"no"/"off") disables it.
+local function api_only_requested(args)
+    args = args or {}
+    local raw = args["api-only"]
+    if raw == nil then raw = args.api_only end
+    if raw == nil then return true end
+    if raw == true then return true end
+    if raw == false then return false end
+    if type(raw) == "number" then return raw ~= 0 end
+    if type(raw) == "string" then
+        local lower = raw:lower()
+        if lower == "false" or lower == "0" or lower == "no" or lower == "off" then
+            return false
+        end
+        return true
+    end
+    return true
+end
+
 -- Hosts (besides the page origin itself) whose `<script src>` bundles may be
 -- fetched for static endpoint scanning. The extranet app serves its real
 -- client code from Booking's static CDN, so same-origin-only fetching would
@@ -1514,6 +1537,19 @@ function main(args)
 
         if no_xcors_only then
             endpoints = filter_booking_tld(endpoints or {})
+        end
+        -- api-only (default on): filter garbage/gunk out of the final specs
+        -- so only proper API endpoints are exported. Never throws: when the
+        -- plugin filter is unavailable the merged endpoints are kept as-is.
+        if api_only_requested(args) and scrape_endpoints.filter_api_endpoints then
+            local ok_filter, filtered = pcall(function()
+                return scrape_endpoints.filter_api_endpoints(endpoints or {}, {
+                    api_only = true,
+                })
+            end)
+            if ok_filter and type(filtered) == "table" then
+                endpoints = filtered
+            end
         end
         local enriched = enrich_with_schemas(session, restful_page, endpoints,
             args, offline)
