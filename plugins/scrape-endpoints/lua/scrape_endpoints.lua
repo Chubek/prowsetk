@@ -77,6 +77,13 @@ local function is_garbage_path(path, patterns)
     if path == nil or path == "" then return false end
     patterns = patterns or DEFAULT_GARBAGE_PATTERNS
     local bare = string.lower(path):gsub("[?#].*$", "")
+    local script = bare:gsub("%%20", " "):gsub("%%28", "("):gsub("%%29", ")")
+        :gsub("%%3d", "="):gsub("%%3e", ">")
+    if script:find("=>", 1, true) or script:find("javascript:", 1, true)
+        or script:match("%f[%w_]function%s*%(")
+        or script:match("%f[%w_]function%s+[%a_$][%w_$]*%s*%(") then
+        return true
+    end
     for _, pat in ipairs(patterns) do
         if pat ~= nil and pat ~= "" then
             local lower_pat = string.lower(pat)
@@ -169,7 +176,9 @@ local function filter_api_endpoints(endpoints, spec)
     local filtered = {}
     for _, ep in ipairs(endpoints) do
         local path = nil
-        if type(ep) == "table" then path = ep.path end
+        if type(ep) == "table" then
+            path = ep.path or (type(ep.url) == "string" and ep.url:match("^https?://[^/]+([^?#]*)"))
+        end
         if is_garbage_path(path, garbage) then
             -- skip: static-asset gunk is never a proper API endpoint
         elseif not require then
@@ -331,6 +340,8 @@ local function resolve_chain(session, endpoints, spec)
             if not is_api_path(candidate, spec.api_patterns) then return end
             local resolved_url = resolve_url(base_url, candidate)
             if not resolved_url then return end
+            local path = resolved_url:match("^https?://[^/]+([^?#]*)") or resolved_url
+            if spec.api_only ~= false and is_garbage_path(path, spec.garbage_patterns) then return end
             if spec.allow_cross_origin_resolve ~= true and not same_origin(base_url, resolved_url) then return end
             if not seen[resolved_url] then
                 seen[resolved_url] = true
@@ -457,7 +468,7 @@ function scrape_endpoints.render_postman_json(endpoints, spec)
     spec = spec or {}
     local redact = spec.redact_secrets ~= false
     local ordered, seen = {}, {}
-    for _, ep in ipairs(endpoints or {}) do
+    for _, ep in ipairs(filter_api_endpoints(endpoints or {}, spec)) do
         local method = (ep.method or "get"):upper()
         local key = (ep.url or "") .. "\0" .. method
         if not seen[key] then
@@ -626,6 +637,7 @@ function scrape_endpoints.scrape(session_or_document, spec)
     if opts.resolve_chain and session ~= nil then
         resolved = resolve_chain(session, filtered, opts)
     end
+    resolved = filter_api_endpoints(resolved, opts)
 
     -- Write OpenAPI YAML if requested. For filtered output we regenerate the
     -- YAML manually so non-API paths are not present.
@@ -773,6 +785,7 @@ end
 function scrape_endpoints.render_openapi_yaml(endpoints, spec)
     spec = spec or {}
     local opts = normalize_spec(spec)
+    endpoints = filter_api_endpoints(endpoints or {}, opts)
     local redact = opts.redact_secrets ~= false
     
     local lines = {}

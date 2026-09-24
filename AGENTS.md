@@ -459,6 +459,9 @@ OpenAPI and Postman specs carry req, res, and URL parameters. api-only
 garbage filtering (`--api-only`, on by default) drops endpoints that cannot
 serve as proper API endpoints — static assets, bundles, plain pages — via
 scrape-endpoints pattern lists before export.
+JavaScript function expressions and arrow functions in endpoint paths are also
+excluded from both exports, including recursively discovered paths; ordinary
+query values do not trigger this path filter.
 Tests cover the real extractor, simulated login flows, CLI, redaction,
 schema enrichment, api-only filtering, and rejected form actions/redirects.
 

@@ -82,6 +82,20 @@ capabilities = [
 ]
 
 [[drivers]]
+name = "crawl-site"
+description = "Crawl admin.booking.com pages and collect page metadata as JSONL (generic drivers/crawl_site.lua)"
+script = "../../drivers/crawl_site.lua"
+entrypoint = "main"
+enabled = true
+
+arguments = [
+    { name = "url", type = "url", required = false, default = "https://admin.booking.com/" },
+    { name = "depth", type = "integer", required = false, default = 2 },
+    { name = "output", type = "path", required = false, default = "_scraped/booking-dotcom-admin/pages.jsonl" },
+    { name = "html", type = "string", required = false, default = "" }
+]
+
+[[drivers]]
 name = "booking-dotcom-admin"
 description = "Login to admin.booking.com and recursively scrape heuristic endpoints"
 script = "scrape-booking-dotcom-admin.lua"

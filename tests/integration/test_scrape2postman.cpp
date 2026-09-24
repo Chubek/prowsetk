@@ -163,7 +163,8 @@ TEST(PostmanIntegration, LuaPostmanRecursiveScrapeFollowsJsonLinks) {
             calls[#calls + 1] = url
             if url == "https://example.test/api/start" then
                 return {status=200, final_url=url, headers={["Content-Type"]="application/json"},
-                    body='{"next":"/api/next","gateway":"/gateway/rates"}'}
+                    body='{"next":"/api/next","gateway":"/gateway/rates",'
+                        .. '"script":"/api/function%28%29"}'}
             elseif url == "https://example.test/api/next" then
                 return {status=200, final_url=url, headers={["Content-Type"]="application/json"},
                     body='{"ok":true}'}
@@ -189,6 +190,38 @@ TEST(PostmanIntegration, LuaPostmanRecursiveScrapeFollowsJsonLinks) {
         assert(result.postman_json:find("/api/next", 1, true))
         assert(result.postman_json:find("/gateway/rates", 1, true))
         assert(result.postman_json:find("/service/pricing", 1, true))
+        assert(not result.openapi_yaml:find("function%28%29", 1, true))
+        assert(not result.postman_json:find("function%28%29", 1, true))
+    )LUA");
+    EXPECT_TRUE(result.ok) << lua.last_error();
+}
+
+TEST(PostmanIntegration, LuaScrapeOmitsJavascriptFunctionsFromBothSpecs) {
+    if (!prowsetk::LuaRuntime::available()) GTEST_SKIP() << "Lua unavailable";
+    prowsetk::LuaRuntime lua;
+    ASSERT_TRUE(lua.run("package.path = '" PROWSETK_SOURCE_DIR "/?.lua;' .. package.path").ok);
+    const auto result = lua.run(R"LUA(
+        local scrape = require("plugins.scrape-endpoints.lua.scrape_endpoints")
+        local browser = require("lprowse").browser.new()
+        local session = browser:create_session()
+        local output = scrape.scrape(session, {
+            html = '<form action="/api/function%28%29" method="post"></form>'
+                .. '<form action="/api/items" method="post"></form>',
+            base_url = "https://example.test/"
+        })
+        assert(output.endpoint_count == 1)
+        assert(not output.openapi_yaml:find("function%28%29", 1, true))
+        assert(not output.postman_json:find("function%28%29", 1, true))
+        assert(output.openapi_yaml:find("/api/items", 1, true))
+        assert(output.postman_json:find("/api/items", 1, true))
+        local endpoints = {
+            {url="https://example.test/api/function%28%29", path="/api/function%28%29", method="get"},
+            {url="https://example.test/api/items", path="/api/items", method="get"}
+        }
+        assert(not scrape.render_openapi_yaml(endpoints):find("function%28%29", 1, true))
+        assert(not scrape.render_postman_json(endpoints):find("function%28%29", 1, true))
+        assert(scrape.render_openapi_yaml(endpoints, {api_only=false}):find("function%28%29", 1, true))
+        assert(scrape.render_postman_json(endpoints, {api_only=false}):find("function%28%29", 1, true))
     )LUA");
     EXPECT_TRUE(result.ok) << lua.last_error();
 }

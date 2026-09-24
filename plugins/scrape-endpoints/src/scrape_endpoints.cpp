@@ -180,6 +180,24 @@ bool is_garbage_path(const std::string& path,
         patterns.empty() ? default_garbage_patterns() : patterns;
     const std::string bare = to_lower(strip_query_fragment(path));
     if (bare.empty()) return false;
+    std::string script = bare;
+    for (const auto& [encoded, decoded] : {
+             std::pair{"%20", " "}, {"%28", "("}, {"%29", ")"},
+             {"%3d", "="}, {"%3e", ">"}}) {
+        size_t offset = 0;
+        while ((offset = script.find(encoded, offset)) != std::string::npos) {
+            script.replace(offset, 3, decoded);
+            offset += 1;
+        }
+    }
+    static const std::regex function_expression(
+        R"((^|[^a-z0-9_$])function[[:space:]]*([a-z_$][a-z0-9_$]*[[:space:]]*)?\()"
+    );
+    if (script.find("=>") != std::string::npos ||
+        script.find("javascript:") != std::string::npos ||
+        std::regex_search(script, function_expression)) {
+        return true;
+    }
     for (const auto& pat : effective) {
         if (pat.empty()) continue;
         const std::string lower_pat = to_lower(pat);
@@ -435,7 +453,6 @@ ScrapeEndpointsResult scrape_from_session(Session& session,
                                (!resp.body.empty() && resp.body.front() == '{');
                 if (is_json) {
                     auto discovered = extract_api_urls_from_body(resp.body, options.api_patterns);
-                    r.json_discovered = discovered;
                     for (auto& du : discovered) {
                         std::string u = du;
                         try {
@@ -444,7 +461,10 @@ ScrapeEndpointsResult scrape_from_session(Session& session,
                             }
                             Url parsed = parse_url(u);
                             std::string path = parsed.path;
+                            if (options.api_only &&
+                                is_garbage_path(path, options.garbage_patterns)) continue;
                             if (!is_api_path(path, options.api_patterns)) continue;
+                            r.json_discovered.push_back(du);
                             if (visited.find(u) != visited.end()) continue;
                             // Check not already queued
                             bool queued = false;

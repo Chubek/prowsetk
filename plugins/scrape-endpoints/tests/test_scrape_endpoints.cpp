@@ -184,6 +184,16 @@ TEST(Scrape2OapiGarbage, RejectsBundleUnderApiPath) {
     EXPECT_TRUE(scrape::is_garbage_path("/api/bundle.js", {}));
 }
 
+TEST(Scrape2OapiGarbage, RejectsJavascriptFunctionsInPaths) {
+    EXPECT_TRUE(scrape::is_garbage_path("/api/function() { return data; }", {}));
+    EXPECT_TRUE(scrape::is_garbage_path("/api/async function load()", {}));
+    EXPECT_TRUE(scrape::is_garbage_path("/api/function%20load%28%29", {}));
+    EXPECT_TRUE(scrape::is_garbage_path("/api/()%3D%3Eresult", {}));
+    EXPECT_TRUE(scrape::is_garbage_path("javascript:fetch('/api/items')", {}));
+    EXPECT_FALSE(scrape::is_garbage_path("/api/functions", {}));
+    EXPECT_FALSE(scrape::is_garbage_path("/api/items?callback=function()", {}));
+}
+
 TEST(Scrape2OapiGarbage, KeepsApiEndpoint) {
     EXPECT_FALSE(scrape::is_garbage_path("/api/users", {}));
 }
@@ -227,6 +237,14 @@ TEST(Scrape2OapiFilter, DropsGarbagePostDespiteMethodRule) {
         scrape::filter_to_api({endpoint("/api/pixel.gif", "post")}, {}).empty());
 }
 
+TEST(Scrape2OapiFilter, DropsJavascriptFunctionDespiteApiMarkerOrPost) {
+    auto values = scrape::filter_to_api(
+        {endpoint("/api/function%28%29"), endpoint("/api/()%3D%3Edata", "post"),
+         endpoint("/api/functions", "post")}, {});
+    ASSERT_EQ(values.size(), 1u);
+    EXPECT_EQ(values[0].path, "/api/functions");
+}
+
 TEST(Scrape2OapiFilter, DropsGarbageWithoutPatternRequirement) {
     scrape::Scrape2OapiOptions options;
     options.require_api_pattern = false;
@@ -239,10 +257,11 @@ TEST(Scrape2OapiFilter, ApiOnlyFalseKeepsEverything) {
     scrape::Scrape2OapiOptions options;
     options.api_only = false;
     EXPECT_EQ(
-        scrape::filter_to_api({endpoint("/home"), endpoint("/static/app.js")},
+        scrape::filter_to_api({endpoint("/home"), endpoint("/static/app.js"),
+                               endpoint("/api/function%28%29")},
                               options)
             .size(),
-        2u);
+        3u);
 }
 
 TEST(Scrape2OapiFilter, PreservesOrder) {
@@ -484,6 +503,18 @@ TEST(Scrape2OapiDocument, ProducesDeterministicYaml) {
     EXPECT_EQ(first.openapi_yaml, second.openapi_yaml);
 }
 
+TEST(Scrape2OapiDocument, OmitsJavascriptFunctionPathsFromBothSpecs) {
+    const auto result = scrape_html(
+        "<form action='/api/function%28%29' method='post'></form>"
+        "<form action='/api/items' method='post'></form>");
+    ASSERT_EQ(result.endpoints.size(), 1u);
+    EXPECT_EQ(result.endpoints.front().path, "/api/items");
+    EXPECT_EQ(result.openapi_yaml.find("function%28%29"), std::string::npos);
+    EXPECT_EQ(result.postman_json.find("function%28%29"), std::string::npos);
+    EXPECT_NE(result.openapi_yaml.find("/api/items"), std::string::npos);
+    EXPECT_NE(result.postman_json.find("/api/items"), std::string::npos);
+}
+
 TEST(Scrape2OapiDocument, HonorsConfidenceThreshold) {
     scrape::Scrape2OapiOptions options;
     options.minimum_confidence = 1.0;
@@ -587,7 +618,9 @@ TEST(Scrape2OapiSession, ObservesRuntimePostIssuedByPageScript) {
 TEST(Scrape2OapiSession, FollowsJsonApiLinks) {
     Browser browser;
     auto network = std::make_unique<MemoryNetworkClient>();
-    network->set_response("https://example.test/api/first", response(200, "{\"next\":\"/api/second\"}"));
+    network->set_response("https://example.test/api/first",
+                          response(200, "{\"next\":\"/api/second\","
+                                        "\"script\":\"/api/function%28%29\"}"));
     network->set_response("https://example.test/api/second", response(200, "{}"));
     browser.set_network_client(std::move(network));
     auto session = browser.create_session();
@@ -596,6 +629,8 @@ TEST(Scrape2OapiSession, FollowsJsonApiLinks) {
     options.resolve_chain = true;
     const auto result = scrape::scrape_from_session(*session, options);
     EXPECT_EQ(result.resolved.size(), 2u);
+    EXPECT_EQ(result.openapi_yaml.find("function%28%29"), std::string::npos);
+    EXPECT_EQ(result.postman_json.find("function%28%29"), std::string::npos);
 }
 
 TEST(Scrape2OapiSession, HonorsResolutionRequestLimit) {

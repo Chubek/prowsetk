@@ -977,6 +977,12 @@ Discovery inspects:
 - Request and response content types
 - Example response structures
 
+With `api_only` enabled (the default), the scrape-endpoints OpenAPI and
+Postman exports omit static assets and paths that contain JavaScript function
+expressions or arrow functions. Query parameters are not treated as path code;
+`api_only = false` retains unfiltered discoveries. Recursive JSON discoveries
+use the same filter before export.
+
 The host-facing WIT inputs and outputs:
 
 ```wit
