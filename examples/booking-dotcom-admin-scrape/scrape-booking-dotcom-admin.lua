@@ -9,6 +9,15 @@
 -- not read credentials. Pass --no-xcors (boolean, default false) to drop any
 -- discovered endpoint whose host is outside the booking.com TLD
 -- (booking.com or *.booking.com).
+--
+-- Beacon network results (Firefox oracle, heuristic): pass args.beacon_json
+-- with a network_info flash_data document (hermetic, works offline and in
+-- tests) or set args.beacon_socket for a live beacond socket. Observed
+-- Firefox requests merge as beacon-network endpoints before restful
+-- resolution and schema enrichment. Live collection registers a Flash with
+-- beaconctl, waits for the user-consented addon flow (List Flashes, Connect
+-- to Flash, Send Network Info), then polls the bounded queue; any failure
+-- keeps the seed endpoints with a status note.
 
 local source = debug.getinfo(1, "S").source
 if source:sub(1, 1) == "@" then source = source:sub(2) end
@@ -48,6 +57,12 @@ do
     local ok, module = pcall(require_first,
         "schema_grabber", "plugins.schema-grabber.lua.schema_grabber")
     if ok then schema_grabber = module end
+end
+local beacon_spec = nil
+do
+    local ok, module = pcall(require_first,
+        "beacon", "plugins.beacon.lua.beacon")
+    if ok then beacon_spec = module end
 end
 
 local function trim(value)
@@ -763,6 +778,217 @@ local function make_endpoint(url, source, method)
     }
 end
 
+-- Beacon network Flash results (Firefox oracle, heuristic).
+--
+-- The addon sends `network_info` flash_data only after an explicit user
+-- click, and only from the connected HTTP(S) tab. Each entry carries
+-- bounded metadata — method, origin+path URL (no query or body), and
+-- resource type — captured after connect; earlier requests are unavailable.
+-- This driver never treats Beacon data as authoritative: entries become
+-- ordinary heuristic endpoints with beacon-network provenance and flow
+-- through the same redaction, --no-xcors, api-only, restful, and schema
+-- stages as every other discovery.
+local function beacon_arg(args, name)
+    args = args or {}
+    local value = args[name]
+    if value == nil then value = args[name:gsub("_", "-")] end
+    return value
+end
+
+-- Extracts network entries from a `flash_data` JSON document. Returns an
+-- empty list unless the document is a `network_info` data response; never
+-- throws and never logs payload content.
+local function parse_beacon_network_entries(text)
+    local entries = {}
+    if type(text) ~= "string" or text == "" then return entries end
+    if not text:find('"data_type"%s*:%s*"network_info"') then return entries end
+    local payload = text:match('"payload"%s*:%s*(%b{})')
+    if not payload then return entries end
+    local list = payload:match('"entries"%s*:%s*(%b[])')
+    if not list then return entries end
+    for chunk in list:gmatch("%b{}") do
+        local method = chunk:match('"method"%s*:%s*"([^"]+)"')
+        local entry_url = chunk:match('"url"%s*:%s*"([^"]+)"')
+        local entry_type = chunk:match('"type"%s*:%s*"([^"]+)"')
+        if type(entry_url) == "string" and entry_url ~= "" then
+            entries[#entries + 1] = {
+                method = method or "GET",
+                url = entry_url,
+                type = entry_type or "",
+            }
+        end
+    end
+    return entries
+end
+
+local function beacon_endpoint_for(entry, source_url)
+    local raw_url = tostring(entry.url or "")
+    if raw_url == "" then return nil end
+    if not raw_url:match("^https?://") then return nil end
+    if no_xcors_only and not is_booking_tld_url(raw_url) then return nil end
+    local method = tostring(entry.method or "get"):lower()
+    if method == "" then method = "get" end
+    return {
+        url = raw_url,
+        path = path_from_url(raw_url),
+        method = method,
+        source = source_url,
+        discovery_method = "beacon-network",
+        confidence = 0.85,
+        parameters = {},
+        notes = {"heuristically observed in Firefox via Beacon network Flash; heuristic, not authoritative."}
+    }
+end
+
+local function find_beaconctl(args)
+    local override = beacon_arg(args, "beacon_binary")
+    if type(override) == "string" and override ~= "" then return override end
+    local candidate = repo_root .. "/build/default/plugins/beacon/beaconctl"
+    local probe = io.open(candidate, "rb")
+    if probe then probe:close(); return candidate end
+    return "beaconctl"
+end
+
+-- Runs a beaconctl command and returns trimmed stdout, or nil on any
+-- failure. Never raises; never writes the command or its output anywhere.
+local function run_beacon_capture(command)
+    local ok, handle = pcall(function() return io.popen(command, "r") end)
+    if not ok or handle == nil then return nil end
+    local ok_read, output = pcall(function() return handle:read("*a") end)
+    pcall(function() handle:close() end)
+    if not ok_read or type(output) ~= "string" then return nil end
+    return trim(output)
+end
+
+local function extract_flash_id(text)
+    if type(text) ~= "string" then return nil end
+    return text:match('"flash_id"%s*:%s*"([^"]+)"')
+end
+
+-- Live Beacon collection through the local broker. Registers a network_info
+-- Flash, prompts for the user-consented addon flow, then polls the bounded
+-- delivery queue. Bounded and best-effort: any failure yields zero entries
+-- with a short note. Only used for live runs with an explicit socket.
+local function live_beacon_network_entries(args, page_url)
+    local socket = beacon_arg(args, "beacon_socket")
+    if type(socket) ~= "string" or socket == "" then return {}, "disabled" end
+    if beacon_spec ~= nil then
+        local valid, _ = beacon_spec.validate(
+            { url_pattern = page_url, resource_types = { "main_frame" } },
+            "network_info")
+        if not valid then return {}, "invalid filter" end
+    end
+    local binary = find_beaconctl(args)
+    local pattern = beacon_arg(args, "beacon_url_pattern")
+    if type(pattern) ~= "string" or pattern == "" then
+        local origin = url_origin(page_url)
+        pattern = (origin or page_url) .. "/*"
+    end
+    local flash_out = run_beacon_capture(
+        shell_quote(binary) .. " --socket " .. shell_quote(socket) ..
+        " flash network_info " .. shell_quote(pattern))
+    local flash_id = extract_flash_id(flash_out)
+    if not flash_id or flash_id == "" then
+        return {}, "flash registration failed or beacond unavailable"
+    end
+    io.stderr:write("booking-dotcom-admin: Beacon Flash " .. flash_id ..
+        " seeking; List Flashes, Connect to Flash on the matching tab, " ..
+        "then Send Network Info in Firefox.\n")
+    local max_polls = tonumber(beacon_arg(args, "beacon_max_polls")) or 10
+    if max_polls < 1 then max_polls = 1 end
+    if max_polls > 30 then max_polls = 30 end
+    local sleep_secs = tonumber(beacon_arg(args, "beacon_poll_sleep")) or 2
+    if sleep_secs < 0 then sleep_secs = 0 end
+    if sleep_secs > 10 then sleep_secs = 10 end
+    local payload = nil
+    for _ = 1, max_polls do
+        local poll_out = run_beacon_capture(
+            shell_quote(binary) .. " --socket " .. shell_quote(socket) ..
+            " poll " .. shell_quote(flash_id))
+        if type(poll_out) == "string" and poll_out ~= "" then
+            if poll_out:find('"type"%s*:%s*"flash_data"') then
+                payload = poll_out
+                break
+            elseif not poll_out:find('"type"%s*:%s*"flash_empty"') then
+                break
+            end
+        else
+            break
+        end
+        if sleep_secs > 0 then
+            pcall(function()
+                os.execute("sleep " .. tostring(math.floor(sleep_secs)))
+            end)
+        end
+    end
+    pcall(function()
+        os.execute(shell_quote(binary) .. " --socket " .. shell_quote(socket) ..
+            " disconnect " .. shell_quote(flash_id) .. " >/dev/null 2>&1")
+    end)
+    if type(payload) ~= "string" or payload == "" then
+        return {}, "no Beacon network data delivered"
+    end
+    return parse_beacon_network_entries(payload), "live"
+end
+
+-- Merges Beacon network results into the endpoint list. Hermetic inputs
+-- (`beacon_json`) work offline and in tests; the live socket path is used
+-- only for live runs with an explicit `beacon_socket`. Never throws.
+local function apply_beacon_network(endpoints, args, page_url,
+                                    authenticated_flag, offline)
+    local status = { used = false, entries = 0, note = "disabled" }
+    local ok, result = pcall(function()
+        local injected = beacon_arg(args, "beacon_json")
+        local entries = {}
+        local origin = "disabled"
+        if type(injected) == "string" and injected ~= "" then
+            entries = parse_beacon_network_entries(injected)
+            origin = "injected"
+        elseif offline then
+            return status
+        else
+            entries, origin = live_beacon_network_entries(args, page_url)
+        end
+        if #entries == 0 then
+            status.note = (origin == "injected") and "injected payload held no network entries" or
+                (type(origin) == "string" and origin or "no Beacon network data delivered")
+            return status
+        end
+        local seen = {}
+        for _, ep in ipairs(endpoints or {}) do
+            if type(ep) == "table" and ep.url then
+                seen[endpoint_key(ep)] = true
+            end
+        end
+        local added = 0
+        for _, entry in ipairs(entries) do
+            local ep = beacon_endpoint_for(entry, page_url)
+            if ep ~= nil then
+                local key = endpoint_key(ep)
+                if not seen[key] then
+                    seen[key] = true
+                    endpoints[#endpoints + 1] = ep
+                    added = added + 1
+                end
+            end
+        end
+        for _, ep in ipairs(endpoints or {}) do
+            if type(ep) == "table" then ep.authenticated = authenticated_flag == true end
+        end
+        status.used = added > 0
+        status.entries = added
+        status.note = origin .. ": " .. tostring(added) ..
+            " network endpoint(s) merged"
+        return status
+    end)
+    if not ok then
+        status.used = false
+        status.note = "beacon merge failed; seeds kept"
+        return status
+    end
+    return result
+end
+
 local function scan_urls(text, base_url)
     local found, seen = {}, {}
     local function add(candidate)
@@ -1278,13 +1504,18 @@ local function output_paths(args)
     return output, postman
 end
 
-local function append_metadata(yaml, authenticated_flag, restful)
+local function append_metadata(yaml, authenticated_flag, restful, beacon_status)
     restful = restful or {}
+    beacon_status = beacon_status or {}
     return yaml ..
         "x-prowsetk-booking-admin:\n" ..
         "  authenticated: " .. tostring(authenticated_flag == true) .. "\n" ..
         "  complete: false\n" ..
         "  note: 'Heuristic endpoint discovery; not authoritative API documentation.'\n" ..
+        "x-prowsetk-beacon:\n" ..
+        "  used: " .. tostring(beacon_status.used == true) .. "\n" ..
+        "  network-entries: " .. tostring(tonumber(beacon_status.entries) or 0) .. "\n" ..
+        "  note: 'Firefox network Flash results are heuristic observations after user consent; not authoritative.'\n" ..
         "x-prowsetk-restful:\n" ..
         "  has-post: " .. tostring(restful.has_post == true) .. "\n" ..
         "  is-complete: " .. tostring(restful.is_complete == true) .. "\n" ..
@@ -1513,6 +1744,12 @@ function main(args)
         end
 
         local restful_page = (not offline) and authenticated_url or url
+        -- Beacon network Flash results merge before restful resolution so
+        -- observed Firefox requests join the GET+POST surface and schema
+        -- enrichment like any other heuristic discovery. Disabled by
+        -- default; hermetic via beacon_json, live via beacon_socket.
+        local beacon_status = apply_beacon_network(endpoints, args,
+            restful_page, authenticated_flag, offline)
         local restful_status = { has_post = false, is_complete = false,
             rounds_used = 0, request_count = 0 }
         if not offline then
@@ -1556,7 +1793,7 @@ function main(args)
         local yaml, postman_json
         if enriched ~= nil then
             yaml = append_metadata(enriched.openapi_yaml, authenticated_flag,
-                restful_status)
+                restful_status, beacon_status)
             postman_json = enriched.postman_json
         else
             local safe_endpoints = redacted_endpoints(endpoints or {})
@@ -1566,7 +1803,8 @@ function main(args)
                 include_provenance = true,
                 infer_schemas = true
             })
-            yaml = append_metadata(yaml, authenticated_flag, restful_status)
+            yaml = append_metadata(yaml, authenticated_flag, restful_status,
+                beacon_status)
             postman_json = scrape_endpoints.render_postman_json(safe_endpoints, {
                 collection_name = "Discovered API (Booking.com Admin)",
                 redact_secrets = true,

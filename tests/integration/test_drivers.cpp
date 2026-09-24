@@ -226,6 +226,41 @@ TEST(Drivers, BookingDotcomOfflinePicksUpPostEndpoints) {
     EXPECT_NE(yaml.find("x-prowsetk-schema:"), std::string::npos);
 }
 
+TEST(Drivers, BookingDotcomOfflineBeaconNetworkScrapesResults) {
+    if (!LuaRuntime::available()) GTEST_SKIP();
+    LuaRuntime lua;
+    ASSERT_TRUE(lua.run_file(std::string(PROWSETK_SOURCE_DIR) +
+        "/examples/booking-dotcom-admin-scrape/scrape-booking-dotcom-admin.lua").ok) << lua.last_error();
+    const std::string output = std::string(TEST_BINARY_DIR) + "/booking-offline-beacon.yaml";
+    const std::string postman_output = output + ".postman.json";
+    const std::string beacon_json =
+        "{\"type\":\"flash_data\",\"flash_id\":\"11111111-1111-4111-8111-111111111111\","
+        "\"tab_id\":7,\"data_type\":\"network_info\",\"payload\":{"
+        "\"entries\":["
+        "{\"method\":\"GET\",\"url\":\"https://admin.booking.com/api/beacon-orders?token=secret-value\",\"type\":\"xmlhttprequest\"},"
+        "{\"method\":\"POST\",\"url\":\"https://admin.booking.com/api/beacon-checkout\",\"type\":\"xmlhttprequest\"}"
+        "],\"timestamp\":1727155200}}";
+    const auto result = lua.call_function("main", {
+        {"html", "string", "<html><body><p>Beacon network oracle</p></body></html>"},
+        {"beacon_json", "string", beacon_json},
+        {"output", "path", output},
+        {"postman", "path", postman_output}});
+    ASSERT_TRUE(result.ok) << result.error;
+    const auto yaml = read_file(output);
+    // Beacon network entries join the heuristic surface with provenance.
+    EXPECT_NE(yaml.find("/api/beacon-orders"), std::string::npos);
+    EXPECT_NE(yaml.find("/api/beacon-checkout"), std::string::npos);
+    EXPECT_NE(yaml.find("beacon-network"), std::string::npos);
+    EXPECT_NE(yaml.find("post:"), std::string::npos);
+    EXPECT_NE(yaml.find("has-post: true"), std::string::npos);
+    EXPECT_NE(yaml.find("is-complete: true"), std::string::npos);
+    EXPECT_NE(yaml.find("x-prowsetk-beacon:"), std::string::npos);
+    // Beacon URLs carry no query after consent; defensive redaction still holds.
+    EXPECT_EQ(yaml.find("secret-value"), std::string::npos);
+    const auto postman = read_file(postman_output);
+    EXPECT_NE(postman.find("/api/beacon-checkout"), std::string::npos);
+}
+
 TEST(Drivers, BookingDotcomLoginAndFailureBoundaries) {
     if (!LuaRuntime::available()) GTEST_SKIP();
     for (const std::string scenario : {

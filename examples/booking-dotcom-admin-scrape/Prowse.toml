@@ -81,6 +81,19 @@ capabilities = [
     "url-parameters"
 ]
 
+[[plugins]]
+name = "beacon"
+description = "Firefox network oracle: merge user-consented Beacon network Flash results"
+type = "native"
+path = "../../build/default/plugins/beacon/libprowsetk_beacon.so"
+enabled = true
+autoload = true
+capabilities = [
+    "beacon-oracle",
+    "flash-lifecycle",
+    "network-info"
+]
+
 [[drivers]]
 name = "crawl-site"
 description = "Crawl admin.booking.com pages and collect page metadata as JSONL (generic drivers/crawl_site.lua)"
@@ -126,5 +139,11 @@ arguments = [
     { name = "api-only", type = "boolean", required = false, default = true },
     { name = "api_only", type = "boolean", required = false, default = true },
     { name = "script_origins", type = "string", required = false, default = "bstatic.com" },
+    { name = "beacon_socket", type = "string", required = false, default = "" },
+    { name = "beacon_url_pattern", type = "string", required = false, default = "" },
+    { name = "beacon_binary", type = "string", required = false, default = "" },
+    { name = "beacon_json", type = "string", required = false, default = "" },
+    { name = "beacon_max_polls", type = "integer", required = false, default = 10 },
+    { name = "beacon_poll_sleep", type = "integer", required = false, default = 2 },
     { name = "html", type = "string", required = false, default = "" }
 ]
