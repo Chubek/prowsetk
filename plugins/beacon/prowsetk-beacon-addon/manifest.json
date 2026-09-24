@@ -1,0 +1,27 @@
+{
+  "manifest_version": 2,
+  "name": "ProwseTk Beacon",
+  "version": "0.1.0",
+  "description": "Oracle bridge: expose seeking Flashes and send page data to ProwseTk drivers after explicit user consent.",
+  "permissions": [
+    "nativeMessaging",
+    "tabs",
+    "webRequest",
+    "<all_urls>",
+    "activeTab"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "sidebar_action": {
+    "default_title": "ProwseTk Beacon",
+    "default_panel": "sidebar.html"
+  }
+}

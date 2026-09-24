@@ -1,0 +1,7 @@
+{
+  "name": "prowsetk_beacon",
+  "description": "ProwseTk Beacon native host",
+  "path": "/usr/lib/prowsetk/beacon_native_host",
+  "type": "stdio",
+  "allowed_extensions": ["prowsetk-beacon@example.com"]
+}

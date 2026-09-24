@@ -1,0 +1,86 @@
+package prowsetk:beacon@0.1.0;
+
+// WIT contract for a future Beacon WASM component. The native plugin
+// (`plugins/beacon`) is the implementation of record; this interface keeps
+// the contract portable behind the `WasmRuntime` abstraction (README
+// "WASM Runtime"). All browser access stays host-mediated through beacond
+// and explicit user consent; the component never opens sockets, never sees
+// raw page bytes without a connected Flash, and never logs secrets.
+
+interface types {
+    enum request-type {
+        page-dom,
+        network-info,
+        stylesheet,
+        tracepoint,
+    }
+
+    enum flash-status {
+        seeking,
+        connected,
+        closed,
+        timed-out,
+    }
+
+    record flash-filters {
+        url-pattern: string,
+        resource-types: list<string>,
+    }
+
+    record flash-request {
+        flash-id: string,
+        request-type: request-type,
+        filters: flash-filters,
+    }
+
+    record flash-descriptor {
+        flash-id: string,
+        request-type: request-type,
+        filters: flash-filters,
+        status: flash-status,
+    }
+
+    record flash-connect {
+        flash-id: string,
+        tab-id: s32,
+    }
+
+    record flash-data {
+        flash-id: string,
+        data-type: string,
+        html: string,
+        url: string,
+        timestamp: s64,
+    }
+
+    record tracepoint-event {
+        flash-id: string,
+        event: string,
+        selector: string,
+        detail: string,
+    }
+
+    record beacon-options {
+        socket-path: string,
+        timeout-ms: u32,
+        max-flashes: u32,
+        require-user-consent: bool,
+        redact-secrets: bool,
+    }
+}
+
+interface beacon-oracle {
+    use types;
+
+    flash: func(request-type: types.request-type, filters: types.flash-filters)
+        -> result<types.flash-request, string>;
+    list-seeking: func() -> result<list<types.flash-descriptor>, string>;
+    connect: func(connect: types.flash-connect) -> result<_, string>;
+    disconnect: func(flash-id: string) -> result<_, string>;
+    describe: func() -> result<string, string>;
+}
+
+world beacon-plugin {
+    import prowsetk:plugin/host;
+    export beacon-oracle;
+}

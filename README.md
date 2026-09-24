@@ -443,6 +443,15 @@ the engine's event loop, timers, request hooks, and session lifecycle events.
 
 ## Plugin System
 
+The repository includes `plugins/beacon`, a Firefox Native Messaging bridge
+for user-approved inspection of a connected tab. A local `beacond` broker
+tracks bounded Flash sessions, `beaconctl` registers and polls Flashes from
+driver processes, and the Firefox addon sends page HTML, styles, limited
+network request metadata, or selector-scoped DOM mutation notifications after
+the user connects. The owner-only Unix socket is a same-user trust boundary;
+page content can contain secrets. See `plugins/beacon/README.md` for setup,
+protocol, and current limitations.
+
 The repository includes `plugins/ezlogin`, a native host-mediated
 authentication plugin. It supports Basic, Bearer, API-key, and custom-header
 request credentials without exposing secrets to plugin logs. Form-based login

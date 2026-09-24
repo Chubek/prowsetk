@@ -579,3 +579,22 @@ lose their example to redaction. The native ABI stays at
 `PROWSETK_PLUGIN_ABI_VERSION`; the WIT contract for a future WASM component
 is `wit/schema-grabber.wit`; the Lua spec layer is
 `lua/schema_grabber.lua` (`enrich(session, spec)`).
+
+---
+
+## Beacon Firefox handoff
+
+`plugins/beacon` supplies a native Flash plugin, an owner-only local Unix
+socket broker (`beacond`), a framed Firefox Native Messaging host, a driver-side
+`beaconctl`, and a Firefox addon. Drivers register a Flash through the local
+client and poll its bounded delivery queue. The addon lists seeking Flashes,
+requires an explicit user click to connect to a matching HTTP(S) tab, and
+sends data only from that tab. Tab navigation and closure revoke the addon
+connection. Page HTML and styles may contain secrets and are delivered verbatim
+after consent; network metadata omits queries and request bodies. Treat the
+socket owner as trusted: no token authentication is implemented in the broker,
+and the addon click cannot protect against another same-user socket client.
+Tracepoints currently observe CSS-selector-scoped DOM mutations; full HAR,
+request tracepoints and stylesheet tracepoints are not implemented. Keep the
+broker integration and addon simulation CTests registered with bounded timeouts.
+See `plugins/beacon/README.md` for protocol and installation details.
