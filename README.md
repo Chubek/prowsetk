@@ -478,6 +478,25 @@ authoritative; secrets stay redacted. See
 `examples/booking-dotcom-admin-scrape` driver applies it after its crawl and
 records the outcome in the same `x-prowsetk-restful` block.
 
+The repository also includes `plugins/schema-grabber`, a native plugin that
+reverse-engineers scraped endpoints into full request/response schemas plus
+URL parameters. It composes with `plugins/scrape-endpoints`: scrape first for
+discovery, then enrich the same endpoints so the exported OpenAPI and Postman
+specs carry typed query/path parameters, request bodies, and response
+schemas. Query parameters are typed from example values; volatile path
+segments become `{id}`-style templates; POST/PUT/PATCH request schemas come
+from matching form fields first, then JSON body hints in inline scripts;
+response schemas come from observed bytes — bounded host-mediated GET probes
+for GET endpoints, or bodies resolved alongside `scrape-endpoints` — parsed
+with a dependency-free JSON inferrer. POST/PUT/PATCH endpoints are never
+probed with their own method. Output is deterministic OpenAPI 3.x YAML with
+an `x-prowsetk-schema` extension (request/response provenance) and Postman
+2.1 JSON with query pairs, `:var` path variables, and example bodies.
+Inference is heuristic and never authoritative; secrets stay redacted. See
+`plugins/schema-grabber/README.md` for options. The WIT contract for a future
+WASM component lives in `wit/schema-grabber.wit`; the Lua spec layer is
+`plugins/schema-grabber/lua/schema_grabber.lua` (`enrich(session, spec)`).
+
 ProwseTk provides a native plugin interface through `ProwseTk-Plugin.h`. The
 interface allows native components to extend the browser without modifying the
 Flatworm core.

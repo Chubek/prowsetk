@@ -248,6 +248,14 @@ if scenario == 'success' or scenario == 'js-built-form' or scenario == 'two-step
     for _, secret in ipairs({'fixture-token','fixture#pass&word','fixture@example.com'}) do
         assert(not postman:find(secret, 1, true), 'secret leaked in Postman: ' .. secret)
     end
+
+    -- Schema-grabber enrichment alongside scrape-endpoints: typed URL
+    -- parameters, request/response schemas, never authoritative.
+    assert(yaml:find('x-prowsetk-schema:', 1, true), 'schema enrichment missing')
+    assert(yaml:find('in: query', 1, true), 'query parameters missing')
+    assert(yaml:find('Observed response', 1, true), 'response schemas missing')
+    assert(postman:find('Discovered API (Booking.com Admin)', 1, true),
+        'Postman missing schema-grabber collection name')
     
     local minimum_calls = (scenario == 'two-step' or scenario == 'oauth') and 14 or 13
     assert(#calls >= minimum_calls, 'recursive API crawl made too few calls: ' .. #calls)

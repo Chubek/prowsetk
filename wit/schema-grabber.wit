@@ -1,0 +1,91 @@
+package prowsetk:schema-grabber@0.1.0;
+
+// WIT contract for a future schema-grabber WASM component. The native plugin
+// (`plugins/schema-grabber`) is the implementation of record; this interface
+// keeps the contract portable behind the `WasmRuntime` abstraction (README
+// "WASM Runtime"). Network access stays host-mediated; the component never
+// opens sockets and never logs secrets.
+
+interface types {
+    record query-param {
+        name: string,
+        type-name: string,
+        required: bool,
+        example: string,
+        sensitive: bool,
+    }
+
+    record path-param {
+        name: string,
+        type-name: string,
+        example: string,
+    }
+
+    record json-field {
+        name: string,
+        type-name: string,
+        format: string,
+        required: bool,
+        example: string,
+        sensitive: bool,
+    }
+
+    record inferred-schema {
+        type-name: string,
+        fields: list<json-field>,
+        required: list<string>,
+        provenance: string,
+        confidence: f64,
+        truncated: bool,
+    }
+
+    record endpoint-schema {
+        method: string,
+        path: string,
+        path-template: string,
+        query: list<query-param>,
+        path-params: list<path-param>,
+        request-schema: option<inferred-schema>,
+        request-provenance: string,
+        response-status: u16,
+        response-content-type: string,
+        response-schema: option<inferred-schema>,
+        response-provenance: string,
+        response-observed: bool,
+        discovery-method: string,
+        confidence: f64,
+    }
+
+    record grab-options {
+        infer-types: bool,
+        include-examples: bool,
+        include-provenance: bool,
+        redact-secrets: bool,
+        probe-get-responses: bool,
+        max-probe-requests: u32,
+        max-properties: u32,
+        max-depth: u32,
+        minimum-confidence: f64,
+        openapi-version: string,
+    }
+
+    record grab-result {
+        openapi-yaml: string,
+        postman-json: string,
+        schema-count: u32,
+        probe-count: u32,
+        warnings: list<string>,
+    }
+}
+
+interface schema-inference {
+    use types;
+
+    enrich: func(endpoints: list<endpoint-schema>, options: types.grab-options)
+        -> result<types.grab-result, string>;
+}
+
+world schema-grabber-plugin {
+    import prowsetk:plugin/host;
+    export schema-inference;
+}

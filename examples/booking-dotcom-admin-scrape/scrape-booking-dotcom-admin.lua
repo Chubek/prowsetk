@@ -2,7 +2,9 @@
 --
 -- Live runs read Booking.com credentials from dotenv before looking at the
 -- process environment, authenticate through ezlogin, crawl same-origin admin
--- pages, and write OpenAPI plus Postman artifacts under
+-- pages, resolve a RESTful surface through restful-resolver, enrich
+-- request/response schemas and URL parameters through schema-grabber, and
+-- write OpenAPI plus Postman artifacts under
 -- _scraped/booking-dotcom-admin by default. Offline runs pass args.html and do
 -- not read credentials. Pass --no-xcors (boolean, default false) to drop any
 -- discovered endpoint whose host is outside the booking.com TLD
@@ -40,6 +42,12 @@ do
     local ok, module = pcall(require_first,
         "restful_resolver", "plugins.restful-resolver.lua.restful_resolver")
     if ok then restful_resolver = module end
+end
+local schema_grabber = nil
+do
+    local ok, module = pcall(require_first,
+        "schema_grabber", "plugins.schema-grabber.lua.schema_grabber")
+    if ok then schema_grabber = module end
 end
 
 local function trim(value)
@@ -1322,6 +1330,36 @@ local function resolve_until_restful(session, page_url, seed_endpoints, args)
     return merged, status
 end
 
+-- Applies the schema-grabber plugin: reverse-engineers request/response
+-- schemas and URL parameters for the merged endpoints so the exported OpenAPI
+-- and Postman specs carry req, res, and URL parameters alongside
+-- scrape-endpoints discovery. GET response bodies come from bounded
+-- host-mediated probes in live runs; offline runs stay fully static (no
+-- network). Never throws: on any failure it returns nil and the caller falls
+-- back to the plain scrape-endpoints rendering.
+local function enrich_with_schemas(session, page_url, seed_endpoints, args, offline)
+    if schema_grabber == nil then return nil end
+    if type(seed_endpoints) ~= "table" or #seed_endpoints == 0 then return nil end
+    local ok, result = pcall(function()
+        return schema_grabber.enrich(session, {
+            url = page_url,
+            endpoints = seed_endpoints,
+            require_api_pattern = false,
+            probe_get_responses = not offline,
+            max_probe_requests = tonumber(args.max_schema_probes) or 32,
+            allow_cross_origin = false,
+            openapi_version = "3.1.0",
+            collection_name = "Discovered API (Booking.com Admin)",
+            redact_secrets = true,
+            include_provenance = true,
+            include_examples = true,
+            infer_schemas = true,
+        })
+    end)
+    if not ok or type(result) ~= "table" then return nil end
+    return result
+end
+
 function main(args)
     args = args or {}
     local url = args.url or DEFAULT_URL
@@ -1477,21 +1515,29 @@ function main(args)
         if no_xcors_only then
             endpoints = filter_booking_tld(endpoints or {})
         end
-        local safe_endpoints = redacted_endpoints(endpoints or {})
-        local yaml = scrape_endpoints.render_openapi_yaml(safe_endpoints, {
-            openapi_version = "3.1.0",
-            redact_secrets = true,
-            include_provenance = true,
-            infer_schemas = true
-        })
-        yaml = append_metadata(yaml, authenticated_flag, restful_status)
+        local enriched = enrich_with_schemas(session, restful_page, endpoints,
+            args, offline)
+        local yaml, postman_json
+        if enriched ~= nil then
+            yaml = append_metadata(enriched.openapi_yaml, authenticated_flag,
+                restful_status)
+            postman_json = enriched.postman_json
+        else
+            local safe_endpoints = redacted_endpoints(endpoints or {})
+            yaml = scrape_endpoints.render_openapi_yaml(safe_endpoints, {
+                openapi_version = "3.1.0",
+                redact_secrets = true,
+                include_provenance = true,
+                infer_schemas = true
+            })
+            yaml = append_metadata(yaml, authenticated_flag, restful_status)
+            postman_json = scrape_endpoints.render_postman_json(safe_endpoints, {
+                collection_name = "Discovered API (Booking.com Admin)",
+                redact_secrets = true,
+                include_provenance = true
+            })
+        end
         write_file(output, yaml)
-
-        local postman_json = scrape_endpoints.render_postman_json(safe_endpoints, {
-            collection_name = "Discovered API (Booking.com Admin)",
-            redact_secrets = true,
-            include_provenance = true
-        })
         write_file(postman, postman_json)
 
         print("booking-dotcom-admin: wrote heuristic OpenAPI and Postman outputs")

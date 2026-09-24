@@ -176,6 +176,7 @@ TEST(Drivers, BookingDotcomOfflineExtraction) {
     EXPECT_NE(yaml.find("/reservations"), std::string::npos);
     EXPECT_NE(yaml.find("/api/hotels"), std::string::npos);
     EXPECT_NE(yaml.find("authenticated: false"), std::string::npos);
+    EXPECT_NE(yaml.find("x-prowsetk-schema:"), std::string::npos);
 }
 
 TEST(Drivers, BookingDotcomOfflinePicksUpPostEndpoints) {
@@ -203,6 +204,7 @@ TEST(Drivers, BookingDotcomOfflinePicksUpPostEndpoints) {
     EXPECT_NE(yaml.find("/fresa/extranet/inbox/send_message"), std::string::npos);
     EXPECT_NE(yaml.find("post:"), std::string::npos);
     EXPECT_NE(yaml.find("has-post: true"), std::string::npos);
+    EXPECT_NE(yaml.find("x-prowsetk-schema:"), std::string::npos);
 }
 
 TEST(Drivers, BookingDotcomLoginAndFailureBoundaries) {

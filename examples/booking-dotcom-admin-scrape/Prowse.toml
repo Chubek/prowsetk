@@ -66,6 +66,21 @@ capabilities = [
     "post-discovery"
 ]
 
+[[plugins]]
+name = "schema-grabber"
+description = "Reverse-engineer request/response schemas and URL parameters for scraped endpoints"
+type = "native"
+path = "../../build/default/plugins/schema-grabber/libprowsetk_schema_grabber.so"
+enabled = true
+autoload = true
+capabilities = [
+    "schema-inference",
+    "endpoint-discovery",
+    "openapi-yaml",
+    "postman-json",
+    "url-parameters"
+]
+
 [[drivers]]
 name = "booking-dotcom-admin"
 description = "Login to admin.booking.com and recursively scrape heuristic endpoints"
@@ -84,6 +99,7 @@ arguments = [
     { name = "max_api_depth", type = "integer", required = false, default = 2 },
     { name = "max_api_requests", type = "integer", required = false, default = 64 },
     { name = "max_resolve_rounds", type = "integer", required = false, default = 4 },
+    { name = "max_schema_probes", type = "integer", required = false, default = 32 },
     { name = "success_selector", type = "string", required = false, default = "" },
     { name = "success_beacon", type = "string", required = false, default = "" },
     { name = "success_beacon_type", type = "string", required = false, default = "auto" },

@@ -452,8 +452,12 @@ support is partial; human verification and MFA can still require browser
 interaction followed by importing fresh cookies. Never claim those challenges
 have been solved merely because a cookie exists.
 Discovery is heuristic and bounded, with explicit incomplete coverage metadata.
-Tests cover the real extractor, simulated login flows, CLI, redaction, and
-rejected form actions/redirects.
+After the crawl the driver applies restful-resolver and then schema-grabber
+enrichment (request/response schemas, typed URL parameters; GET response
+probes are same-origin and bounded, POST is never probed), so the exported
+OpenAPI and Postman specs carry req, res, and URL parameters.
+Tests cover the real extractor, simulated login flows, CLI, redaction,
+schema enrichment, and rejected form actions/redirects.
 
 The POSIX transport optionally uses OpenSSL 3 for certificate-verified HTTPS.
 Keep TLS dependency discovery in `cmake/Dependencies.cmake`, default trust and
@@ -541,3 +545,31 @@ Discovery is heuristic, never authoritative.
 `examples/booking-dotcom-admin-scrape` registers the plugin in its
 `Prowse.toml` and applies it after the crawl via
 `lua/restful_resolver.lua`: `resolve_until
+
+---
+
+## Schema grabber and scrape-endpoints composition
+
+`plugins/schema-grabber` reverse-engineers scraped endpoints into full
+request/response schemas plus URL parameters and composes with
+`plugins/scrape-endpoints` (scrape for discovery, grabber for enrichment).
+Query parameters are typed from example values (`boolean`/`integer`/`number`/
+`string`, always `required: false`); volatile path segments (numeric ids,
+UUIDs, long hashes) are templated (`/api/users/123` → `/api/users/{id}`)
+with the original kept as the example. POST/PUT/PATCH request schemas prefer
+matching form fields (input types mapped, `required` honored), then JSON body
+hints near the endpoint path in inline scripts, then a generic inferred
+object when a body content type is known; GET endpoints get no request body.
+Response schemas come from observed bytes only: bounded host-mediated GET
+probes for GET endpoints through the owning `Session`
+(`probe_get_responses`/`max_probe_requests`, same-origin unless
+`allow_cross_origin`), or `ResolvedBody` bytes resolved alongside
+`scrape-endpoints` via `enrich_endpoints`. POST/PUT/PATCH endpoints are never
+probed with their own method. Output is deterministic OpenAPI 3.x YAML with
+`x-prowsetk-schema` (request/response provenance) and Postman 2.1 JSON with
+query pairs, `:var` path variables, and example bodies. Inference is
+heuristic, never authoritative; sensitive names/values keep their type but
+lose their example to redaction. The native ABI stays at
+`PROWSETK_PLUGIN_ABI_VERSION`; the WIT contract for a future WASM component
+is `wit/schema-grabber.wit`; the Lua spec layer is
+`lua/schema_grabber.lua` (`enrich(session, spec)`).
