@@ -23,5 +23,10 @@
   "sidebar_action": {
     "default_title": "ProwseTk Beacon",
     "default_panel": "sidebar.html"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "prowsetk-beacon@example.com"
+    }
   }
 }

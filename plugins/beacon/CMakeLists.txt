@@ -74,6 +74,42 @@ add_executable(beaconctl src/beaconctl.cpp)
 target_link_libraries(beaconctl PRIVATE prowsetk_beacon_static ProwseTk::core)
 prowsetk_set_warnings(beaconctl)
 
+# Beacon Firefox addon (.xpi): deterministic ZIP of prowsetk-beacon-addon/.
+set(BEACON_ADDON_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/prowsetk-beacon-addon")
+set(BEACON_ADDON_FILES
+    "${BEACON_ADDON_SOURCE_DIR}/manifest.json"
+    "${BEACON_ADDON_SOURCE_DIR}/background.js"
+    "${BEACON_ADDON_SOURCE_DIR}/content.js"
+    "${BEACON_ADDON_SOURCE_DIR}/sidebar.html"
+    "${BEACON_ADDON_SOURCE_DIR}/sidebar.js")
+set(BEACON_XPI_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/prowsetk-beacon-addon.xpi")
+set(BEACON_PACK_SCRIPT "${PROJECT_SOURCE_DIR}/scripts/pack-beacon-addon.py")
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_custom_command(
+        OUTPUT "${BEACON_XPI_OUTPUT}"
+        COMMAND "${Python3_EXECUTABLE}" "${BEACON_PACK_SCRIPT}"
+            --source-dir "${BEACON_ADDON_SOURCE_DIR}"
+            --output "${BEACON_XPI_OUTPUT}"
+        DEPENDS ${BEACON_ADDON_FILES} "${BEACON_PACK_SCRIPT}"
+        COMMENT "Packing ProwseTk Beacon Firefox addon (.xpi)"
+        VERBATIM)
+    add_custom_target(beacon-addon-xpi ALL DEPENDS "${BEACON_XPI_OUTPUT}")
+    install(FILES "${BEACON_XPI_OUTPUT}"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/prowsetk/beacon")
+    if(PROWSETK_BUILD_TESTS)
+        add_test(NAME prowsetk.integration.beacon.xpi
+            COMMAND "${Python3_EXECUTABLE}" "${BEACON_PACK_SCRIPT}"
+                --check "${BEACON_XPI_OUTPUT}"
+                --native-host-manifest
+                "${CMAKE_CURRENT_SOURCE_DIR}/beacon-native-host/prowsetk_beacon.json")
+        set_tests_properties(prowsetk.integration.beacon.xpi PROPERTIES
+            LABELS "integration;plugin;beacon" TIMEOUT 10)
+    endif()
+else()
+    message(STATUS "beacon: Python3 not found, skipping .xpi packaging")
+endif()
+
 install(TARGETS prowsetk_beacon
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/prowsetk/plugins"
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/prowsetk/plugins")

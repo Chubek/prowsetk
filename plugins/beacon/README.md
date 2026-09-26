@@ -60,6 +60,28 @@ ctest --preset default
 toolchain is required. The WIT contract for a future WASM component lives in
 `wit/beacon.wit`.
 
+## Firefox addon (.xpi)
+
+`prowsetk-beacon-addon/` packs into a deterministic, unsigned
+`prowsetk-beacon-addon.xpi` via `scripts/pack-beacon-addon.py`
+(sorted entries, fixed timestamps, `0644` modes):
+
+```bash
+cmake --build --preset default --target beacon-addon-xpi
+# artifact: build/default/plugins/beacon/prowsetk-beacon-addon.xpi
+python3 scripts/pack-beacon-addon.py \
+  --check build/default/plugins/beacon/prowsetk-beacon-addon.xpi \
+  --native-host-manifest plugins/beacon/beacon-native-host/prowsetk_beacon.json
+```
+
+The check validates the ZIP layout, the manifest (stable
+`browser_specific_settings.gecko.id` of `prowsetk-beacon@example.com`,
+permissions, background/sidebar wiring), and that the id matches the
+`allowed_extensions` allowlist in `beacon-native-host/prowsetk_beacon.json`.
+Load the `.xpi` in Firefox via `about:debugging → Load Temporary Add-on`
+for development, or sign it through Mozilla for distribution. The CMake
+`install` also ships the `.xpi` next to the unpacked addon sources.
+
 ## Testing
 
 ```bash
