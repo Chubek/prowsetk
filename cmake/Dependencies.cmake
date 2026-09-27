@@ -32,6 +32,33 @@ if(EXISTS "${PROWSETK_LIBTOMCRYPT_SOURCE_DIR}/CMakeLists.txt")
     target_compile_options(libtomcrypt PRIVATE
         $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-w>)
     add_library(ProwseTk::tomcrypt ALIAS libtomcrypt)
+    # libtomcrypt declares PUBLIC_HEADER as paths relative to its own source
+    # dir (see third_party/libtomcrypt/sources.cmake). An install() call in
+    # this directory would resolve those against PROJECT_SOURCE_DIR, yielding
+    # "<source>/src/headers/..." which does not exist. Re-root them to
+    # absolute paths before exporting/installing. Do not patch third_party/.
+    get_target_property(_prowsetk_ltc_public_header libtomcrypt PUBLIC_HEADER)
+    if(_prowsetk_ltc_public_header)
+        set(_prowsetk_ltc_abs_headers "")
+        foreach(_prowsetk_ltc_h IN LISTS _prowsetk_ltc_public_header)
+            if(IS_ABSOLUTE "${_prowsetk_ltc_h}")
+                list(APPEND _prowsetk_ltc_abs_headers "${_prowsetk_ltc_h}")
+            else()
+                list(APPEND _prowsetk_ltc_abs_headers
+                    "${PROWSETK_LIBTOMCRYPT_SOURCE_DIR}/${_prowsetk_ltc_h}")
+            endif()
+        endforeach()
+        set_target_properties(libtomcrypt PROPERTIES
+            PUBLIC_HEADER "${_prowsetk_ltc_abs_headers}")
+        unset(_prowsetk_ltc_abs_headers)
+        unset(_prowsetk_ltc_h)
+    endif()
+    unset(_prowsetk_ltc_public_header)
+    # Upstream exposes only <libtomcrypt/tomcrypt.h> for installs, but
+    # ProwseTk sources include <tomcrypt.h>; expose the bare include dir too
+    # so the installed ProwseTk::tomcrypt target keeps working.
+    target_include_directories(libtomcrypt PUBLIC
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
     prowsetk_install_library(libtomcrypt)
     message(STATUS "ProwseTk: using vendored LibTomCrypt")
 else()
