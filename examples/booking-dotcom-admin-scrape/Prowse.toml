@@ -140,6 +140,8 @@ arguments = [
     { name = "api_only", type = "boolean", required = false, default = true },
     { name = "script_origins", type = "string", required = false, default = "bstatic.com" },
     { name = "beacon_socket", type = "string", required = false, default = "" },
+    { name = "flash-on", type = "boolean", required = false, default = false },
+    { name = "flash_on", type = "boolean", required = false, default = false },
     { name = "beacon_url_pattern", type = "string", required = false, default = "" },
     { name = "beacon_binary", type = "string", required = false, default = "" },
     { name = "beacon_json", type = "string", required = false, default = "" },

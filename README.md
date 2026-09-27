@@ -1908,6 +1908,13 @@ build/default/src/cli/prowsetk run booking-dotcom-admin \
   --output build/booking-offline.yaml
 ```
 
+For a live Firefox oracle Flash, pass `--flash-on true` (default broker
+socket `/tmp/beacond.sock`, override with `--beacon_socket PATH`). The
+driver registers a `network_info` Flash, prints its ID, and waits for the
+user-consented addon flow (List Flashes, Connect to Flash, Send Network
+Info) before polling the bounded queue. Offline `--html` runs never flash,
+and `--beacon_json FILE-CONTENTS` stays the hermetic alternative.
+
 ## Build and Runtime Strategy
 
 The command reference lives in `man/man1/prowsetk.1` and

@@ -261,6 +261,51 @@ TEST(Drivers, BookingDotcomOfflineBeaconNetworkScrapesResults) {
     EXPECT_NE(postman.find("/api/beacon-checkout"), std::string::npos);
 }
 
+TEST(Drivers, BookingDotcomFlashOnStaysOfflineWithoutBeaconJson) {
+    if (!LuaRuntime::available()) GTEST_SKIP();
+    LuaRuntime lua;
+    ASSERT_TRUE(lua.run_file(std::string(PROWSETK_SOURCE_DIR) +
+        "/examples/booking-dotcom-admin-scrape/scrape-booking-dotcom-admin.lua").ok) << lua.last_error();
+    const std::string output = std::string(TEST_BINARY_DIR) + "/booking-offline-flash-on-disabled.yaml";
+    const std::string postman_output = output + ".postman.json";
+    // --flash-on true with an offline html run must stay deterministic: no
+    // live socket access, seeds kept, beacon reported unused.
+    const auto result = lua.call_function("main", {
+        {"html", "string", "<a href='/reservations'>Reservations</a><script>fetch('/api/hotels')</script>"},
+        {"flash-on", "boolean", "true"},
+        {"output", "path", output},
+        {"postman", "path", postman_output}});
+    ASSERT_TRUE(result.ok) << result.error;
+    const auto yaml = read_file(output);
+    EXPECT_NE(yaml.find("/api/hotels"), std::string::npos);
+    EXPECT_NE(yaml.find("used: false"), std::string::npos);
+}
+
+TEST(Drivers, BookingDotcomFlashOnUnderscoreSpellingMergesInjectedBeacon) {
+    if (!LuaRuntime::available()) GTEST_SKIP();
+    LuaRuntime lua;
+    ASSERT_TRUE(lua.run_file(std::string(PROWSETK_SOURCE_DIR) +
+        "/examples/booking-dotcom-admin-scrape/scrape-booking-dotcom-admin.lua").ok) << lua.last_error();
+    const std::string output = std::string(TEST_BINARY_DIR) + "/booking-offline-flash-on-beacon.yaml";
+    const std::string postman_output = output + ".postman.json";
+    const std::string beacon_json =
+        "{\"type\":\"flash_data\",\"flash_id\":\"11111111-1111-4111-8111-111111111111\","
+        "\"tab_id\":7,\"data_type\":\"network_info\",\"payload\":{"
+        "\"entries\":["
+        "{\"method\":\"GET\",\"url\":\"https://admin.booking.com/api/flash-on-orders\",\"type\":\"xmlhttprequest\"}"
+        "],\"timestamp\":1727155200}}";
+    const auto result = lua.call_function("main", {
+        {"html", "string", "<html><body><p>Flash-on oracle</p></body></html>"},
+        {"flash_on", "boolean", "true"},
+        {"beacon_json", "string", beacon_json},
+        {"output", "path", output},
+        {"postman", "path", postman_output}});
+    ASSERT_TRUE(result.ok) << result.error;
+    const auto yaml = read_file(output);
+    EXPECT_NE(yaml.find("/api/flash-on-orders"), std::string::npos);
+    EXPECT_NE(yaml.find("beacon-network"), std::string::npos);
+}
+
 TEST(Drivers, BookingDotcomLoginAndFailureBoundaries) {
     if (!LuaRuntime::available()) GTEST_SKIP();
     for (const std::string scenario : {

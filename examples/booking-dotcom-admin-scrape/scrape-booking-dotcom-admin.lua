@@ -12,7 +12,8 @@
 --
 -- Beacon network results (Firefox oracle, heuristic): pass args.beacon_json
 -- with a network_info flash_data document (hermetic, works offline and in
--- tests) or set args.beacon_socket for a live beacond socket. Observed
+-- tests) or pass --flash-on true for a live beacond Flash (optionally with
+-- args.beacon_socket, default /tmp/beacond.sock). Observed
 -- Firefox requests merge as beacon-network endpoints before restful
 -- resolution and schema enrichment. Live collection registers a Flash with
 -- beaconctl, waits for the user-consented addon flow (List Flashes, Connect
@@ -792,7 +793,30 @@ local function beacon_arg(args, name)
     args = args or {}
     local value = args[name]
     if value == nil then value = args[name:gsub("_", "-")] end
+    if value == nil then value = args[name:gsub("-", "_")] end
     return value
+end
+
+-- `--flash-on` opts into a live Firefox Flash. The CLI maps
+-- `--flash-on VALUE` onto the `flash-on` driver argument (coerced to a Lua
+-- boolean); direct `main(args)` callers may use `["flash-on"]` or `flash_on`
+-- with a boolean or a truthy string ("true"/"1"/"yes"/"on"). Either spelling
+-- being truthy enables the Flash, so a `--flash-on true` CLI run is not
+-- cancelled by the companion `flash_on` default of false.
+local function flash_on_requested(args)
+    args = args or {}
+    local candidates = { args["flash-on"], args.flash_on }
+    for _, raw in ipairs(candidates) do
+        if raw == true then return true end
+        if type(raw) == "number" and raw ~= 0 then return true end
+        if type(raw) == "string" then
+            local lower = raw:lower()
+            if lower == "true" or lower == "1" or lower == "yes" or lower == "on" then
+                return true
+            end
+        end
+    end
+    return false
 end
 
 -- Extracts network entries from a `flash_data` JSON document. Returns an
@@ -868,10 +892,15 @@ end
 -- Live Beacon collection through the local broker. Registers a network_info
 -- Flash, prompts for the user-consented addon flow, then polls the bounded
 -- delivery queue. Bounded and best-effort: any failure yields zero entries
--- with a short note. Only used for live runs with an explicit socket.
+-- with a short note. Only used for live runs when `--flash-on true` is
+-- passed (or, for backward compatibility, when `beacon_socket` is set
+-- explicitly); offline `html` runs never flash so they stay deterministic.
 local function live_beacon_network_entries(args, page_url)
+    local flash_on = flash_on_requested(args)
     local socket = beacon_arg(args, "beacon_socket")
-    if type(socket) ~= "string" or socket == "" then return {}, "disabled" end
+    local socket_explicit = type(socket) == "string" and socket ~= ""
+    if not flash_on and not socket_explicit then return {}, "disabled" end
+    if not socket_explicit then socket = "/tmp/beacond.sock" end
     if beacon_spec ~= nil then
         local valid, _ = beacon_spec.validate(
             { url_pattern = page_url, resource_types = { "main_frame" } },
@@ -932,8 +961,9 @@ local function live_beacon_network_entries(args, page_url)
 end
 
 -- Merges Beacon network results into the endpoint list. Hermetic inputs
--- (`beacon_json`) work offline and in tests; the live socket path is used
--- only for live runs with an explicit `beacon_socket`. Never throws.
+-- (`beacon_json`) work offline and in tests; the live Flash path is used
+-- only for live runs with `--flash-on true` (or an explicit `beacon_socket`
+-- for backward compatibility) and never for offline `html` runs. Never throws.
 local function apply_beacon_network(endpoints, args, page_url,
                                     authenticated_flag, offline)
     local status = { used = false, entries = 0, note = "disabled" }
@@ -1747,7 +1777,8 @@ function main(args)
         -- Beacon network Flash results merge before restful resolution so
         -- observed Firefox requests join the GET+POST surface and schema
         -- enrichment like any other heuristic discovery. Disabled by
-        -- default; hermetic via beacon_json, live via beacon_socket.
+        -- default; hermetic via beacon_json, live via --flash-on true
+        -- (default socket /tmp/beacond.sock unless beacon_socket is set).
         local beacon_status = apply_beacon_network(endpoints, args,
             restful_page, authenticated_flag, offline)
         local restful_status = { has_post = false, is_complete = false,
