@@ -44,9 +44,9 @@ typedef struct {
 
 static void print_usage(FILE *stream) {
     fprintf(stream,
-            "Usage: page2pdf [--format auto|iml|vtd] INPUT OUTPUT.pdf\\n"
-            "Lay out serialized ProwseIML or ProwseVTD as a PDF.\\n"
-            "Use '-' as INPUT to read standard input. OUTPUT must be a file.\\n");
+            "Usage: page2pdf [--format auto|iml|vtd] INPUT OUTPUT.pdf\n"
+            "Lay out serialized ProwseIML or ProwseVTD as a PDF.\n"
+            "Use '-' as INPUT to read standard input. OUTPUT must be a file.\n");
 }
 
 static bool buffer_append(Buffer *buffer, const unsigned char *data,
@@ -80,19 +80,19 @@ static bool read_input(const char *path, Buffer *out) {
         input = fopen(path, "rb");
     }
     if (input == NULL) {
-        fprintf(stderr, "page2pdf: cannot open input '%s': %s\\n", path,
+        fprintf(stderr, "page2pdf: cannot open input '%s': %s\n", path,
                 strerror(errno));
         return false;
     }
     while ((count = fread(chunk, 1U, sizeof(chunk), input)) != 0U) {
         if (!buffer_append(out, chunk, count)) {
-            fprintf(stderr, "page2pdf: input exceeds the 16 MiB safety limit\\n");
+            fprintf(stderr, "page2pdf: input exceeds the 16 MiB safety limit\n");
             ok = false;
             break;
         }
     }
     if (ferror(input) != 0) {
-        fprintf(stderr, "page2pdf: failed to read input '%s'\\n", path);
+        fprintf(stderr, "page2pdf: failed to read input '%s'\n", path);
         ok = false;
     }
     if (input != stdin) {
@@ -468,7 +468,7 @@ int main(int argc, char **argv) {
         }
         if (strcmp(argv[i], "--format") == 0) {
             if (++i >= argc || (format = parse_format(argv[i])) == (InputFormat)-1) {
-                fprintf(stderr, "page2pdf: --format requires auto, iml, or vtd\\n");
+                fprintf(stderr, "page2pdf: --format requires auto, iml, or vtd\n");
                 return EXIT_FAILURE;
             }
             continue;
@@ -495,7 +495,7 @@ int main(int argc, char **argv) {
                  INPUT_VTD : INPUT_IML;
     }
     if (!renderer_init(&renderer)) {
-        fprintf(stderr, "page2pdf: unable to initialize libHaru (0x%04X, %u)\\n",
+        fprintf(stderr, "page2pdf: unable to initialize libHaru (0x%04X, %u)\n",
                 (unsigned int)renderer.error, (unsigned int)renderer.detail);
         renderer_destroy(&renderer);
         free(input.data);

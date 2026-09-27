@@ -209,7 +209,7 @@ static void hpdf_error_handler(HPDF_STATUS error, HPDF_STATUS detail,
 }
 
 static HPDF_Page page_at(Renderer *renderer, size_t index) {
-    if (index >= 128U) return NULL;
+    if (index >= PAGE2PDF_MAX_PAGES) return NULL;
     while (renderer->page_count <= index) {
         HPDF_Page page = HPDF_AddPage(renderer->document);
         if (page == NULL || HPDF_Page_SetSize(page, HPDF_PAGE_SIZE_LETTER,
@@ -226,13 +226,13 @@ bool renderer_init(Renderer *renderer) {
     renderer->document = HPDF_New(hpdf_error_handler, renderer);
     if (renderer->document == NULL) return false;
     HPDF_SetCompressionMode(renderer->document, HPDF_COMP_ALL);
-    renderer->regular = HPDF_GetFont(renderer->document, "Helvetica", NULL);
-    renderer->bold = HPDF_GetFont(renderer->document, "Helvetica-Bold", NULL);
-    renderer->mono = HPDF_GetFont(renderer->document, "Courier", NULL);
-    renderer->page = page_at(renderer, 0U);
+    renderer->fallback_regular = HPDF_GetFont(renderer->document, "Helvetica", NULL);
+    renderer->fallback_bold = HPDF_GetFont(renderer->document, "Helvetica-Bold", NULL);
+    renderer->fallback_mono = HPDF_GetFont(renderer->document, "Courier", NULL);
+    (void)page_at(renderer, 0U);
     renderer->root = new_node(renderer, "#document", NULL, 0U);
-    return renderer->regular != NULL && renderer->bold != NULL &&
-           renderer->mono != NULL && renderer->page != NULL &&
+    return renderer->fallback_regular != NULL && renderer->fallback_bold != NULL &&
+           renderer->fallback_mono != NULL && renderer->page_count != 0U &&
            renderer->root != NULL && renderer->error == HPDF_OK;
 }
 
@@ -559,14 +559,14 @@ static Style compute_style(const GraphicNode *node, const Style *parent,
 }
 
 static HPDF_Font select_font(Renderer *renderer, const Style *style) {
-    return style->mono ? renderer->mono :
-           (style->bold ? renderer->bold : renderer->regular);
+    return style->mono ? renderer->fallback_mono :
+           (style->bold ? renderer->fallback_bold : renderer->fallback_regular);
 }
 
 static float word_width(Renderer *renderer, const Style *style, const char *text) {
-    HPDF_Page_SetFontAndSize(renderer->page, select_font(renderer, style),
+    HPDF_Page_SetFontAndSize(renderer->pages[0], select_font(renderer, style),
                              style->font_size);
-    return HPDF_Page_TextWidth(renderer->page, text);
+    return HPDF_Page_TextWidth(renderer->pages[0], text);
 }
 
 static void line_finish(Flow *flow) {
@@ -860,8 +860,8 @@ static bool paint_node(Renderer *renderer, const GraphicNode *node) {
     for (run = node->runs; run != NULL; run = run->next) {
         size_t index = (size_t)(run->top / PAGE_HEIGHT);
         HPDF_Page page = page_at(renderer, index);
-        HPDF_Font font = run->mono ? renderer->mono :
-                         (run->bold ? renderer->bold : renderer->regular);
+        HPDF_Font font = run->mono ? renderer->fallback_mono :
+                         (run->bold ? renderer->fallback_bold : renderer->fallback_regular);
         float local_top = run->top - (float)index * PAGE_HEIGHT;
         if (page == NULL || HPDF_Page_BeginText(page) != HPDF_OK ||
             HPDF_Page_SetFontAndSize(page, font, run->size) != HPDF_OK ||
