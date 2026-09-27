@@ -80,3 +80,80 @@ TEST(Page2Pdf, RejectsMalformedVtd) {
     EXPECT_NE(std::system(command.c_str()), 0);
     EXPECT_FALSE(std::filesystem::exists(output));
 }
+
+TEST(Page2Pdf, AcceptsVtdFromStandardInput) {
+    const std::filesystem::path directory =
+        std::filesystem::path(TEST_BINARY_DIR) / "page2pdf";
+    std::filesystem::create_directories(directory);
+    const auto document = prowsetk::parse_html("<html><body><p>stdin</p></body></html>");
+    ASSERT_NE(document, nullptr);
+    const auto input = directory / "stdin.vtd";
+    const auto output = directory / "stdin.pdf";
+    write_bytes(input, prowsetk::emit_prowse_vtd(*document));
+    const std::string command = shell_quote(PAGE2PDF_BIN) + " --format vtd - " +
+                                shell_quote(output) + " < " + shell_quote(input);
+    ASSERT_EQ(std::system(command.c_str()), 0);
+    expect_pdf(output);
+}
+
+TEST(Page2Pdf, AcceptsImlDocumentTextFromStandardInput) {
+    const std::filesystem::path directory =
+        std::filesystem::path(TEST_BINARY_DIR) / "page2pdf";
+    std::filesystem::create_directories(directory);
+    const auto document = prowsetk::parse_html(
+        "\xEF\xBB\xBF<html><body><h1>BOM-safe pipeline</h1></body></html>");
+    ASSERT_NE(document, nullptr);
+
+    const auto input = directory / "stdin-bom.iml";
+    const auto output = directory / "stdin-bom.pdf";
+    write_text(input, prowsetk::emit_prowse_iml(*document));
+    const std::string command = shell_quote(PAGE2PDF_BIN) + " --format iml - " +
+                                shell_quote(output) + " < " + shell_quote(input);
+    ASSERT_EQ(std::system(command.c_str()), 0);
+    expect_pdf(output);
+}
+
+TEST(Page2Pdf, PaintsImageFromBothIrFormats) {
+    const auto directory = std::filesystem::path(TEST_BINARY_DIR) / "page2pdf";
+    std::filesystem::create_directories(directory);
+    const auto document = prowsetk::parse_html(
+        "<html><head><style>.panel,.other{background-color:#123456;"
+        "border:2px solid red;padding:12px}"
+        ".panel h1{color:white;text-align:center}</style></head><body>"
+        "<div class='panel'><h1>Graphic</h1>"
+        "<img width='72' height='48' src='data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEX/AAAZ4gk3"
+        "AAAACklEQVQI12NgAAAAAgAB4iG8MwAAAABJRU5ErkJggg=='></div>"
+        "</body></html>");
+    ASSERT_NE(document, nullptr);
+    const auto iml = directory / "graphics.iml";
+    const auto vtd = directory / "graphics.vtd";
+    write_text(iml, prowsetk::emit_prowse_iml(*document));
+    write_bytes(vtd, prowsetk::emit_prowse_vtd(*document));
+    for (const auto& input : {iml, vtd}) {
+        const auto output = directory / (input.filename().string() + ".pdf");
+        const std::string command = shell_quote(PAGE2PDF_BIN) + " --format " +
+            (input == iml ? "iml" : "vtd") + " " + shell_quote(input) +
+            " " + shell_quote(output);
+        ASSERT_EQ(std::system(command.c_str()), 0);
+        expect_pdf(output);
+        EXPECT_NE(read_text(output).find("/Subtype /Image"), std::string::npos);
+    }
+}
+
+TEST(Page2Pdf, SkipsCorruptPngInsteadOfCrashing) {
+    const auto directory = std::filesystem::path(TEST_BINARY_DIR) / "page2pdf";
+    std::filesystem::create_directories(directory);
+    const auto document = prowsetk::parse_html(
+        "<html><body><img src='data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/ZY0AAAAASUVORK5CYII='>"
+        "</body></html>");
+    ASSERT_NE(document, nullptr);
+    const auto input = directory / "invalid-image.iml";
+    const auto output = directory / "invalid-image.pdf";
+    write_text(input, prowsetk::emit_prowse_iml(*document));
+    ASSERT_EQ(std::system((shell_quote(PAGE2PDF_BIN) + " --format iml " +
+                           shell_quote(input) + " " + shell_quote(output)).c_str()), 0);
+    expect_pdf(output);
+    EXPECT_EQ(read_text(output).find("/Subtype /Image"), std::string::npos);
+}

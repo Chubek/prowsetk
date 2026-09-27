@@ -5,6 +5,7 @@
 //   prowsetk serve [--host H] [--port P] ...  run the web interface
 //   prowsetk webdriver [--host H] [--port P]  run the builtin W3C WebDriver
 //   prowsetk endpoints --url URL ...          extract endpoints to OpenAPI YAML
+//   prowsetk serialize --iml|--vtd ...         serialize a loaded document IR
 //   prowsetk run <driver> [--arg value ...]   run a Prowse.toml Lua driver
 //
 // The CLI is a thin host application over the C++ core: it creates a Browser,
@@ -23,12 +24,21 @@
 #include <prowsetk/cookie_import.hpp>
 #include <prowsetk/endpoint_extraction.hpp>
 #include <prowsetk/error.hpp>
+#include <prowsetk/ir.hpp>
 #include <prowsetk/lua_runtime.hpp>
 #include <prowsetk/project_config.hpp>
 #include <prowsetk/version.hpp>
 #include <prowsetk/web_interface.hpp>
 
+#include "serialize_resources.hpp"
+
 namespace {
+
+enum class SerializationFormat {
+    None,
+    Iml,
+    Vtd,
+};
 
 struct Arguments {
     std::string command;
@@ -37,7 +47,10 @@ struct Arguments {
     std::string web_root;
     std::string url;
     std::string output;
+    std::string html;
     bool javascript = true;
+    bool stdout_output = false;
+    SerializationFormat serialization_format = SerializationFormat::None;
     std::string driver;
     std::string config_path = "Prowse.toml";
     std::string user_agent;
@@ -113,6 +126,23 @@ bool parse_arguments(int argc, char** argv, Arguments& args) {
             args.url = argv[++i];
         } else if (arg == "--output" && i + 1 < argc) {
             args.output = argv[++i];
+        } else if (args.command == "serialize" && arg == "--html" &&
+                   i + 1 < argc) {
+            args.html = argv[++i];
+        } else if (args.command == "serialize" && arg == "--stdout") {
+            args.stdout_output = true;
+        } else if (args.command == "serialize" && arg == "--iml") {
+            if (args.serialization_format != SerializationFormat::None) {
+                std::cerr << "prowsetk serialize: choose exactly one of --iml or --vtd\n";
+                return false;
+            }
+            args.serialization_format = SerializationFormat::Iml;
+        } else if (args.command == "serialize" && arg == "--vtd") {
+            if (args.serialization_format != SerializationFormat::None) {
+                std::cerr << "prowsetk serialize: choose exactly one of --iml or --vtd\n";
+                return false;
+            }
+            args.serialization_format = SerializationFormat::Vtd;
         } else if (arg == "--javascript") {
             args.javascript = true;
         } else if (arg == "--no-javascript") {
@@ -133,6 +163,8 @@ void print_usage(std::ostream& out) {
         << "  prowsetk webdriver [--host 127.0.0.1] [--port 0] [--no-javascript]\n"
         << "  prowsetk cdp [--host 127.0.0.1] [--port 0] [--no-javascript]\n"
         << "  prowsetk endpoints --url URL [--output FILE] [--javascript]\n"
+        << "  prowsetk serialize (--iml|--vtd) (--url URL|--html HTML) "
+           "(--stdout|--output FILE) [--no-javascript]\n"
         << "  prowsetk run <driver> [--arg VALUE ...] [--config Prowse.toml] "
            "[--user-agent VALUE] [--cookies-json FILE]\n";
 }
@@ -223,6 +255,75 @@ int run_endpoints(const Arguments& args) {
         std::cout << result.openapi_yaml;
     }
     return 0;
+}
+
+int run_serialize(const Arguments& args) {
+    if (args.serialization_format == SerializationFormat::None) {
+        std::cerr << "prowsetk serialize: choose one of --iml or --vtd\n";
+        return 2;
+    }
+    if (args.url.empty() && args.html.empty()) {
+        std::cerr << "prowsetk serialize: provide --url or --html\n";
+        return 2;
+    }
+    if (args.stdout_output == !args.output.empty()) {
+        std::cerr << "prowsetk serialize: choose exactly one of --stdout or --output\n";
+        return 2;
+    }
+
+    prowsetk::BrowserConfig config;
+    config.javascript = args.javascript;
+    prowsetk::Browser browser(std::move(config));
+    auto session = browser.create_session();
+    if (!args.html.empty()) {
+        session->load_html(args.html, args.url);
+    } else {
+        session->navigate(args.url);
+    }
+    const auto document = session->document();
+    if (document == nullptr || !document->valid()) {
+        std::cerr << "prowsetk serialize: no document was loaded\n";
+        return 1;
+    }
+
+    if (args.html.empty()) {
+        prowsetk::cli::embed_serialized_resources(*session, *document);
+    }
+
+    if (args.serialization_format == SerializationFormat::Iml) {
+        const std::string iml = prowsetk::emit_prowse_iml(*document);
+        if (args.stdout_output) {
+            std::cout.write(iml.data(), static_cast<std::streamsize>(iml.size()));
+            std::cout.flush();
+            return std::cout ? 0 : 1;
+        }
+        std::ofstream output(args.output, std::ios::binary);
+        if (!output) {
+            std::cerr << "prowsetk serialize: cannot open output file: "
+                      << args.output << '\n';
+            return 1;
+        }
+        output.write(iml.data(), static_cast<std::streamsize>(iml.size()));
+        return output ? 0 : 1;
+    }
+
+    const std::vector<std::uint8_t> vtd = prowsetk::emit_prowse_vtd(*document);
+    const auto write_vtd = [&](std::ostream& output) {
+        output.write(reinterpret_cast<const char*>(vtd.data()),
+                     static_cast<std::streamsize>(vtd.size()));
+        output.flush();
+        return static_cast<bool>(output);
+    };
+    if (args.stdout_output) {
+        return write_vtd(std::cout) ? 0 : 1;
+    }
+    std::ofstream output(args.output, std::ios::binary);
+    if (!output) {
+        std::cerr << "prowsetk serialize: cannot open output file: "
+                  << args.output << '\n';
+        return 1;
+    }
+    return write_vtd(output) ? 0 : 1;
 }
 
 int run_driver(const Arguments& args) {
@@ -424,6 +525,9 @@ int main(int argc, char** argv) {
         }
         if (args.command == "endpoints") {
             return run_endpoints(args);
+        }
+        if (args.command == "serialize") {
+            return run_serialize(args);
         }
         if (args.command == "run") {
             return run_driver(args);

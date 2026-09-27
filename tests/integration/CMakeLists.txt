@@ -80,4 +80,8 @@ if(PROWSETK_BUILD_CLI)
             PROWSETK_HAVE_TOMLPLUSPLUS=1)
     endif()
     add_dependencies(prowsetk_integration_cli prowsetk_cli)
+    target_sources(prowsetk_integration_cli PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/cli/serialize_resources.cpp")
+    target_include_directories(prowsetk_integration_cli PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/cli")
 endif()

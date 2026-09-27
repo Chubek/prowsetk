@@ -120,14 +120,6 @@ JSValue handles_to_array(JSContext* context,
     return array;
 }
 
-JSValue string_property(JSContext* context, JSValueConst object,
-                        const char* name) {
-    JSValue value = JS_GetPropertyStr(context, object, name);
-    std::string text = value_to_string(context, value);
-    JS_FreeValue(context, value);
-    return JS_NewString(context, text.c_str());
-}
-
 // Reads a [[name, value], ...] array into header pairs.
 std::vector<std::pair<std::string, std::string>> arg_header_pairs(
     JSContext* context, JSValueConst value) {
@@ -340,7 +332,19 @@ JSValue bp_query_all(JSContext* context, JSValueConst, int argc,
     if (host == nullptr || argc < 1 || !arg_string(context, argv[0], selector)) {
         return JS_NewArray(context);
     }
-    return handles_to_array(context, host->query_selector_all(selector));
+    try {
+        return handles_to_array(context, host->query_selector_all(selector));
+    } catch (const Error& error) {
+        // DOM selector failures are page-JavaScript errors. Never unwind a
+        // C++ exception through QuickJS: doing so aborts document installation
+        // and prevents callers such as `prowsetk serialize` from using the
+        // already parsed document.
+        return JS_ThrowSyntaxError(context, "%s", error.what());
+    } catch (const std::exception& error) {
+        return JS_ThrowInternalError(context, "%s", error.what());
+    } catch (...) {
+        return JS_ThrowInternalError(context, "DOM selector evaluation failed");
+    }
 }
 
 JSValue bp_query_scope(JSContext* context, JSValueConst, int argc,
@@ -351,8 +355,16 @@ JSValue bp_query_scope(JSContext* context, JSValueConst, int argc,
         !arg_string(context, argv[1], selector)) {
         return JS_NewArray(context);
     }
-    return handles_to_array(
-        context, host->query_selector_all_in(arg_handle(context, argv[0]), selector));
+    try {
+        return handles_to_array(
+            context, host->query_selector_all_in(arg_handle(context, argv[0]), selector));
+    } catch (const Error& error) {
+        return JS_ThrowSyntaxError(context, "%s", error.what());
+    } catch (const std::exception& error) {
+        return JS_ThrowInternalError(context, "%s", error.what());
+    } catch (...) {
+        return JS_ThrowInternalError(context, "DOM selector evaluation failed");
+    }
 }
 
 JSValue bp_matches(JSContext* context, JSValueConst, int argc,
@@ -362,8 +374,16 @@ JSValue bp_matches(JSContext* context, JSValueConst, int argc,
     if (host == nullptr || argc < 2 || !arg_string(context, argv[1], selector)) {
         return JS_FALSE;
     }
-    return JS_NewBool(context,
-                      host->element_matches(arg_handle(context, argv[0]), selector));
+    try {
+        return JS_NewBool(context,
+                          host->element_matches(arg_handle(context, argv[0]), selector));
+    } catch (const Error& error) {
+        return JS_ThrowSyntaxError(context, "%s", error.what());
+    } catch (const std::exception& error) {
+        return JS_ThrowInternalError(context, "%s", error.what());
+    } catch (...) {
+        return JS_ThrowInternalError(context, "DOM selector evaluation failed");
+    }
 }
 
 JSValue bp_node_type(JSContext* context, JSValueConst, int argc,

@@ -11,6 +11,10 @@ prowsetk \- headless browser automation and endpoint discovery
 .B prowsetk endpoints --url
 \fIURL\fR [\fB--output\fR \fIFILE\fR] [\fB--no-javascript\fR]
 .br
+.B prowsetk serialize
+(\fB--iml\fR|\fB--vtd\fR) (\fB--url\fR \fIURL\fR|\fB--html\fR \fIHTML\fR)
+(\fB--stdout\fR|\fB--output\fR \fIFILE\fR) [\fB--no-javascript\fR]
+.br
 .B prowsetk run
 \fIDRIVER\fR [\fB--config\fR \fIFILE\fR] [\fB--user-agent\fR \fIVALUE\fR]
 [\fB--cookies-json\fR \fIFILE\fR] [\fB--\fIargument\fR \fIVALUE\fR ...]
@@ -20,7 +24,9 @@ The \fBversion\fR command prints the installed version.
 \fBserve\fR runs the embedded HTTP interface, listening on 127.0.0.1:8080
 by default. \fBendpoints\fR discovers candidate endpoints and emits an
 OpenAPI document; inferred endpoints carry provenance and confidence rather
-than being authoritative. \fBrun\fR executes a declared Lua driver.
+than being authoritative. \fBserialize\fR emits the loaded document as
+ProwseIML text or ProwseVTD binary data. \fBrun\fR executes a declared Lua
+driver.
 .SH OPTIONS
 .TP
 .B --host \fIADDRESS\fR
@@ -37,6 +43,18 @@ Target URL for endpoint discovery or a declared driver argument.
 .TP
 .B --output \fIFILE\fR
 Output file for endpoint discovery, or a declared driver argument.
+.TP
+.B --html \fIHTML\fR
+Offline HTML source for \fBserialize\fR. When combined with \fB--url\fR,
+the URL is the document base URL rather than a navigation target.
+.TP
+.B --iml, --vtd
+Select ProwseIML or ProwseVTD output for \fBserialize\fR. Exactly one is
+required.
+.TP
+.B --stdout
+Write \fBserialize\fR output to standard output. VTD is binary and no status
+text is written to standard output.
 .TP
 .B --config \fIFILE\fR
 Project configuration for \fBrun\fR (default: Prowse.toml).

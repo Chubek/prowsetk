@@ -1,4 +1,4 @@
-prowsetk_add_executable(prowsetk_cli prowsetk_main.cpp)
+prowsetk_add_executable(prowsetk_cli prowsetk_main.cpp serialize_resources.cpp)
 target_link_libraries(prowsetk_cli PRIVATE ProwseTk::core)
 target_include_directories(prowsetk_cli PRIVATE "${PROJECT_SOURCE_DIR}/src/core")
 

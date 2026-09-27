@@ -5,6 +5,11 @@
 #include <sstream>
 #include <string>
 
+#include "serialize_resources.hpp"
+#include "prowsetk/browser.hpp"
+#include "prowsetk/ir.hpp"
+#include "prowsetk/network_client.hpp"
+
 #if defined(__unix__) || defined(__APPLE__)
 #include <sys/wait.h>
 #endif
@@ -210,6 +215,77 @@ TEST(CliDriverRun, RejectsUnknownDriverAndArguments) {
                           quote_shell(config_path)),
               0);
 #endif
+}
+
+TEST(CliSerialize, WritesImlAndVtdToStandardOutput) {
+    const std::filesystem::path fixture =
+        std::filesystem::path(TEST_BINARY_DIR) / "cli_serialize";
+    std::filesystem::create_directories(fixture);
+    const auto iml = fixture / "page.iml";
+    const auto vtd = fixture / "page.vtd";
+    const std::string html =
+        "<html><body><h1>Serialized</h1><p>page</p>"
+        "<script>document.querySelector(':scope')</script></body></html>";
+    const std::string binary = quote_shell(PROWSETK_CLI_BIN);
+
+    const std::string iml_command =
+        binary + " serialize --iml --stdout --html " + quote_shell(html) +
+        " > " + quote_shell(iml.string());
+    ASSERT_EQ(run_command(iml_command), 0);
+    EXPECT_NE(read_file(iml.string()).find("(document"), std::string::npos);
+
+    const std::string vtd_command =
+        binary + " serialize --vtd --stdout --html " + quote_shell(html) +
+        " > " + quote_shell(vtd.string());
+    ASSERT_EQ(run_command(vtd_command), 0);
+    const std::string vtd_bytes = read_file(vtd.string());
+    ASSERT_GE(vtd_bytes.size(), 5U);
+    EXPECT_EQ(vtd_bytes.substr(0, 5), "PVTD1");
+
+    EXPECT_NE(run_command(binary + " serialize --stdout --html " +
+                          quote_shell(html)), 0);
+    EXPECT_NE(run_command(binary + " serialize --iml --vtd --stdout --html " +
+                          quote_shell(html)), 0);
+}
+
+TEST(CliSerialize, SnapshotsSameOriginStylesAndImages) {
+    prowsetk::BrowserConfig config;
+    config.javascript = false;
+    prowsetk::Browser browser(config);
+    auto network = std::make_unique<prowsetk::MemoryNetworkClient>();
+    auto* requests = network.get();
+    prowsetk::HttpResponse page;
+    page.status = 200;
+    page.headers.emplace_back("Content-Type", "text/html");
+    page.body = "<html><head><link rel='stylesheet' href='/main.css'></head>"
+                "<body><img src='/logo.png'><img src='https://other.test/private.png'>"
+                "</body></html>";
+    network->set_response("https://example.test/", page);
+    prowsetk::HttpResponse css;
+    css.status = 200;
+    css.headers.emplace_back("Content-Type", "text/css");
+    css.body = "body{background-color:#abcdef}";
+    network->set_response("https://example.test/main.css", css);
+    prowsetk::HttpResponse image;
+    image.status = 200;
+    image.headers.emplace_back("Content-Type", "image/png");
+    image.body = "png-bytes";
+    network->set_response("https://example.test/logo.png", image);
+    browser.set_network_client(std::move(network));
+
+    auto session = browser.create_session();
+    session->navigate("https://example.test/");
+    auto document = session->document();
+    ASSERT_NE(document, nullptr);
+    prowsetk::cli::embed_serialized_resources(*session, *document);
+
+    const std::string iml = prowsetk::emit_prowse_iml(*document);
+    EXPECT_NE(iml.find("background-color:#abcdef"), std::string::npos);
+    EXPECT_NE(iml.find("data:image/png;base64,cG5nLWJ5dGVz"), std::string::npos);
+    EXPECT_NE(iml.find("https://other.test/private.png"), std::string::npos);
+    for (const auto& request : requests->requests()) {
+        EXPECT_EQ(request.url.find("https://other.test/"), std::string::npos);
+    }
 }
 
 TEST(CliDriverRun, BookingDotcomOfflineOpenApi) {

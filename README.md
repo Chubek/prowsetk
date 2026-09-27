@@ -1179,6 +1179,7 @@ prowsetk serve [--host 127.0.0.1] [--port 8080] [--web-root DIR] [--no-javascrip
 prowsetk webdriver [--host 127.0.0.1] [--port 9515] [--no-javascript]
 prowsetk playwright [--host 127.0.0.1] [--port 9222]
 prowsetk endpoints --url https://example.com --output build/openapi.yaml
+prowsetk serialize --vtd --stdout --url https://example.com > page.vtd
 prowsetk run crawl-site --url https://example.com --depth 2 --output build/pages.jsonl
 prowsetk version
 ```
@@ -1188,6 +1189,25 @@ prowsetk version
 is a single-page application (`resources/web/index.html`, `app.js`,
 `style.css`) with no framework and no build step: it drives the same REST API
 from the browser.
+
+`prowsetk serialize` creates one session, loads either `--url URL` or an
+offline `--html HTML` document, and serializes the resulting document as
+ProwseIML (`--iml`) or ProwseVTD (`--vtd`). Select exactly one format and one
+destination (`--stdout` or `--output FILE`). When `--html` and `--url` are
+both supplied, the URL is used only as the offline document's base URL. VTD is
+binary and is written directly to standard output with no status text, so it
+can safely be piped into `page2pdf`:
+
+For live `--url` documents, serialization also snapshots a bounded number of
+same-origin linked CSS files and PNG/JPEG images through the owning session.
+The CSS is added to the serialized document as `<style>` content and supported
+images are embedded as data URLs. Offline `--html` input makes no resource
+requests; it can supply inline CSS and image data URLs directly.
+
+```sh
+prowsetk serialize --vtd --stdout --html '<h1>Report</h1>' \
+  | page2pdf --format vtd - report.pdf
+```
 
 ### Automation protocols
 
@@ -1986,7 +2006,7 @@ optional components depending on the build configuration.
 | `jemalloc` | Optional memory allocator |
 | `kaguya` | C++ and Lua integration |
 | `lexbor` | HTML and CSS parsing |
-| `libharu` | Semantic PDF generation for the standalone `page2pdf` IR compiler |
+| `libharu` | PDF drawing and image embedding for the standalone `page2pdf` IR compiler |
 | `libdom` | DOM tree construction (NetSurf) |
 | `libev` | Event loop |
 | `libmagic` | File and content-type detection |
@@ -2019,20 +2039,26 @@ documented with the build system.
 
 `page2pdf` is a standalone C tool built at `build/<preset>/tools/page2pdf/`.
 It consumes the serialized ProwseVTD (`PVTD1`) and ProwseIML formats emitted by
-`lprowseir`, rather than accessing Flatworm's C++ DOM. It produces a bounded,
-semantic PDF using libHaru:
+`lprowseir`, rather than accessing Flatworm's C++ DOM. It calculates a print
+layout from the IR tree and paints boxes, backgrounds, borders, colored and
+sized text, and embedded PNG/JPEG images with libHaru:
 
 ```sh
 build/default/tools/page2pdf/page2pdf --format vtd page.vtd page.pdf
 build/default/tools/page2pdf/page2pdf --format iml page.iml page.pdf
+prowsetk serialize --vtd --stdout --html '<p>Pipeline</p>' | \
+  build/default/tools/page2pdf/page2pdf --format vtd - page.pdf
 ```
 
 `--format auto` (the default) recognizes the ProwseVTD magic and otherwise
-expects ProwseIML; `-` may be used as the input path for a pipeline. The tool
-preserves document text and common headings/list nesting, but it deliberately
-does not implement CSS, browser layout, images, JavaScript, link activation,
-or arbitrary page attributes. ProwseIML macro forms must be expanded before
-they are passed to the tool.
+expects ProwseIML; `-` may be used as the input path for a pipeline. CSS support
+includes inline declarations and basic grouped/descendant tag, `.class`, and `#id` rules from
+`<style>`; unsupported selectors and CSS properties are skipped. The printer
+does not implement full browser layout, flex/grid alignment, SVG, web fonts,
+arbitrary JavaScript painting, or remote image loading within the C process.
+Live resource snapshots are bounded and same-origin; a page depending on
+cross-origin assets or advanced CSS will differ from a browser screenshot.
+ProwseIML macro forms must be expanded before they are passed to the tool.
 
 ## Modularity
 

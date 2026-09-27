@@ -335,10 +335,15 @@ Further IRs register by name with `IrEmitterRegistry`
 the built-ins, and drivers resolve every name uniformly through
 `lprowseir.emit(document, name)` / `lprowseir.emitters()`.
 
-`tools/page2pdf` is a C-only consumer of serialized ProwseVTD and ProwseIML.
+`prowsetk serialize` emits either serialized ProwseVTD or ProwseIML from a
+fresh CLI session. `tools/page2pdf` is a C-only consumer of those wire forms
+and accepts `-` as standard input for pipelines.
 It must remain downstream of the IR boundary: it never accesses Flatworm DOM
-objects or the C++ API, and it renders bounded semantic text with libHaru
-rather than claiming browser/CSS layout compatibility.
+objects or the C++ API. It builds a bounded print box layout from IR attributes
+and embedded styles, then paints backgrounds, borders, text, and embedded images
+with libHaru. The CLI may snapshot bounded same-origin CSS and PNG/JPEG via the
+owning session into serialized IR. Neither component claims browser/CSS layout
+compatibility beyond the documented supported subset.
 
 ---
 
