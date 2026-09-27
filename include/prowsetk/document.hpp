@@ -61,6 +61,10 @@ public:
     std::shared_ptr<Element> next_sibling() const;
     std::shared_ptr<Element> previous_sibling() const;
 
+    // CSS subset documented in README: escaped identifiers/strings, attribute
+    // i/s flags, structural pseudos and complex :not() lists. Malformed or
+    // oversized syntax throws Error(ParseError); excessive matching work
+    // throws Error(ResourceLimit). Results are in document order.
     std::shared_ptr<Element> query_selector(std::string_view selector) const;
     std::vector<std::shared_ptr<Element>> query_selector_all(
         std::string_view selector) const;
@@ -117,6 +121,10 @@ public:
 
     std::shared_ptr<Element> root() const;
 
+    // CSS subset documented in README: escaped identifiers/strings, attribute
+    // i/s flags, structural pseudos and complex :not() lists. Malformed or
+    // oversized syntax throws Error(ParseError); excessive matching work
+    // throws Error(ResourceLimit). Results are in document order.
     std::shared_ptr<Element> query_selector(std::string_view selector) const;
     std::vector<std::shared_ptr<Element>> query_selector_all(
         std::string_view selector) const;
