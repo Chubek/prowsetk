@@ -5,14 +5,10 @@ implements, extends, or reviews ProwseTk. Read `README.md` first; it is the
 architecture of record. When this file and `README.md` disagree, `README.md`
 wins and this file must be corrected.
 
-## 0. MCP Tools
-
 You must use the following MCP tools installed on this agent in development of ProwseTk:
 
 - `prowsetk_oracle`
 - `http_oracle`
-
-Use `absyn_cache` to cache C/C++ files, and read back from them, instead of reading the files (unless they have been changed). Same goes for `python_absyn` with Python files.
 
 ## 1. Mission
 
@@ -338,6 +334,11 @@ Further IRs register by name with `IrEmitterRegistry`
 (`src/core/ir_registry.cpp`; built-ins `"iml"`/`"vtd"`) instead of patching
 the built-ins, and drivers resolve every name uniformly through
 `lprowseir.emit(document, name)` / `lprowseir.emitters()`.
+
+`tools/page2pdf` is a C-only consumer of serialized ProwseVTD and ProwseIML.
+It must remain downstream of the IR boundary: it never accesses Flatworm DOM
+objects or the C++ API, and it renders bounded semantic text with libHaru
+rather than claiming browser/CSS layout compatibility.
 
 ---
 

@@ -29,6 +29,15 @@ endif()
 prowsetk_gtest(prowsetk_integration_lua_ir "prowsetk.integration.lua."
     "integration;lua;document" test_lua_ir.cpp)
 
+if(TARGET page2pdf)
+    prowsetk_gtest(prowsetk_integration_page2pdf "prowsetk.integration.page2pdf."
+        "integration;document" test_page2pdf.cpp)
+    target_compile_definitions(prowsetk_integration_page2pdf PRIVATE
+        PAGE2PDF_BIN="$<TARGET_FILE:page2pdf>"
+        TEST_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_dependencies(prowsetk_integration_page2pdf page2pdf)
+endif()
+
 find_package(Threads REQUIRED)
 prowsetk_gtest(prowsetk_integration_web_interface
     "prowsetk.integration.web-interface."

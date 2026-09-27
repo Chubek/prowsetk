@@ -93,6 +93,37 @@ endif()
 # must be exposed as a ProwseTk::<name> imported target.
 
 # ---------------------------------------------------------------------------
+# libHaru — PDF generation for the standalone page2pdf IR compiler.
+# ---------------------------------------------------------------------------
+find_package(libharu CONFIG QUIET)
+if(TARGET libharu::hpdf)
+    add_library(ProwseTk::haru ALIAS libharu::hpdf)
+    set(PROWSETK_HAVE_HARU ON CACHE INTERNAL "libHaru PDF generator available")
+    message(STATUS "ProwseTk: using system libHaru for page2pdf")
+elseif(TARGET hpdf)
+    add_library(ProwseTk::haru ALIAS hpdf)
+    set(PROWSETK_HAVE_HARU ON CACHE INTERNAL "libHaru PDF generator available")
+elseif(EXISTS "${PROJECT_SOURCE_DIR}/third_party/libharu/CMakeLists.txt")
+    set(PROWSETK_LIBHARU_SOURCE_DIR "${PROJECT_SOURCE_DIR}/third_party/libharu")
+    set(PROWSETK_LIBHARU_BINARY_DIR "${CMAKE_BINARY_DIR}/third_party/libharu")
+    set(LIBHPDF_EXAMPLES OFF CACHE BOOL "Build libHaru examples" FORCE)
+    add_subdirectory("${PROWSETK_LIBHARU_SOURCE_DIR}"
+                     "${PROWSETK_LIBHARU_BINARY_DIR}" EXCLUDE_FROM_ALL)
+    # libHaru's upstream directory-scoped include paths do not propagate to a
+    # sibling consumer. Publish both its source headers and generated config.
+    target_include_directories(hpdf PUBLIC
+        "$<BUILD_INTERFACE:${PROWSETK_LIBHARU_SOURCE_DIR}/include>"
+        "$<BUILD_INTERFACE:${PROWSETK_LIBHARU_BINARY_DIR}/include>")
+    set_target_properties(hpdf PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    add_library(ProwseTk::haru ALIAS hpdf)
+    set(PROWSETK_HAVE_HARU ON CACHE INTERNAL "libHaru PDF generator available")
+    message(STATUS "ProwseTk: using vendored libHaru for page2pdf")
+else()
+    set(PROWSETK_HAVE_HARU OFF CACHE INTERNAL "libHaru PDF generator available")
+    message(STATUS "ProwseTk: libHaru missing; page2pdf disabled")
+endif()
+
+# ---------------------------------------------------------------------------
 # Lua — required for the lprowse automation layer, optional for the core.
 # ---------------------------------------------------------------------------
 find_package(Lua QUIET)

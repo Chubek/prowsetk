@@ -1986,6 +1986,7 @@ optional components depending on the build configuration.
 | `jemalloc` | Optional memory allocator |
 | `kaguya` | C++ and Lua integration |
 | `lexbor` | HTML and CSS parsing |
+| `libharu` | Semantic PDF generation for the standalone `page2pdf` IR compiler |
 | `libdom` | DOM tree construction (NetSurf) |
 | `libev` | Event loop |
 | `libmagic` | File and content-type detection |
@@ -2013,6 +2014,25 @@ optional components depending on the build configuration.
 Build options disable optional dependencies when their functionality is not
 required. Dependency versions, licensing, build options, and feature mappings are
 documented with the build system.
+
+### Page IR to PDF
+
+`page2pdf` is a standalone C tool built at `build/<preset>/tools/page2pdf/`.
+It consumes the serialized ProwseVTD (`PVTD1`) and ProwseIML formats emitted by
+`lprowseir`, rather than accessing Flatworm's C++ DOM. It produces a bounded,
+semantic PDF using libHaru:
+
+```sh
+build/default/tools/page2pdf/page2pdf --format vtd page.vtd page.pdf
+build/default/tools/page2pdf/page2pdf --format iml page.iml page.pdf
+```
+
+`--format auto` (the default) recognizes the ProwseVTD magic and otherwise
+expects ProwseIML; `-` may be used as the input path for a pipeline. The tool
+preserves document text and common headings/list nesting, but it deliberately
+does not implement CSS, browser layout, images, JavaScript, link activation,
+or arbitrary page attributes. ProwseIML macro forms must be expanded before
+they are passed to the tool.
 
 ## Modularity
 

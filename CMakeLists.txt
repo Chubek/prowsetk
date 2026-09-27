@@ -31,6 +31,10 @@ endif()
 
 add_subdirectory(src)
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/CMakeLists.txt")
+    add_subdirectory(tools)
+endif()
+
 prowsetk_export_package()
 
 if(PROWSETK_BUILD_TESTS)
