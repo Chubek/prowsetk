@@ -338,6 +338,9 @@ the built-ins, and drivers resolve every name uniformly through
 `prowsetk serialize` emits either serialized ProwseVTD or ProwseIML from a
 fresh CLI session. `tools/page2pdf` is a C-only consumer of those wire forms
 and accepts `-` as standard input for pipelines.
+Both encodings replay into the same start/attribute/text/end renderer sink;
+keep CLI pipeline coverage for both formats and enforce the shared 512-page
+output bound.
 It must remain downstream of the IR boundary: it never accesses Flatworm DOM
 objects or the C++ API. It builds a bounded print box layout from IR attributes
 and embedded styles, then paints backgrounds, borders, text, and embedded images
@@ -627,3 +630,14 @@ Tracepoints currently observe CSS-selector-scoped DOM mutations; full HAR,
 request tracepoints and stylesheet tracepoints are not implemented. Keep the
 broker integration and addon simulation CTests registered with bounded timeouts.
 See `plugins/beacon/README.md` for protocol and installation details.
+
+
+## Flatworm selector layers
+
+Keep selector syntax data in `src/flatworm/selector_model.hpp`, parsing and
+escape decoding in `selector_parser.cpp`, DOM matching in `selector_matcher.cpp`,
+and iterative query traversal in `css_selector.cpp`. All callers (C++, Lua,
+and page JavaScript) share these semantics. Preserve the documented syntax and
+matching limits, explicit errors for unsupported selectors, element receiver
+exclusion, and document-order deduplication. Extend unit and cross-layer tests
+when selector semantics change; do not claim full CSS conformance.

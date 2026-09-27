@@ -138,3 +138,93 @@ TEST(CssSelector, CaseInsensitiveTagMatching) {
     EXPECT_EQ(document->query_selector_all("span").size(), 1u);
     EXPECT_EQ(document->query_selector_all("DIV SPAN").size(), 1u);
 }
+
+TEST(CssSelector, UnicodeAndHexEscapes) {
+    const auto document = parse_html(
+        "<div id='123' class='a:b' data-label='café'></div>"
+        "<p id='😀'></p><span id='�'></span>");
+    EXPECT_NE(document->query_selector(R"(#\31 23)"), nullptr);
+    EXPECT_NE(document->query_selector(R"(.a\:b)"), nullptr);
+    EXPECT_NE(document->query_selector(R"([data-label='caf\e9 '])"), nullptr);
+    EXPECT_NE(document->query_selector(R"(#\1f600)"), nullptr);
+    EXPECT_NE(document->query_selector(R"(#\0)"), nullptr);
+    EXPECT_NE(document->query_selector(R"(#\d800)"), nullptr);
+    EXPECT_NE(document->query_selector(R"(#\110000)"), nullptr);
+    EXPECT_NE(document->query_selector("#\\31\r\n23"), nullptr);
+    EXPECT_THROW(document->query_selector("#123"), prowsetk::Error);
+    EXPECT_THROW(document->query_selector(".\\\n"), prowsetk::Error);
+    EXPECT_THROW(document->query_selector("[data-label='caf\né']"), prowsetk::Error);
+    EXPECT_NE(document->query_selector("[data-label='caf\\\né']"), nullptr);
+}
+
+TEST(CssSelector, ExplicitAttributeCaseFlags) {
+    const auto document = parse_html("<div data-value='AbC-DeF xyz' data-unicode='Ä'></div>");
+    for (const auto* selector : {"[data-value='abc-def XYZ' i]",
+         "[data-value='abc-def XYZ'i]", "[data-value^=abc I]", "[data-value$=XYZ i]", "[data-value*=C-d i]",
+         "[data-value~=XYZ i]", "[data-value|=abc i]"}) {
+        EXPECT_EQ(document->query_selector_all(selector).size(), 1u) << selector;
+    }
+    EXPECT_EQ(document->query_selector_all("[data-value^=abc s]").size(), 0u);
+    EXPECT_EQ(document->query_selector_all("[data-value^=AbC s]").size(), 1u);
+    EXPECT_EQ(document->query_selector_all("[data-value^=abc]").size(), 0u);
+    EXPECT_EQ(document->query_selector_all("[data-unicode='ä' i]").size(), 0u);
+    EXPECT_EQ(document->query_selector_all("[data-value*='' i]").size(), 0u);
+    EXPECT_THROW(document->query_selector("[data-value i]"), prowsetk::Error);
+    EXPECT_THROW(document->query_selector("[data-value=x unknown]"), prowsetk::Error);
+}
+
+TEST(CssSelector, NegationListsAndComplexSelectors) {
+    const auto document = parse_html(
+        "<section><p id='a' class='hidden'></p><p id='b'></p></section>"
+        "<p id='c'></p><p id='d'></p>");
+    auto matches = document->query_selector_all("p:not(section > p, #d)");
+    ASSERT_EQ(matches.size(), 1u);
+    EXPECT_EQ(matches.front()->id(), "c");
+    EXPECT_EQ(document->query_selector_all("p:not(:not(section p))").size(), 2u);
+    EXPECT_EQ(document->query_selector_all("p:not(.hidden + p, #d)").size(), 2u);
+    for (const auto* selector : {":not()", ":not(p,)", ":not(,p)", ":not(p >)",
+                                 ":not(p, :bogus)", ":not(p", "p,"})
+        EXPECT_THROW(document->query_selector(selector), prowsetk::Error) << selector;
+}
+
+TEST(CssSelector, BoundedSyntax) {
+    const auto document = parse_html("<div></div>");
+    std::string nested = "div";
+    for (int i = 0; i < 32; ++i) nested = ":not(" + nested + ")";
+    EXPECT_NO_THROW(document->query_selector(nested));
+    EXPECT_THROW(document->query_selector(":not(" + nested + ")"), prowsetk::Error);
+    EXPECT_THROW(document->query_selector(std::string(65537, 'a')), prowsetk::Error);
+    std::string chain = "div";
+    for (int i = 0; i < 256; ++i) chain += " div";
+    EXPECT_THROW(document->query_selector(chain), prowsetk::Error);
+}
+
+TEST(CssSelector, TraversalOrderAndElementScope) {
+    const auto document = parse_html("<div id='root'><p id='a'><b id='b'></b></p><b id='c'></b></div>");
+    const auto root = document->query_selector("#root");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->query_selector("#root"), nullptr);
+    EXPECT_EQ(root->query_selector("b")->id(), "b");
+    auto matches = root->query_selector_all("b, p, #b");
+    ASSERT_EQ(matches.size(), 3u);
+    EXPECT_EQ(matches[0]->id(), "a");
+    EXPECT_EQ(matches[1]->id(), "b");
+    EXPECT_EQ(matches[2]->id(), "c");
+    EXPECT_TRUE(matches[1]->matches("div > p b:not(#c, .missing)"));
+}
+
+TEST(CssSelector, CombinatorialBacktrackingFailsWithResourceLimit) {
+    std::string html = "<p id='first'></p>";
+    for (int i = 0; i < 35; ++i) html += "<div>";
+    for (int i = 0; i < 35; ++i) html += "</div>";
+    const auto document = parse_html(html);
+    const auto selector = "#first, missing div div div div div div div div div div";
+    ASSERT_NE(document->query_selector(selector), nullptr);
+    EXPECT_EQ(document->query_selector(selector)->id(), "first");
+    try {
+        document->query_selector_all(selector);
+        FAIL() << "adversarial selector should exhaust its matching budget";
+    } catch (const prowsetk::Error& error) {
+        EXPECT_EQ(error.code(), prowsetk::ErrorCode::ResourceLimit);
+    }
+}

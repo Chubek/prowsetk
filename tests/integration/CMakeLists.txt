@@ -36,6 +36,11 @@ if(TARGET page2pdf)
         PAGE2PDF_BIN="$<TARGET_FILE:page2pdf>"
         TEST_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_dependencies(prowsetk_integration_page2pdf page2pdf)
+    if(TARGET prowsetk_cli)
+        target_compile_definitions(prowsetk_integration_page2pdf PRIVATE
+            PROWSETK_BIN="$<TARGET_FILE:prowsetk_cli>")
+        add_dependencies(prowsetk_integration_page2pdf prowsetk_cli)
+    endif()
 endif()
 
 find_package(Threads REQUIRED)

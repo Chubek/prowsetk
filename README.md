@@ -158,8 +158,24 @@ It exists so the engine configures, builds, and tests with no third-party HTML
 toolchain present, and it defines the DOM contract that the `lexbor` and
 `gumbo-parser` backends will satisfy. Selector support covers type, class, id,
 attribute operators, the descendant/child/adjacent/general-sibling combinators,
-selector lists, and the structural `:first-child`, `:last-child`,
-`:only-child`, `:nth-child()`, `:empty`, `:root`, and `:not()` pseudo-classes.
+selector lists, Unicode CSS escapes, explicit ASCII case-insensitive (`i`) and
+case-sensitive (`s`) attribute flags, and structural child/of-type pseudo-classes
+(including reverse `nth` variants), `:empty`, `:root`, and `:not()` with nested
+complex selector lists. Unflagged attribute values remain case-sensitive;
+HTML enumerated-attribute case folding is not implemented. Unsupported syntax
+(including `:is()`, `:where()`, `:has()`, namespaces, and pseudo-elements) fails
+explicitly instead of returning misleading matches.
+
+Selector processing has separate internal layers: `selector_model.hpp` holds
+syntax data, `selector_parser.cpp` validates and decodes it without accessing
+the DOM, `selector_matcher.cpp` evaluates it without reparsing, and
+`css_selector.cpp` performs iterative preorder traversal. First-match queries
+stop immediately; element queries exclude the receiver and preserve document
+order without duplicate results. C++, Lua, and page JavaScript share this path.
+Selectors are limited to 64 KiB, 256 total compounds, and 32 nested negations
+(`ParseError`); matching is limited to 100,000 compound evaluations per candidate
+(`ResourceLimit`). These limits bound recursion and combinatorial backtracking;
+they do not claim a wall-clock deadline or full CSS conformance.
 
 An XPath interface into the DOM is exposed through the Lua extension layer as
 `lprowsext.dom.xpath`. XPath substantially increases scraping reach compared with
@@ -2059,6 +2075,10 @@ arbitrary JavaScript painting, or remote image loading within the C process.
 Live resource snapshots are bounded and same-origin; a page depending on
 cross-origin assets or advanced CSS will differ from a browser screenshot.
 ProwseIML macro forms must be expanded before they are passed to the tool.
+Both wire formats replay start/attribute/text/end events into the same C
+renderer. The PDF uses built-in Helvetica, Helvetica-Bold, and Courier fonts;
+input is limited to 16 MiB and output to 512 pages. Exceeding these bounds
+fails the conversion.
 
 ## Modularity
 

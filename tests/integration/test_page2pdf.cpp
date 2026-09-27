@@ -12,7 +12,11 @@
 namespace {
 
 std::string shell_quote(const std::filesystem::path& path) {
-    return "\"" + path.string() + "\"";
+    std::string quoted = "'";
+    for (const char c : path.string()) {
+        quoted += c == '\'' ? "'\\''" : std::string(1, c);
+    }
+    return quoted + "'";
 }
 
 void write_bytes(const std::filesystem::path& path,
@@ -156,4 +160,67 @@ TEST(Page2Pdf, SkipsCorruptPngInsteadOfCrashing) {
                            shell_quote(input) + " " + shell_quote(output)).c_str()), 0);
     expect_pdf(output);
     EXPECT_EQ(read_text(output).find("/Subtype /Image"), std::string::npos);
+}
+
+#ifdef PROWSETK_BIN
+TEST(Page2Pdf, CompilesCliEventStreamWithAutoDetection) {
+    const auto directory = std::filesystem::path(TEST_BINARY_DIR) / "page2pdf-cli";
+    std::filesystem::create_directories(directory);
+    const std::string html =
+        "<html><body><p>Regular <b>Bold</b> <code>Monospace</code></p>"
+        "<p>Second paragraph</p></body></html>";
+    for (const std::string format : {"vtd", "iml"}) {
+        const auto output = directory / (format + ".pdf");
+        std::filesystem::remove(output);
+        const std::string command = shell_quote(PROWSETK_BIN) +
+            " serialize --" + format + " --stdout --html " + shell_quote(html) +
+            " | " + shell_quote(PAGE2PDF_BIN) + " - " + shell_quote(output);
+        ASSERT_EQ(std::system(command.c_str()), 0);
+        expect_pdf(output);
+        const auto pdf = read_text(output);
+        for (const auto* font : {"/BaseFont /Helvetica\n", "/BaseFont /Helvetica-Bold\n",
+                                 "/BaseFont /Courier\n"}) {
+            EXPECT_NE(pdf.find(font), std::string::npos) << format << ": " << font;
+        }
+    }
+}
+#endif
+
+TEST(Page2Pdf, PaginatesBeyondLegacyLimit) {
+    const auto directory = std::filesystem::path(TEST_BINARY_DIR) / "page2pdf-pages";
+    std::filesystem::create_directories(directory);
+    std::string html = "<html><body>";
+    for (int i = 0; i < 130; ++i) {
+        html += "<div style='height:720pt'>Page " + std::to_string(i + 1) + "</div>";
+    }
+    html += "</body></html>";
+    const auto document = prowsetk::parse_html(html);
+    ASSERT_NE(document, nullptr);
+    const auto input = directory / "pages.vtd";
+    const auto output = directory / "pages.pdf";
+    write_bytes(input, prowsetk::emit_prowse_vtd(*document));
+    std::filesystem::remove(output);
+    ASSERT_EQ(std::system((shell_quote(PAGE2PDF_BIN) + " " + shell_quote(input) +
+                           " " + shell_quote(output)).c_str()), 0);
+    expect_pdf(output);
+    EXPECT_NE(read_text(output).find("/Count 130\n"), std::string::npos);
+}
+
+TEST(Page2Pdf, RejectsOutputBeyondPageLimit) {
+    const auto directory = std::filesystem::path(TEST_BINARY_DIR) / "page2pdf-limit";
+    std::filesystem::create_directories(directory);
+    std::string html = "<html><body>";
+    for (int i = 0; i < 513; ++i) {
+        html += "<div style='height:720pt'>Page</div>";
+    }
+    html += "</body></html>";
+    const auto document = prowsetk::parse_html(html);
+    ASSERT_NE(document, nullptr);
+    const auto input = directory / "limit.iml";
+    const auto output = directory / "limit.pdf";
+    write_text(input, prowsetk::emit_prowse_iml(*document));
+    std::filesystem::remove(output);
+    EXPECT_NE(std::system((shell_quote(PAGE2PDF_BIN) + " " + shell_quote(input) +
+                           " " + shell_quote(output)).c_str()), 0);
+    EXPECT_FALSE(std::filesystem::exists(output));
 }

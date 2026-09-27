@@ -273,3 +273,20 @@ TEST(LuaBinding, SyntheticClickAndTypeDispatchCascades) {
     const auto result = lua.run(script, "lua_synthetic_interactions");
     EXPECT_TRUE(result.ok) << lua.last_error();
 }
+
+TEST(LuaBinding, ExpandedSelectorSyntax) {
+    if (!LuaRuntime::available()) GTEST_SKIP() << "Lua unavailable";
+    LuaRuntime lua;
+    const auto result = lua.run(R"LUA(
+        local browser = require('lprowse').browser.new()
+        local session = browser:create_session()
+        session:load_html('<section><p id="123" data-kind="API"></p></section><p id="other"></p>')
+        local doc = session:document()
+        assert(doc:query_selector([[#\31 23]]):attribute('data-kind') == 'API')
+        assert(#doc:query_selector_all('[data-kind=api i]') == 1)
+        assert(doc:query_selector('p:not(section > p, .hidden)'):attribute('id') == 'other')
+        local ok = pcall(function() doc:query_selector(':not(p,)') end)
+        assert(not ok)
+    )LUA", "expanded_selectors");
+    EXPECT_TRUE(result.ok) << lua.last_error();
+}

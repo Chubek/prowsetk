@@ -547,3 +547,17 @@ TEST(ScriptPlatform, SyntheticActionsRejectInvalidAndClosedSessions) {
     EXPECT_FALSE(session->click_element(button));
     EXPECT_FALSE(session->type_element(button, "x"));
 }
+
+TEST(ScriptPlatform, ExpandedSelectorsReachPageJavascript) {
+    Browser browser;
+    auto session = browser.create_session();
+    session->load_html(R"HTML(<section><p id="123" data-kind="API"></p></section><p id="other"></p>
+        <script>
+        const escaped = document.querySelector('#\\31 23');
+        const selected = document.querySelector('p:not(section > p, .hidden)');
+        if (escaped && document.querySelectorAll('[data-kind=api i]').length === 1 &&
+            selected.id === 'other' && escaped.matches('section > p:not(.hidden, #other)'))
+            document.body.setAttribute('data-selector-result', 'passed');
+        </script>)HTML", "https://example.test/");
+    ASSERT_NE(session->document()->query_selector("[data-selector-result=passed]"), nullptr);
+}
