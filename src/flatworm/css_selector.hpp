@@ -30,9 +30,9 @@ private:
 };
 
 std::shared_ptr<Node> query_selector(const std::shared_ptr<Node>& root,
-                                     std::string_view selector);
+                                     std::string_view selector, bool include_root = true);
 std::vector<std::shared_ptr<Node>> query_selector_all(
-    const std::shared_ptr<Node>& root, std::string_view selector);
+    const std::shared_ptr<Node>& root, std::string_view selector, bool include_root = true);
 
 }  // namespace prowsetk::flatworm
 

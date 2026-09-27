@@ -27,7 +27,7 @@ WebPlatform default_web_platform() {
     platform.declare("dom", ImplementationClass::FullyImplemented,
                      "tolerant HTML parser and queryable DOM tree");
     platform.declare("css-selectors", ImplementationClass::PartiallyImplemented,
-                     "type, class, id, attribute, and structural pseudos");
+                     "bounded selectors: Unicode escapes, attribute i/s flags, structural pseudos, complex :not() lists");
     platform.declare("xpath", ImplementationClass::PartiallyImplemented,
                      "XPath 1.0 through the vendored pugixml engine");
     platform.declare("network", ImplementationClass::ImplementedWithRestrictions,

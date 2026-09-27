@@ -233,20 +233,7 @@ std::shared_ptr<Element> Element::query_selector(
     if (node_ == nullptr) {
         return nullptr;
     }
-    const auto parsed = fw::Selector::parse(selector);
-    const std::function<std::shared_ptr<fw::Node>(const std::shared_ptr<fw::Node>&)> scan =
-        [&](const std::shared_ptr<fw::Node>& node) -> std::shared_ptr<fw::Node> {
-        for (const auto& child : node->children) {
-            if (parsed.matches(*child)) {
-                return child;
-            }
-            if (auto match = scan(child)) {
-                return match;
-            }
-        }
-        return nullptr;
-    };
-    return wrap(scan(node_));
+    return wrap(fw::query_selector(node_, selector, false));
 }
 
 std::vector<std::shared_ptr<Element>> Element::query_selector_all(
@@ -255,10 +242,8 @@ std::vector<std::shared_ptr<Element>> Element::query_selector_all(
     if (node_ == nullptr) {
         return result;
     }
-    for (const auto& node : fw::query_selector_all(node_, selector)) {
-        if (node != node_) {
-            result.push_back(wrap(node));
-        }
+    for (const auto& node : fw::query_selector_all(node_, selector, false)) {
+        result.push_back(wrap(node));
     }
     return result;
 }

@@ -27,6 +27,8 @@ set(PROWSETK_CORE_SOURCES
     core/web_interface.cpp
     core/playwright.cpp
     flatworm/html_parser.cpp
+    flatworm/selector_parser.cpp
+    flatworm/selector_matcher.cpp
     flatworm/css_selector.cpp
     flatworm/dom.cpp
     flatworm/xpath.cpp
