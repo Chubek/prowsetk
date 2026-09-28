@@ -42,8 +42,13 @@ namespace prowsetk {
 // `lprowseir` pipeline (`emit`, `emitters`) resolves through the same
 // registry, so C++ plugins and Lua drivers observe identical IR names.
 
-// ProwseXAS event emitted while walking a document tree.
-struct ProwseXasEvent {
+// Canonical event emitted while walking a document tree.  This is the one
+// in-memory IR: a start event contains the element snapshot formerly exposed
+// by ProwseDOM, while attribute/text/end events preserve streaming order.
+// Consumers that only need a stream can ignore `attributes` and
+// `subtree_text`; consumers that need a flattened node view can project the
+// start events without another DOM walk.
+struct ProwseEvent {
     // "start", "attribute", "text", or "end".
     std::string kind;
     // XPath-like stable path (for example: /html[1]/body[1]/a[2]).
@@ -56,7 +61,17 @@ struct ProwseXasEvent {
     // Text value (for text and attribute events).
     std::string value;
     std::size_t depth = 0;
+    // Present on start events. Kept in source order.
+    std::vector<Attribute> attributes;
+    // Present on start events: concatenated text of this element subtree.
+    std::string subtree_text;
 };
+
+using ProwseEventStream = std::vector<ProwseEvent>;
+
+// Compatibility name for the former ProwseXAS record. New code should use
+// ProwseEvent and emit_prowse_events().
+using ProwseXasEvent = ProwseEvent;
 
 // Flattened DOM node record, suitable for visitor/walker implementations.
 struct ProwseDomNode {
@@ -67,16 +82,24 @@ struct ProwseDomNode {
     std::size_t depth = 0;
 };
 
-// Emits a structured event stream for the current document.
-std::vector<ProwseXasEvent> emit_prowse_xas(const Document& document);
+// Emits the canonical structured event stream for the current document.
+ProwseEventStream emit_prowse_events(const Document& document);
+
+// Compatibility spelling for emit_prowse_events().
+ProwseEventStream emit_prowse_xas(const Document& document);
 
 // Filters the event stream using an XPath expression against the underlying DOM.
 // If XPath support is unavailable in this build, this returns an empty list.
-std::vector<ProwseXasEvent> filter_prowse_xas(const Document& document,
-                                              std::string_view xpath_expression);
+ProwseEventStream filter_prowse_xas(const Document& document,
+                                    std::string_view xpath_expression);
 
-// Emits a flattened DOM representation with stable paths.
+// Compatibility projection of start events. New code should consume
+// emit_prowse_events() directly.
 std::vector<ProwseDomNode> emit_prowse_dom(const Document& document);
+
+// Encodes an event stream as deterministic newline-delimited JSON. This is a
+// transport encoding only; it never accesses a Document or recomputes layout.
+std::string encode_prowse_events_ndjson(std::span<const ProwseEvent> events);
 
 // ProwseVTD binary framing (encoding stratum). The stream is little-endian:
 // magic "PVTD1", u32 event count, then per-event tokens of
@@ -97,7 +120,7 @@ std::vector<std::uint8_t> emit_prowse_vtd(const Document& document);
 // or truncated input returns an empty vector. Decoding is allocation-bounded:
 // reservation is capped by the input size so a corrupt event count cannot
 // force a huge allocation.
-std::vector<ProwseXasEvent> decode_prowse_vtd(std::span<const std::uint8_t> bytes);
+ProwseEventStream decode_prowse_vtd(std::span<const std::uint8_t> bytes);
 
 // Emits an S-expression textual form. Returns an empty string when the
 // document has no DOM tree; otherwise emits a `(document ...)` form which may

@@ -5,7 +5,7 @@
 //   prowsetk serve [--host H] [--port P] ...  run the web interface
 //   prowsetk webdriver [--host H] [--port P]  run the builtin W3C WebDriver
 //   prowsetk endpoints --url URL ...          extract endpoints to OpenAPI YAML
-//   prowsetk serialize --iml|--vtd ...         serialize a loaded document IR
+//   prowsetk serialize --events|--iml|--vtd ... serialize a loaded document IR
 //   prowsetk run <driver> [--arg value ...]   run a Prowse.toml Lua driver
 //
 // The CLI is a thin host application over the C++ core: it creates a Browser,
@@ -36,6 +36,7 @@ namespace {
 
 enum class SerializationFormat {
     None,
+    Events,
     Iml,
     Vtd,
 };
@@ -133,13 +134,19 @@ bool parse_arguments(int argc, char** argv, Arguments& args) {
             args.stdout_output = true;
         } else if (args.command == "serialize" && arg == "--iml") {
             if (args.serialization_format != SerializationFormat::None) {
-                std::cerr << "prowsetk serialize: choose exactly one of --iml or --vtd\n";
+                std::cerr << "prowsetk serialize: choose exactly one format\n";
                 return false;
             }
             args.serialization_format = SerializationFormat::Iml;
+        } else if (args.command == "serialize" && arg == "--events") {
+            if (args.serialization_format != SerializationFormat::None) {
+                std::cerr << "prowsetk serialize: choose exactly one format\n";
+                return false;
+            }
+            args.serialization_format = SerializationFormat::Events;
         } else if (args.command == "serialize" && arg == "--vtd") {
             if (args.serialization_format != SerializationFormat::None) {
-                std::cerr << "prowsetk serialize: choose exactly one of --iml or --vtd\n";
+                std::cerr << "prowsetk serialize: choose exactly one format\n";
                 return false;
             }
             args.serialization_format = SerializationFormat::Vtd;
@@ -163,7 +170,7 @@ void print_usage(std::ostream& out) {
         << "  prowsetk webdriver [--host 127.0.0.1] [--port 0] [--no-javascript]\n"
         << "  prowsetk cdp [--host 127.0.0.1] [--port 0] [--no-javascript]\n"
         << "  prowsetk endpoints --url URL [--output FILE] [--javascript]\n"
-        << "  prowsetk serialize (--iml|--vtd) (--url URL|--html HTML) "
+        << "  prowsetk serialize (--events|--iml|--vtd) (--url URL|--html HTML) "
            "(--stdout|--output FILE) [--no-javascript]\n"
         << "  prowsetk run <driver> [--arg VALUE ...] [--config Prowse.toml] "
            "[--user-agent VALUE] [--cookies-json FILE]\n";
@@ -259,7 +266,7 @@ int run_endpoints(const Arguments& args) {
 
 int run_serialize(const Arguments& args) {
     if (args.serialization_format == SerializationFormat::None) {
-        std::cerr << "prowsetk serialize: choose one of --iml or --vtd\n";
+        std::cerr << "prowsetk serialize: choose one of --events, --iml, or --vtd\n";
         return 2;
     }
     if (args.url.empty() && args.html.empty()) {
@@ -288,6 +295,24 @@ int run_serialize(const Arguments& args) {
 
     if (args.html.empty()) {
         prowsetk::cli::embed_serialized_resources(*session, *document);
+    }
+
+    if (args.serialization_format == SerializationFormat::Events) {
+        const std::string events = prowsetk::encode_prowse_events_ndjson(
+            prowsetk::emit_prowse_events(*document));
+        if (args.stdout_output) {
+            std::cout.write(events.data(), static_cast<std::streamsize>(events.size()));
+            std::cout.flush();
+            return std::cout ? 0 : 1;
+        }
+        std::ofstream output(args.output, std::ios::binary);
+        if (!output) {
+            std::cerr << "prowsetk serialize: cannot open output file: "
+                      << args.output << '\n';
+            return 1;
+        }
+        output.write(events.data(), static_cast<std::streamsize>(events.size()));
+        return output ? 0 : 1;
     }
 
     if (args.serialization_format == SerializationFormat::Iml) {

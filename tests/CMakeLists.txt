@@ -8,15 +8,19 @@ endif()
 
 include(GoogleTest)
 
-# prowsetk_gtest(<name> <test-prefix> <labels> <sources...>)
+# prowsetk_gtest(<name> <test-prefix> <labels> <sources...> [TIMEOUT seconds])
 # Builds a GoogleTest executable against ProwseTk::core and registers every
 # discovered test case with CTest.
 function(prowsetk_gtest name prefix labels)
-    prowsetk_add_executable(${name} ${ARGN})
+    cmake_parse_arguments(test "" "TIMEOUT" "" ${ARGN})
+    if(NOT test_TIMEOUT)
+        set(test_TIMEOUT 60)
+    endif()
+    prowsetk_add_executable(${name} ${test_UNPARSED_ARGUMENTS})
     target_link_libraries(${name} PRIVATE ProwseTk::core GTest::gtest GTest::gtest_main)
     gtest_discover_tests(${name}
         TEST_PREFIX "${prefix}"
-        PROPERTIES LABELS "${labels}" TIMEOUT 60
+        PROPERTIES LABELS "${labels}" TIMEOUT "${test_TIMEOUT}"
         DISCOVERY_MODE PRE_TEST
         DISCOVERY_TIMEOUT 30)
 endfunction()

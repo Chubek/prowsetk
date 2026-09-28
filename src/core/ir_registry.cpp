@@ -1,6 +1,6 @@
 // ir_registry.cpp — plugin-extensibility stratum.
 //
-// Named IR emitters beyond the four built-ins. Native plugins register text
+// Named IR emitters beyond the built-in event and wire-format encoders. Native plugins register text
 // or binary emitters here; the `lprowseir.emit` / `lprowseir.emitters` Lua
 // pipeline resolves through the same registry, so drivers and plugins agree
 // on IR names. The registry never walks documents itself — it only dispatches
@@ -13,6 +13,9 @@
 namespace prowsetk {
 
 IrEmitterRegistry::IrEmitterRegistry() {
+    text_.emplace("events", [](const Document& document) {
+        return encode_prowse_events_ndjson(emit_prowse_events(document));
+    });
     text_.emplace("iml", [](const Document& document) {
         return emit_prowse_iml(document);
     });
@@ -55,7 +58,7 @@ bool IrEmitterRegistry::unregister(std::string_view name) {
 void IrEmitterRegistry::clear_custom() {
     const std::lock_guard<std::mutex> lock(mutex_);
     for (auto it = text_.begin(); it != text_.end();) {
-        if (it->first != "iml") {
+        if (it->first != "events" && it->first != "iml") {
             it = text_.erase(it);
         } else {
             ++it;

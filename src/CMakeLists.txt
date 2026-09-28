@@ -21,12 +21,19 @@ set(PROWSETK_CORE_SOURCES
     core/ir_model.cpp
     core/ir_layout.cpp
     core/ir_filter.cpp
+    core/ir_events.cpp
     core/ir_vtd.cpp
     core/ir_iml.cpp
     core/ir_registry.cpp
+    core/embedding.cpp
     core/web_interface.cpp
     core/playwright.cpp
     flatworm/html_parser.cpp
+    flatworm/html_tokenizer.cpp
+    flatworm/html_syntax.cpp
+    flatworm/html_entities.cpp
+    flatworm/html_serializer.cpp
+    flatworm/dom_node.cpp
     flatworm/selector_parser.cpp
     flatworm/selector_matcher.cpp
     flatworm/css_selector.cpp

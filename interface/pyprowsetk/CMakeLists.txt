@@ -58,21 +58,18 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/pyproject.toml"
     OPTIONAL
 )
 
-# Copy extension into source tree for editable development after build
-add_custom_command(TARGET pyprowsetk_core POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/pyprowsetk"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "$<TARGET_FILE:pyprowsetk_core>"
-        "${CMAKE_CURRENT_SOURCE_DIR}/pyprowsetk/$<TARGET_FILE_NAME:pyprowsetk_core>"
-    COMMENT "Copying _core extension to interface/pyprowsetk/pyprowsetk/"
-)
+# Each preset owns its package: sanitizer and development builds must not
+# overwrite one another or import a module copied into the source tree.
+configure_file(pyprowsetk/__init__.py pyprowsetk/__init__.py COPYONLY)
+include("${PROJECT_SOURCE_DIR}/cmake/PythonSanitizers.cmake")
+prowsetk_python_sanitizers(pyprowsetk_core PROWSETK_PYTHON_SANITIZER_ENV)
 
 # Stub generation (PEP 561) - best-effort
 if(Python_Interpreter_FOUND)
     nanobind_add_stub(pyprowsetk_stub
         MODULE pyprowsetk._core
-        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/pyprowsetk/_core.pyi"
-        PYTHON_PATH "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/pyprowsetk/_core.pyi"
+        PYTHON_PATH "${CMAKE_CURRENT_BINARY_DIR}"
         DEPENDS pyprowsetk_core
         VERBOSE
     )
@@ -84,10 +81,10 @@ if(Python_Interpreter_FOUND)
     if(PYTEST_EXECUTABLE)
         add_test(NAME pyprowsetk.unit.python
             COMMAND ${Python_EXECUTABLE} -m pytest -q "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_pyprowsetk.py"
-            WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
         set_tests_properties(pyprowsetk.unit.python PROPERTIES
             LABELS "unit;python"
             TIMEOUT 60
-            ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}:$ENV{PYTHONPATH}")
+            ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR};${PROWSETK_PYTHON_SANITIZER_ENV}")
     endif()
 endif()

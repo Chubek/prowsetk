@@ -12,7 +12,10 @@
 #include "prowsetk/xpath.hpp"
 
 using prowsetk::Document;
+using prowsetk::ProwseEvent;
 using prowsetk::ProwseXasEvent;
+using prowsetk::encode_prowse_events_ndjson;
+using prowsetk::emit_prowse_events;
 using prowsetk::decode_prowse_vtd;
 using prowsetk::emit_prowse_dom;
 using prowsetk::emit_prowse_iml;
@@ -119,6 +122,34 @@ TEST(IrEmitters, IR02_XasHasRootStartAndEnd) {
     ASSERT_GE(events.size(), 2u);
     EXPECT_EQ(events.front().kind, "start");
     EXPECT_EQ(events.back().kind, "end");
+}
+
+TEST(IrEmitters, IR02a_CanonicalEventsCarryFormerDomSnapshot) {
+    const auto events = emit_prowse_events(*sample_document());
+    const auto nodes = emit_prowse_dom(*sample_document());
+    std::vector<const ProwseEvent*> starts;
+    for (const auto& event : events) {
+        if (event.kind == "start") {
+            starts.push_back(&event);
+        }
+    }
+    ASSERT_EQ(starts.size(), nodes.size());
+    for (std::size_t i = 0; i < starts.size(); ++i) {
+        EXPECT_EQ(starts[i]->xpath, nodes[i].xpath);
+        EXPECT_EQ(starts[i]->tag, nodes[i].tag);
+        EXPECT_EQ(starts[i]->depth, nodes[i].depth);
+        EXPECT_EQ(starts[i]->subtree_text, nodes[i].text);
+        EXPECT_EQ(starts[i]->attributes.size(), nodes[i].attributes.size());
+    }
+}
+
+TEST(IrEmitters, IR02b_NdjsonEncodingIsDeterministicAndEscaped) {
+    const auto events = emit_prowse_events(*escaped_text_document());
+    const auto encoded = encode_prowse_events_ndjson(events);
+    EXPECT_NE(encoded.find("\"kind\":\"start\""), std::string::npos);
+    EXPECT_NE(encoded.find("\"attributes\":["), std::string::npos);
+    EXPECT_NE(encoded.find("\\n"), std::string::npos);
+    EXPECT_EQ(encoded, encode_prowse_events_ndjson(events));
 }
 
 TEST(IrEmitters, IR03_XasIncludesAttributeEvents) {
@@ -745,11 +776,13 @@ TEST(IrEmitters, IR63_XasFilterIncludesTextChildrenOfSelection) {
 TEST(IrEmitters, IR64_RegistryExposesBuiltIns) {
     const auto doc = sample_document();
     auto& registry = prowsetk::IrEmitterRegistry::global();
+    EXPECT_TRUE(registry.contains("events"));
     EXPECT_TRUE(registry.contains("iml"));
     EXPECT_TRUE(registry.contains("vtd"));
     EXPECT_FALSE(registry.contains("no-such-ir"));
 
     const auto names = registry.names();
+    EXPECT_NE(std::find(names.begin(), names.end(), "events"), names.end());
     EXPECT_NE(std::find(names.begin(), names.end(), "iml"), names.end());
     EXPECT_NE(std::find(names.begin(), names.end(), "vtd"), names.end());
     EXPECT_TRUE(std::is_sorted(names.begin(), names.end()));
@@ -757,6 +790,10 @@ TEST(IrEmitters, IR64_RegistryExposesBuiltIns) {
     const auto iml = registry.emit_text(*doc, "iml");
     ASSERT_TRUE(iml.has_value());
     EXPECT_EQ(*iml, emit_prowse_iml(*doc));
+
+    const auto events = registry.emit_text(*doc, "events");
+    ASSERT_TRUE(events.has_value());
+    EXPECT_EQ(*events, encode_prowse_events_ndjson(emit_prowse_events(*doc)));
 
     const auto vtd = registry.emit_binary(*doc, "vtd");
     ASSERT_TRUE(vtd.has_value());

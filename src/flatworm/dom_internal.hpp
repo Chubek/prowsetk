@@ -8,15 +8,11 @@
 #include <vector>
 
 #include "prowsetk/document.hpp"
+#include "flatworm/html_model.hpp"
 
 namespace prowsetk::flatworm {
 
 enum class NodeType { Document, Element, Text, Comment, Doctype };
-
-struct Attribute {
-    std::string name;
-    std::string value;
-};
 
 using MutationSink = std::function<void(const MutationInfo&)>;
 

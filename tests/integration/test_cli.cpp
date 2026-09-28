@@ -217,11 +217,12 @@ TEST(CliDriverRun, RejectsUnknownDriverAndArguments) {
 #endif
 }
 
-TEST(CliSerialize, WritesImlAndVtdToStandardOutput) {
+TEST(CliSerialize, WritesEventsImlAndVtdToStandardOutput) {
     const std::filesystem::path fixture =
         std::filesystem::path(TEST_BINARY_DIR) / "cli_serialize";
     std::filesystem::create_directories(fixture);
     const auto iml = fixture / "page.iml";
+    const auto events = fixture / "page.events.ndjson";
     const auto vtd = fixture / "page.vtd";
     const std::string html =
         "<html><body><h1>Serialized</h1><p>page</p>"
@@ -234,6 +235,14 @@ TEST(CliSerialize, WritesImlAndVtdToStandardOutput) {
     ASSERT_EQ(run_command(iml_command), 0);
     EXPECT_NE(read_file(iml.string()).find("(document"), std::string::npos);
 
+    const std::string events_command =
+        binary + " serialize --events --stdout --html " + quote_shell(html) +
+        " > " + quote_shell(events.string());
+    ASSERT_EQ(run_command(events_command), 0);
+    const std::string event_lines = read_file(events.string());
+    EXPECT_NE(event_lines.find("\"kind\":\"start\""), std::string::npos);
+    EXPECT_NE(event_lines.find("\"attributes\":"), std::string::npos);
+
     const std::string vtd_command =
         binary + " serialize --vtd --stdout --html " + quote_shell(html) +
         " > " + quote_shell(vtd.string());
@@ -245,6 +254,8 @@ TEST(CliSerialize, WritesImlAndVtdToStandardOutput) {
     EXPECT_NE(run_command(binary + " serialize --stdout --html " +
                           quote_shell(html)), 0);
     EXPECT_NE(run_command(binary + " serialize --iml --vtd --stdout --html " +
+                          quote_shell(html)), 0);
+    EXPECT_NE(run_command(binary + " serialize --events --vtd --stdout --html " +
                           quote_shell(html)), 0);
 }
 

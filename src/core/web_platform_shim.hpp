@@ -832,7 +832,7 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
           }));
         } catch (err) { reportError(err); }
         this.__settingValue = false;
-      }, enumerable: true
+      }, enumerable: true, configurable: true
     });
   }
   defineValueProperty(ElementNode.prototype);
@@ -1460,6 +1460,10 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
    'HTMLUnknownElement'].forEach(function (name) {
     DOMInterfaces[name] =
       interfaceCtor(name, DOMInterfaces.HTMLElement.prototype);
+  });
+  // Frameworks inspect the concrete form-control prototype, not its ancestors.
+  ['HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement'].forEach(function (name) {
+    defineValueProperty(DOMInterfaces[name].prototype);
   });
   var TAG_INTERFACES = {
     a: 'HTMLAnchorElement', area: 'HTMLAreaElement', audio: 'HTMLAudioElement',

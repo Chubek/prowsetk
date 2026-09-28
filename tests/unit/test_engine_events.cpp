@@ -343,3 +343,51 @@ TEST(SessionScripts, ScriptPostSurvivesScriptNavigation) {
     }
     EXPECT_TRUE(saw_post);
 }
+TEST(EngineEvents, SyntheticActionsDrainTimerRequestsBeforeReturning) {
+    Browser browser;
+    auto network = std::make_unique<MemoryNetworkClient>();
+    std::vector<std::string> observed;
+    network->set_handler([&](const HttpRequest& request) {
+        observed.push_back(request.url);
+        HttpResponse response;
+        response.status = 200;
+        response.final_url = request.url;
+        response.body = "ok";
+        return response;
+    });
+    browser.set_network_client(std::move(network));
+    auto session = browser.create_session();
+    session->load_html(R"HTML(<button id="go" type="button">Go</button><input id="q">
+        <script>
+        document.getElementById('go').addEventListener('click', function () {
+            setTimeout(function () { fetch('/clicked'); }, 0);
+        });
+        document.getElementById('q').addEventListener('input', function () {
+            setTimeout(function () { fetch('/typed'); }, 0);
+        });
+        </script>)HTML", "https://actions.test/");
+    EXPECT_TRUE(session->click_element(session->document()->query_selector("#go")));
+    ASSERT_EQ(observed.size(), 1u);
+    EXPECT_EQ(observed[0], "https://actions.test/clicked");
+    EXPECT_TRUE(session->type_element(session->document()->query_selector("#q"), "a"));
+    ASSERT_EQ(observed.size(), 2u);
+    EXPECT_EQ(observed[1], "https://actions.test/typed");
+}
+
+TEST(EngineEvents, RejectedHtmlPreservesInstalledDocument) {
+    Browser browser;
+    auto session = browser.create_session();
+    session->load_html("<title>Original</title><p id='saved'>usable</p>", "https://original.test/");
+    const auto original = session->document();
+    std::string deep;
+    for (int i = 0; i < 257; ++i) deep += "<div>";
+    try {
+        session->load_html(deep, "https://replacement.test/");
+        FAIL() << "expected ResourceLimit";
+    } catch (const Error& error) {
+        EXPECT_EQ(error.code(), ErrorCode::ResourceLimit);
+    }
+    EXPECT_EQ(session->document(), original);
+    EXPECT_EQ(session->current_url(), "https://original.test/");
+    EXPECT_EQ(session->evaluate_js("document.getElementById('saved').textContent"), "usable");
+}

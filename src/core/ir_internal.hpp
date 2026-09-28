@@ -49,8 +49,7 @@ bool is_within_scope(std::string_view candidate, std::string_view scope);
 // --- Semantics stratum (ir_model.cpp) ---------------------------------------
 
 struct IrBuild {
-    std::vector<ProwseDomNode> dom_nodes;
-    std::vector<ProwseXasEvent> xas_events;
+    ProwseEventStream events;
     std::unordered_map<const flatworm::Node*, std::string> node_paths;
 };
 

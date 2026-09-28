@@ -1,11 +1,13 @@
 -- lprowseir.lua
 -- Intermediate-representation helpers for ProwseTk.
 --
--- The native module (registered by LuaRuntime) implements four built-in IRs
--- over the Flatworm DOM, all with pugixml-powered XPath selection:
+-- The native module (registered by LuaRuntime) implements the canonical event
+-- stream plus built-in wire-format encoders over the Flatworm DOM, all with
+-- pugixml-powered XPath selection:
 --
--- - ProwseXAS: an event stream (`emit_xas`, `xas:AddListener`).
--- - ProwseDOM: a flattened, walkable node model (`emit_dom`, `dom.walk`).
+-- - ProwseEvent: the canonical event stream (`emit_events`; `emit_xas` is a
+--   compatibility alias) and XPath listeners (`xas:AddListener`).
+-- - ProwseDOM: a compatibility flattened-node projection (`emit_dom`, `dom.walk`).
 -- - ProwseVTD: a binary virtual-token dump (`emit_vtd`, `emit(doc, "vtd")`).
 -- - ProwseIML: an S-expression form with macros (`emit_iml`,
 --   `emit(doc, "iml")`).
@@ -23,7 +25,12 @@ local function native_unavailable(feature)
     error(feature .. " requires ProwseTk's native lprowseir module", 3)
 end
 
--- Emits the four built-in IR formats from a document/session.
+-- Emits the canonical event stream and compatibility/wire-format views from a
+-- document/session.
+function lprowseir.emit_events(document_or_session)
+    native_unavailable("lprowseir.emit_events")
+end
+
 function lprowseir.emit_dom(document_or_session)
     native_unavailable("lprowseir.emit_dom")
 end
@@ -40,7 +47,7 @@ function lprowseir.emit_iml(document_or_session)
     native_unavailable("lprowseir.emit_iml")
 end
 
--- Emits a named IR through the plugin-extensible registry ("vtd", "iml",
+-- Emits a named IR through the plugin-extensible registry ("events", "vtd", "iml",
 -- plus any format a native plugin registered). Binary IRs come back as byte
 -- strings. Unknown names raise.
 function lprowseir.emit(document_or_session, name)

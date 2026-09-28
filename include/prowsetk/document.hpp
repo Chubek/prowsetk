@@ -156,8 +156,10 @@ private:
     std::string base_url_;
 };
 
-// Parses `html` into a Document. The parser is tolerant and never throws on
+// Parses `html` into a Document. The parser tolerates
 // malformed markup; it is not a full HTML5 tree-construction implementation.
+// Throws Error(ResourceLimit) above 16 MiB input, 250,000 total nodes
+// (including the document), or 256 levels below the document.
 std::shared_ptr<Document> parse_html(std::string_view html,
                                      std::string url = {},
                                      std::string base_url = {});

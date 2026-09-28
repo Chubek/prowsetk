@@ -25,9 +25,14 @@ Uses [nanobind](https://github.com/wjakob/nanobind) to bind C++ to Python. All P
 
 ```sh
 cmake --preset default
-cmake --build --preset default   # also copies _core extension into pyprowsetk/
-PYTHONPATH=interface/pyprowsetk:$PYTHONPATH python -c "import pyprowsetk; print(pyprowsetk.version())"
+cmake --build --preset default
+PYTHONPATH=build/default/interface/pyprowsetk:$PYTHONPATH python -c "import pyprowsetk; print(pyprowsetk.version())"
 ```
+
+Each preset keeps its package and generated stubs in its own build directory.
+Run `ctest --preset asan -R pyprowsetk` for sanitizer coverage; CTest arranges
+runtime preloading for Python. C++ tests retain normal leak detection, while
+Python processes suppress interpreter shutdown leaks.
 
 Or via pip (scikit-build-core):
 

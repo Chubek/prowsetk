@@ -247,8 +247,10 @@ TEST(LuaBinding, SyntheticClickAndTypeDispatchCascades) {
         -- Session-mediated entry points reach the same cascade.
         session:evaluate_js("window.__cascade = []")
         assert(session:click_element(go) == true, "session:click_element failed")
-        assert(session:evaluate_js("window.__cascade.length") == "8",
-               "expected 8 events")
+        -- The button is already active: focus must not fire a second time.
+        assert(session:evaluate_js("window.__cascade.join('|')") ==
+               "pointerover|pointerenter|pointerdown|mousedown|pointerup|mouseup|click",
+               "repeat click should omit focus")
 
         -- Typing updates the value through the native setter path.
         local input = document:query_selector("#q")
@@ -288,5 +290,21 @@ TEST(LuaBinding, ExpandedSelectorSyntax) {
         local ok = pcall(function() doc:query_selector(':not(p,)') end)
         assert(not ok)
     )LUA", "expanded_selectors");
+    EXPECT_TRUE(result.ok) << lua.last_error();
+}
+
+TEST(LuaBinding, HtmlRecoveryAndReferencesReachLua) {
+    if (!LuaRuntime::available()) GTEST_SKIP() << "Lua unavailable";
+    LuaRuntime lua;
+    const auto result = lua.run(R"LUA(
+        local browser = require('lprowse').browser.new()
+        local session = browser:create_session()
+        session:load_html('<ul><li><b>&#128;<li>two</ul><input NAME="first" name="last">',
+                          'https://example.test/')
+        local doc = session:document()
+        assert(#doc:query_selector_all('ul > li') == 2)
+        assert(doc:query_selector('li'):text() == '\226\130\172')
+        assert(doc:query_selector('input'):attribute('name') == 'first')
+    )LUA", "html_recovery");
     EXPECT_TRUE(result.ok) << lua.last_error();
 }

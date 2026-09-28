@@ -177,6 +177,30 @@ Selectors are limited to 64 KiB, 256 total compounds, and 32 nested negations
 (`ResourceLimit`). These limits bound recursion and combinatorial backtracking;
 they do not claim a wall-clock deadline or full CSS conformance.
 
+
+Flatworm HTML processing separates value-only syntax records (`html_model.hpp`),
+streaming tokenization (`html_tokenizer.cpp`),
+character references (`html_entities.cpp`), shared syntax vocabulary
+(`html_syntax.cpp`), tree construction (`html_parser.cpp`), node ownership and
+mutation (`dom_node.cpp`), and HTML encoding (`html_serializer.cpp`). The
+same parser serves document loads and DOM fragments across C++, Lua, and page
+JavaScript. It keeps the first duplicate attribute, accepts punctuation in
+attribute names, requires a delimited matching raw-text/RCDATA end tag, and
+ignores the trailing solidus on non-void HTML start tags. Numeric references
+support optional semicolons, invalid-scalar replacement, and HTML C1 remapping;
+named references remain restricted to the documented source vocabulary with
+required semicolons. Scoped omitted-end-tag recovery covers paragraphs, list
+items, definition items, options/groups, and table cells/rows/sections.
+
+Parsing fails with `ErrorCode::ResourceLimit` above 16 MiB of input, 250,000
+total nodes (including the document node), or 256 node levels below the document.
+These bounds apply to each parse, including fragments; they are not a cumulative
+quota on later DOM mutations. The parser remains a restricted tolerant HTML
+parser: no implicit html/head/body or table wrappers, foster parenting,
+adoption-agency reconstruction, foreign-content namespaces, full named-entity
+vocabulary, input encoding sniffing, or context-sensitive fragment insertion
+modes. This expansion does not imply full HTML5 conformance.
+
 An XPath interface into the DOM is exposed through the Lua extension layer as
 `lprowsext.dom.xpath`. XPath substantially increases scraping reach compared with
 plain CSS selectors.
@@ -354,6 +378,25 @@ Delivers events related to:
 - Unsupported APIs
 - Plugin lifecycle
 - Session lifecycle
+
+### `EmbeddedBrowser`
+
+`EmbeddedBrowser` is the compact ownership API for host applications. It owns a
+`Browser` and one isolated `Session`, provides `load_html` and `navigate`, and
+streams the loaded document through the canonical `ProwseEvent` IR. Returning
+`EventStreamControl::Stop` stops delivery without invalidating the document;
+an empty visitor and an unloaded document report normal `Error` codes.
+
+```cpp
+#include <prowsetk/embedding.hpp>
+
+prowsetk::EmbeddedBrowser browser;
+browser.load_html("<p>Hello</p>");
+browser.stream_events([](const prowsetk::ProwseEvent& event) {
+    // consume start / attribute / text / end records
+    return prowsetk::EventStreamControl::Continue;
+});
+```
 
 ## Lua Control Layer (`lprowse`)
 
@@ -1195,6 +1238,7 @@ prowsetk serve [--host 127.0.0.1] [--port 8080] [--web-root DIR] [--no-javascrip
 prowsetk webdriver [--host 127.0.0.1] [--port 9515] [--no-javascript]
 prowsetk playwright [--host 127.0.0.1] [--port 9222]
 prowsetk endpoints --url https://example.com --output build/openapi.yaml
+prowsetk serialize --events --stdout --url https://example.com > page.ndjson
 prowsetk serialize --vtd --stdout --url https://example.com > page.vtd
 prowsetk run crawl-site --url https://example.com --depth 2 --output build/pages.jsonl
 prowsetk version
@@ -1207,9 +1251,10 @@ is a single-page application (`resources/web/index.html`, `app.js`,
 from the browser.
 
 `prowsetk serialize` creates one session, loads either `--url URL` or an
-offline `--html HTML` document, and serializes the resulting document as
-ProwseIML (`--iml`) or ProwseVTD (`--vtd`). Select exactly one format and one
-destination (`--stdout` or `--output FILE`). When `--html` and `--url` are
+offline `--html HTML` document, and serializes the resulting document as the
+canonical ProwseEvent stream (`--events`, newline-delimited JSON), ProwseIML
+(`--iml`), or ProwseVTD (`--vtd`). Select exactly one format and one destination
+(`--stdout` or `--output FILE`). When `--html` and `--url` are
 both supplied, the URL is used only as the offline document's base URL. VTD is
 binary and is written directly to standard output with no status text, so it
 can safely be piped into `page2pdf`:
@@ -2054,8 +2099,8 @@ documented with the build system.
 ### Page IR to PDF
 
 `page2pdf` is a standalone C tool built at `build/<preset>/tools/page2pdf/`.
-It consumes the serialized ProwseVTD (`PVTD1`) and ProwseIML formats emitted by
-`lprowseir`, rather than accessing Flatworm's C++ DOM. It calculates a print
+It consumes ProwseEvent NDJSON, serialized ProwseVTD (`PVTD1`), and ProwseIML
+without accessing Flatworm's C++ DOM. It calculates a print
 layout from the IR tree and paints boxes, backgrounds, borders, colored and
 sized text, and embedded PNG/JPEG images with libHaru:
 
@@ -2066,8 +2111,8 @@ prowsetk serialize --vtd --stdout --html '<p>Pipeline</p>' | \
   build/default/tools/page2pdf/page2pdf --format vtd - page.pdf
 ```
 
-`--format auto` (the default) recognizes the ProwseVTD magic and otherwise
-expects ProwseIML; `-` may be used as the input path for a pipeline. CSS support
+`--format auto` recognizes the ProwseVTD magic, then ProwseEvent NDJSON, and
+otherwise expects ProwseIML; `-` may be used as the input path for a pipeline. CSS support
 includes inline declarations and basic grouped/descendant tag, `.class`, and `#id` rules from
 `<style>`; unsupported selectors and CSS properties are skipped. The printer
 does not implement full browser layout, flex/grid alignment, SVG, web fonts,
@@ -2075,10 +2120,34 @@ arbitrary JavaScript painting, or remote image loading within the C process.
 Live resource snapshots are bounded and same-origin; a page depending on
 cross-origin assets or advanced CSS will differ from a browser screenshot.
 ProwseIML macro forms must be expanded before they are passed to the tool.
-Both wire formats replay start/attribute/text/end events into the same C
+All input encodings replay start/attribute/text/end events into the same C
 renderer. The PDF uses built-in Helvetica, Helvetica-Bold, and Courier fonts;
 input is limited to 16 MiB and output to 512 pages. Exceeding these bounds
 fails the conversion.
+
+### Page IR to LaTeX
+
+`page2latex` is a standalone C++ downstream tool built at
+`build/<preset>/tools/page2latex/`. It accepts only canonical ProwseEvent
+NDJSON (normally from `prowsetk serialize --events`), never links to Flatworm,
+and emits a bounded, escaped LaTeX document. It supports headings, paragraphs,
+lists, emphasis, inline code, links, and image alt text; CSS and browser layout
+are intentionally not translated.
+
+```sh
+prowsetk serialize --events --stdout --html '<h1>Report</h1><p>Body</p>' | \
+  build/default/tools/page2latex/page2latex --hyperref - report.tex
+
+prowsetk serialize --events --stdout --html '<p>PDF</p>' | \
+  build/default/tools/page2latex/page2latex --hyperref - report.pdf
+```
+
+`--hyperref` adds the `hyperref` package and emits `\\href` links. A custom
+`--template FILE` must contain `{{PAGE2LATEX_BODY}}`; it may also use
+`{{PAGE2LATEX_PREAMBLE}}` and `{{PAGE2LATEX_TITLE}}`. `.tex` and `.ltx`
+outputs write TeX; `.pdf` outputs compile a PDF. `--make-pdf` additionally
+compiles a `.tex`/`.ltx` output to a sibling PDF. Compilation uses
+`$PWTK_PAGE2LATEX_ENGINE`, or `xelatex` when that variable is unset.
 
 ## Modularity
 
@@ -2232,3 +2301,24 @@ prowsetk/
 Run `scripts/scaffold.sh` to create or refresh the build skeleton. The target
 directory is `$PROWSETK_DIR`; when unset, the script falls back to the directory
 one level above itself.
+
+### Synthetic interaction completion
+
+Host-mediated synthetic clicks and typing drain bounded lifecycle work and
+queued navigation before returning. Form-control `value` prototype descriptors
+are configurable so framework setter wrappers can observe the native setter
+path. Repeated clicks on an already-active element omit the focus event.
+A rejected HTML parse preserves the previously installed document and session URL.
+
+### Python build isolation
+
+Python binding builds keep their module, package wrapper, and generated stubs
+inside each preset's binary directory. CTest imports that package. Sanitizer
+runtime discovery lives in `cmake/PythonSanitizers.cmake`; runtime preloading
+and Python-only leak suppression apply to stub generation and pytest, while
+C++ sanitizer tests retain leak checking. This prevents default and ASan builds
+from overwriting each other's Python modules in the source tree.
+
+Encrypted-storage tests retain production-cost key derivation and use a bounded
+300-second timeout to accommodate sanitizer instrumentation; other unit tests
+retain the default 60-second bound.

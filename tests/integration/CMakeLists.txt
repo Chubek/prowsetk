@@ -26,6 +26,20 @@ if(PROWSETK_HAVE_PUGIXML)
         PROWSETK_HAVE_PUGIXML=1)
 endif()
 
+if(TARGET page2latex)
+    prowsetk_gtest(prowsetk_integration_page2latex "prowsetk.integration.page2latex."
+        "integration;document" test_page2latex.cpp)
+    target_compile_definitions(prowsetk_integration_page2latex PRIVATE
+        PAGE2LATEX_BIN="$<TARGET_FILE:page2latex>"
+        TEST_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_dependencies(prowsetk_integration_page2latex page2latex)
+    find_program(PROWSETK_XELATEX_EXECUTABLE xelatex)
+    if(PROWSETK_XELATEX_EXECUTABLE)
+        target_compile_definitions(prowsetk_integration_page2latex PRIVATE
+            PAGE2LATEX_ENGINE="${PROWSETK_XELATEX_EXECUTABLE}")
+    endif()
+endif()
+
 prowsetk_gtest(prowsetk_integration_lua_ir "prowsetk.integration.lua."
     "integration;lua;document" test_lua_ir.cpp)
 

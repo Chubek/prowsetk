@@ -1,566 +1,86 @@
 #include "flatworm/dom_internal.hpp"
-
+#include "flatworm/html_syntax.hpp"
+#include "flatworm/html_tokenizer.hpp"
+#include "prowsetk/error.hpp"
 #include <algorithm>
-#include <cctype>
-#include <memory>
-#include <stdexcept>
-#include <unordered_map>
+#include <initializer_list>
 
 namespace prowsetk::flatworm {
 namespace {
-
-const std::unordered_map<std::string, std::string>& named_entities() {
-    static const std::unordered_map<std::string, std::string> entities = {
-        {"amp", "&"},     {"lt", "<"},      {"gt", ">"},
-        {"quot", "\""},   {"apos", "'"},    {"nbsp", "\xc2\xa0"},
-        {"copy", "\xc2\xa9"}, {"reg", "\xc2\xae"}, {"hellip", "\xe2\x80\xa6"},
-        {"mdash", "\xe2\x80\x94"}, {"ndash", "\xe2\x80\x93"},
-        {"laquo", "\xc2\xab"}, {"raquo", "\xc2\xbb"},
-        {"trade", "\xe2\x84\xa2"}, {"deg", "\xc2\xb0"},
+bool one_of(std::string_view name, std::initializer_list<std::string_view> names) {
+    return std::find(names.begin(), names.end(), name) != names.end();
+}
+// Scoped, deliberately restricted HTML recovery. It does not implement the
+// adoption-agency algorithm, foster parenting, or implicit document wrappers.
+void close_for_start(std::vector<std::shared_ptr<Node>>& stack, std::string_view name) {
+    const auto close_scoped = [&](std::initializer_list<std::string_view> targets,
+                                  std::initializer_list<std::string_view> barriers) {
+        for (auto depth = stack.size(); depth > 1; --depth) {
+            const auto& open = stack[depth - 1]->name;
+            if (one_of(open, targets)) { stack.resize(depth - 1); return; }
+            if (one_of(open, barriers)) return;
+        }
     };
-    return entities;
+    if (one_of(name, {"address", "article", "aside", "blockquote", "div", "dl", "fieldset",
+                      "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header",
+                      "hgroup", "hr", "main", "menu", "nav", "ol", "p", "pre", "section",
+                      "table", "ul"}))
+        close_scoped({"p"}, {"html", "table", "td", "th", "button", "template"});
+    if (name == "li") close_scoped({"li"}, {"ul", "ol", "menu", "html", "template"});
+    if (name == "dt" || name == "dd") close_scoped({"dt", "dd"}, {"dl", "html", "template"});
+    if (name == "option" || name == "optgroup")
+        close_scoped({"option"}, {"select", "datalist", "optgroup", "html", "template"});
+    if (name == "optgroup") close_scoped({"optgroup"}, {"select", "html", "template"});
+    if (one_of(name, {"td", "th", "tr", "tbody", "thead", "tfoot"}))
+        close_scoped({"td", "th"}, {"tr", "table", "html", "template"});
+    if (one_of(name, {"tr", "tbody", "thead", "tfoot"}))
+        close_scoped({"tr"}, {"table", "tbody", "thead", "tfoot", "html", "template"});
+    if (one_of(name, {"tbody", "thead", "tfoot"}))
+        close_scoped({"tbody", "thead", "tfoot"}, {"table", "html", "template"});
 }
-
-std::string to_lower(std::string_view value) {
-    std::string result(value);
-    std::transform(result.begin(), result.end(), result.begin(), [](char c) {
-        return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    });
-    return result;
 }
-
-bool is_space(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
-}
-
-bool is_name_char(char c) {
-    return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '-' ||
-           c == '_' || c == ':' || c == '.';
-}
-
-bool is_void_element(std::string_view name) {
-    static const char* const voids[] = {
-        "area", "base", "br",  "col",   "embed", "hr",    "img", "input",
-        "link", "meta", "param", "source", "track", "wbr"};
-    for (const char* element : voids) {
-        if (name == element) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool is_raw_text_element(std::string_view name) {
-    return name == "script" || name == "style";
-}
-
-std::string escape_text(std::string_view value) {
-    std::string result;
-    result.reserve(value.size());
-    for (char c : value) {
-        switch (c) {
-            case '&': result += "&amp;"; break;
-            case '<': result += "&lt;"; break;
-            case '>': result += "&gt;"; break;
-            default: result.push_back(c); break;
-        }
-    }
-    return result;
-}
-
-std::string escape_attribute(std::string_view value) {
-    std::string result;
-    result.reserve(value.size());
-    for (char c : value) {
-        switch (c) {
-            case '&': result += "&amp;"; break;
-            case '"': result += "&quot;"; break;
-            case '<': result += "&lt;"; break;
-            case '>': result += "&gt;"; break;
-            default: result.push_back(c); break;
-        }
-    }
-    return result;
-}
-
-bool is_rcdata_element(std::string_view name) {
-    return name == "textarea" || name == "title";
-}
-
-std::string decode_entities(std::string_view input) {
-    std::string output;
-    output.reserve(input.size());
-    std::size_t i = 0;
-    while (i < input.size()) {
-        if (input[i] != '&') {
-            output.push_back(input[i++]);
-            continue;
-        }
-        const auto semicolon = input.find(';', i + 1);
-        if (semicolon == std::string_view::npos || semicolon - i > 12) {
-            output.push_back(input[i++]);
-            continue;
-        }
-        const std::string entity(input.substr(i + 1, semicolon - i - 1));
-        if (!entity.empty() && entity[0] == '#') {
-            long code = 0;
-            bool valid = false;
-            try {
-                if (entity.size() > 1 &&
-                    (entity[1] == 'x' || entity[1] == 'X')) {
-                    code = std::stol(entity.substr(2), nullptr, 16);
-                } else {
-                    code = std::stol(entity.substr(1), nullptr, 10);
-                }
-                valid = true;
-            } catch (...) {
-                valid = false;
-            }
-            if (valid && code > 0 && code < 0x110000) {
-                // Encode as UTF-8.
-                const auto cp = static_cast<unsigned long>(code);
-                if (cp < 0x80) {
-                    output.push_back(static_cast<char>(cp));
-                } else if (cp < 0x800) {
-                    output.push_back(static_cast<char>(0xC0 | (cp >> 6)));
-                    output.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-                } else if (cp < 0x10000) {
-                    output.push_back(static_cast<char>(0xE0 | (cp >> 12)));
-                    output.push_back(
-                        static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-                    output.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-                } else {
-                    output.push_back(static_cast<char>(0xF0 | (cp >> 18)));
-                    output.push_back(
-                        static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
-                    output.push_back(
-                        static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-                    output.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-                }
-                i = semicolon + 1;
-                continue;
-            }
-        }
-        const auto it = named_entities().find(entity);
-        if (it != named_entities().end()) {
-            output += it->second;
-            i = semicolon + 1;
-            continue;
-        }
-        output.push_back(input[i++]);
-    }
-    return output;
-}
-
-// Elements whose start tag implicitly closes an open element of the same name.
-bool closes_previous(std::string_view open, std::string_view incoming) {
-    if (open == "li" && incoming == "li") {
-        return true;
-    }
-    if (open == "p" && (incoming == "p" || incoming == "div" ||
-                        incoming == "ul" || incoming == "ol" ||
-                        incoming == "table" || incoming == "form")) {
-        return true;
-    }
-    if ((open == "td" || open == "th") &&
-        (incoming == "td" || incoming == "th" || incoming == "tr")) {
-        return true;
-    }
-    if (open == "tr" && incoming == "tr") {
-        return true;
-    }
-    if (open == "option" && incoming == "option") {
-        return true;
-    }
-    return false;
-}
-
-void append_child(const std::shared_ptr<Node>& parent,
-                  const std::shared_ptr<Node>& child) {
-    child->parent = parent;
-    parent->children.push_back(child);
-}
-
-std::string serialize_impl(const Node& node, std::string_view parent_name) {
-    switch (node.type) {
-        case NodeType::Document: {
-            std::string result;
-            for (const auto& child : node.children) {
-                result += serialize_impl(*child, {});
-            }
-            return result;
-        }
-        case NodeType::Text:
-            return is_raw_text_element(parent_name) ? node.text
-                                                    : escape_text(node.text);
-        case NodeType::Comment:
-            return "<!--" + node.text + "-->";
-        case NodeType::Doctype:
-            return "<!" + node.text + ">";
-        case NodeType::Element:
-            break;
-    }
-
-    std::string result = "<" + node.name;
-    for (const auto& attr : node.attributes) {
-        result += " " + attr.name + "=\"" + escape_attribute(attr.value) + "\"";
-    }
-    if (is_void_element(node.name)) {
-        result += ">";
-        return result;
-    }
-    result += ">";
-    for (const auto& child : node.children) {
-        result += serialize_impl(*child, node.name);
-    }
-    result += "</" + node.name + ">";
-    return result;
-}
-
-}  // namespace
-
-std::shared_ptr<Node> make_node(NodeType type) {
-    auto node = std::make_shared<Node>();
-    node->type = type;
-    return node;
-}
-
-const std::string* Node::attribute(std::string_view attribute_name) const {
-    for (const auto& attr : attributes) {
-        if (attr.name == attribute_name) {
-            return &attr.value;
-        }
-    }
-    return nullptr;
-}
-
-void Node::set_attribute(std::string_view attribute_name,
-                         std::string_view value) {
-    for (auto& attr : attributes) {
-        if (attr.name == attribute_name) {
-            attr.value = std::string(value);
-            report_mutation(MutationInfo{"attribute-set", name,
-                                         std::string(attribute_name),
-                                         std::string(value)});
-            return;
-        }
-    }
-    attributes.push_back(
-        Attribute{std::string(attribute_name), std::string(value)});
-    report_mutation(MutationInfo{"attribute-set", name,
-                                 std::string(attribute_name),
-                                 std::string(value)});
-}
-
-bool Node::remove_attribute(std::string_view attribute_name) {
-    const auto it = std::remove_if(attributes.begin(), attributes.end(),
-                                   [attribute_name](const Attribute& attr) {
-                                       return attr.name == attribute_name;
-                                   });
-    if (it == attributes.end()) {
-        return false;
-    }
-    attributes.erase(it, attributes.end());
-    report_mutation(MutationInfo{"attribute-removed", name,
-                                 std::string(attribute_name), {}});
-    return true;
-}
-
-void Node::append_child(const std::shared_ptr<Node>& child) {
-    if (child == nullptr || child.get() == this) {
-        return;
-    }
-    const auto self = shared_from_this();
-    for (auto ancestor = self; ancestor != nullptr; ancestor = ancestor->shared_parent()) {
-        if (ancestor == child) {
-            return;
-        }
-    }
-    const auto old_parent = child->shared_parent();
-    children.push_back(child);
-    if (old_parent != nullptr) {
-        const auto it = std::find(old_parent->children.begin(),
-                                  old_parent->children.end(), child);
-        if (it != old_parent->children.end()) {
-            old_parent->children.erase(it);
-        }
-    }
-    child->parent = self;
-    if (old_parent != nullptr) {
-        old_parent->report_mutation(MutationInfo{"child-removed", child->name, {}, {}});
-    }
-    report_mutation(MutationInfo{"child-added", child->name, {}, {}});
-}
-
-bool Node::remove_child(const std::shared_ptr<Node>& child) {
-    if (child == nullptr) {
-        return false;
-    }
-    const auto it = std::find(children.begin(), children.end(), child);
-    if (it == children.end()) {
-        return false;
-    }
-    const std::string removed_name = (*it)->name;
-    (*it)->parent.reset();
-    children.erase(it);
-    report_mutation(MutationInfo{"child-removed", removed_name, {}, {}});
-    return true;
-}
-
-std::shared_ptr<Node> Node::document_root() const {
-    std::shared_ptr<Node> node =
-        std::const_pointer_cast<Node>(shared_from_this());
-    while (true) {
-        std::shared_ptr<Node> ancestor = node->parent.lock();
-        if (ancestor == nullptr) {
-            return node;
-        }
-        node = ancestor;
-    }
-}
-
-void Node::report_mutation(const MutationInfo& info) const {
-    std::shared_ptr<Node> root;
-    try {
-        root = document_root();
-    } catch (const std::bad_weak_ptr&) {
-        return;
-    }
-    if (root != nullptr && root->mutation_sink != nullptr) {
-        (*root->mutation_sink)(info);
-    }
-}
-
-std::string serialize(const Node& node) {
-    const auto parent = node.shared_parent();
-    return serialize_impl(node, parent != nullptr ? parent->name : std::string_view{});
-}
-
-std::string text_content(const Node& node) {
-    if (node.type == NodeType::Text) {
-        return node.text;
-    }
-    std::string result;
-    for (const auto& child : node.children) {
-        result += text_content(*child);
-    }
-    return result;
-}
-
 std::shared_ptr<Node> parse_html_tree(std::string_view html) {
+    // Limits also bound recursive consumers and shared_ptr subtree destruction.
+    constexpr std::size_t max_bytes = 16 * 1024 * 1024;
+    constexpr std::size_t max_nodes = 250000;
+    constexpr std::size_t max_depth = 256;
+    if (html.size() > max_bytes)
+        throw Error(ErrorCode::ResourceLimit, "HTML input exceeds 16 MiB");
     auto root = make_node(NodeType::Document);
     std::vector<std::shared_ptr<Node>> stack{root};
-    std::size_t i = 0;
-
-    auto current = [&stack]() -> std::shared_ptr<Node>& { return stack.back(); };
-
-    while (i < html.size()) {
-        if (html[i] != '<') {
-            const auto next = html.find('<', i);
-            const auto end = next == std::string_view::npos ? html.size() : next;
-            std::string raw(html.substr(i, end - i));
-            if (!raw.empty()) {
-                auto text = make_node(NodeType::Text);
-                text->text = decode_entities(raw);
-                append_child(current(), text);
-            }
-            i = end;
-            continue;
-        }
-
-        if (html.compare(i, 4, "<!--") == 0) {
-            const auto close = html.find("-->", i + 4);
-            const auto end = close == std::string_view::npos ? html.size()
-                                                             : close + 3;
-            auto comment = make_node(NodeType::Comment);
-            comment->text = std::string(html.substr(
-                i + 4, (close == std::string_view::npos ? html.size() : close) -
-                           (i + 4)));
-            append_child(current(), comment);
-            i = end;
-            continue;
-        }
-
-        if (html.compare(i, 2, "<!") == 0 || html.compare(i, 2, "<?") == 0) {
-            const auto close = html.find('>', i);
-            const auto end = close == std::string_view::npos ? html.size()
-                                                             : close + 1;
-            auto doctype = make_node(NodeType::Doctype);
-            const auto content_start = i + 2;
-            const auto content_end =
-                close == std::string_view::npos ? html.size() : close;
-            doctype->text = std::string(
-                html.substr(content_start, content_end - content_start));
-            append_child(current(), doctype);
-            i = end;
-            continue;
-        }
-
-        if (html.compare(i, 2, "</") == 0) {
-            std::size_t j = i + 2;
-            std::string name;
-            while (j < html.size() && is_name_char(html[j])) {
-                name.push_back(html[j++]);
-            }
-            const auto close = html.find('>', j);
-            i = close == std::string_view::npos ? html.size() : close + 1;
-            name = to_lower(name);
-            for (std::size_t depth = stack.size(); depth > 1; --depth) {
-                if (stack[depth - 1]->name == name) {
-                    stack.resize(depth - 1);
-                    break;
+    HtmlTokenizer tokenizer(html);
+    std::size_t count = 1;
+    while (true) {
+        auto token = tokenizer.next();
+        if (token.kind == HtmlTokenKind::End) break;
+        if (token.kind == HtmlTokenKind::EndTag) {
+            for (auto depth = stack.size(); depth > 1; --depth) {
+                if (stack[depth - 1]->name == token.data) {
+                    stack.resize(depth - 1); break;
                 }
             }
             continue;
         }
-
-        // Start tag.
-        std::size_t j = i + 1;
-        std::string name;
-        while (j < html.size() && is_name_char(html[j])) {
-            name.push_back(html[j++]);
-        }
-        if (name.empty()) {
-            // A stray '<' that is not a tag; emit as text.
-            auto text = make_node(NodeType::Text);
-            text->text = "<";
-            append_child(current(), text);
-            i += 1;
-            continue;
-        }
-        name = to_lower(name);
-
-        std::vector<Attribute> attributes;
-        bool self_closing = false;
-        while (j < html.size() && html[j] != '>') {
-            while (j < html.size() && is_space(html[j])) {
-                ++j;
-            }
-            if (j < html.size() && html[j] == '/') {
-                self_closing = true;
-                ++j;
-                continue;
-            }
-            if (j >= html.size() || html[j] == '>') {
-                break;
-            }
-            std::string attr_name;
-            while (j < html.size() && is_name_char(html[j])) {
-                attr_name.push_back(html[j++]);
-            }
-            if (attr_name.empty()) {
-                ++j;
-                continue;
-            }
-            std::string attr_value;
-            while (j < html.size() && is_space(html[j])) {
-                ++j;
-            }
-            if (j < html.size() && html[j] == '=') {
-                ++j;
-                while (j < html.size() && is_space(html[j])) {
-                    ++j;
-                }
-                if (j < html.size() && (html[j] == '"' || html[j] == '\'')) {
-                    const char quote = html[j++];
-                    const auto end = html.find(quote, j);
-                    const auto stop =
-                        end == std::string_view::npos ? html.size() : end;
-                    attr_value = decode_entities(html.substr(j, stop - j));
-                    j = end == std::string_view::npos ? html.size() : end + 1;
-                } else {
-                    while (j < html.size() && !is_space(html[j]) &&
-                           html[j] != '>') {
-                        attr_value.push_back(html[j++]);
-                    }
-                    attr_value = decode_entities(attr_value);
-                }
-            }
-            attributes.push_back(
-                Attribute{to_lower(attr_name), std::move(attr_value)});
-        }
-        if (j < html.size() && html[j] == '>') {
-            ++j;
-        }
-        i = j;
-
-        auto element = make_node(NodeType::Element);
-        element->name = name;
-        element->attributes = std::move(attributes);
-
-        while (stack.size() > 1 &&
-               closes_previous(stack.back()->name, name)) {
-            stack.pop_back();
-        }
-
-        append_child(current(), element);
-
-        if (is_raw_text_element(name)) {
-            const std::string close_tag = "</" + name;
-            std::size_t k = i;
-            std::string lowered;
-            const auto found = [&]() -> std::size_t {
-                std::string hay(html.substr(k));
-                std::transform(hay.begin(), hay.end(), hay.begin(), [](char c) {
-                    return static_cast<char>(
-                        std::tolower(static_cast<unsigned char>(c)));
-                });
-                return hay.find(close_tag);
-            }();
-            if (found == std::string::npos) {
-                if (k < html.size()) {
-                    auto text = make_node(NodeType::Text);
-                    text->text = std::string(html.substr(k));
-                    append_child(element, text);
-                }
-                i = html.size();
-            } else {
-                if (found > 0) {
-                    auto text = make_node(NodeType::Text);
-                    text->text = std::string(html.substr(k, found));
-                    append_child(element, text);
-                }
-                const auto gt = html.find('>', k + found);
-                i = gt == std::string_view::npos ? html.size() : gt + 1;
-            }
-            continue;
-        }
-
-        if (is_rcdata_element(name)) {
-            const std::string close_tag = "</" + name;
-            std::size_t k = i;
-            std::string hay(html.substr(k));
-            std::transform(hay.begin(), hay.end(), hay.begin(), [](char c) {
-                return static_cast<char>(
-                    std::tolower(static_cast<unsigned char>(c)));
-            });
-            const auto found = hay.find(close_tag);
-            if (found == std::string::npos) {
-                if (k < html.size()) {
-                    auto text = make_node(NodeType::Text);
-                    text->text = decode_entities(html.substr(k));
-                    append_child(element, text);
-                }
-                i = html.size();
-            } else {
-                if (found > 0) {
-                    auto text = make_node(NodeType::Text);
-                    text->text =
-                        decode_entities(html.substr(k, found));
-                    append_child(element, text);
-                }
-                const auto gt = html.find('>', k + found);
-                i = gt == std::string_view::npos ? html.size() : gt + 1;
-            }
-            continue;
-        }
-
-        if (!self_closing && !is_void_element(name)) {
-            stack.push_back(element);
+        const bool element = token.kind == HtmlTokenKind::StartTag;
+        if (element) close_for_start(stack, token.data);
+        if (++count > max_nodes || stack.size() > max_depth)
+            throw Error(ErrorCode::ResourceLimit, "HTML tree exceeds node or depth limit");
+        const auto type = element ? NodeType::Element :
+            token.kind == HtmlTokenKind::Text ? NodeType::Text :
+            token.kind == HtmlTokenKind::Comment ? NodeType::Comment : NodeType::Doctype;
+        auto node = make_node(type);
+        if (element) {
+            node->name = std::move(token.data);
+            node->attributes = std::move(token.attributes);
+        } else node->text = std::move(token.data);
+        node->parent = stack.back();
+        stack.back()->children.push_back(node);
+        if (element && !is_void_element(node->name)) {
+            stack.push_back(node);
+            if (is_raw_text_element(node->name) || is_rcdata_element(node->name))
+                tokenizer.text_element(node->name);
         }
     }
-
     return root;
 }
-
-}  // namespace prowsetk::flatworm
+}

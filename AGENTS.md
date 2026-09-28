@@ -297,10 +297,13 @@ the work is not done.
 
 ## The IR Emitters
 
-Although ProwseTk is a headless browser and it does not render anything, the engine can generate an *intermediate representation* for the page. By default, ProwseTk supports four IRs, with more extensible via plugins. The Lua engine exposes `lprowseir` for handling IR pipelines:
+Although ProwseTk is a headless browser and it does not render anything, the engine can generate an *intermediate representation* for the page. Its canonical in-memory IR is the ProwseEvent stream; the Lua engine exposes `lprowseir` for handling it and its wire encodings:
 
-- **ProwseXAS:** An event stream which can be listened to.
-- **ProwseDOM:** A document object model which can be walked.
+- **ProwseEvent:** A start/attribute/text/end stream. Start records carry the
+  former flattened-node attributes and subtree text, so no parallel DOM IR is
+  maintained.
+- **ProwseXAS/ProwseDOM:** Compatibility projections over ProwseEvent for
+  existing callers; do not add new semantics to them.
 - **ProwseVTD:** A binary virtual token format which can be dumped.
 - **ProwseIML:** An S-Expression language with macros which can be expanded.
 
@@ -316,7 +319,7 @@ The implementation is stratified into five concerns with hard boundaries
 (Architecture Rules §7), each in its own translation unit:
 
 - **Semantics** (`src/core/ir_model.cpp`) — lowers the Flatworm DOM to the
-  canonical event/node model. Knows nothing about XPath or encodings.
+  canonical ProwseEvent model. Knows nothing about XPath or encodings.
 - **Register/layout** (`src/core/ir_layout.cpp`) — the sole owner of stable
   XPath-like paths, sibling indexes, and depths. Every IR consumes its
   assignments verbatim.
@@ -326,20 +329,21 @@ The implementation is stratified into five concerns with hard boundaries
   callback errors instead of swallowing them.
 - **Lowering** (per emitter) — maps the canonical model to one IR shape.
   Never reparses HTML or touches the DOM directly.
-- **Encoding** (`src/core/ir_vtd.cpp`, `src/core/ir_iml.cpp`) — VTD framing
-  and IML text/macros. VTD decoding is strict and allocation-bounded, and
+- **Encoding** (`src/core/ir_events.cpp`, `src/core/ir_vtd.cpp`,
+  `src/core/ir_iml.cpp`) — NDJSON event transport, VTD framing, and IML
+  text/macros. VTD decoding is strict and allocation-bounded, and
   attribute owner tags round-trip through the layout path.
 
 Further IRs register by name with `IrEmitterRegistry`
-(`src/core/ir_registry.cpp`; built-ins `"iml"`/`"vtd"`) instead of patching
+(`src/core/ir_registry.cpp`; built-ins `"events"`/`"iml"`/`"vtd"`) instead of patching
 the built-ins, and drivers resolve every name uniformly through
 `lprowseir.emit(document, name)` / `lprowseir.emitters()`.
 
-`prowsetk serialize` emits either serialized ProwseVTD or ProwseIML from a
-fresh CLI session. `tools/page2pdf` is a C-only consumer of those wire forms
+`prowsetk serialize` emits ProwseEvent NDJSON, serialized ProwseVTD, or ProwseIML from a
+fresh CLI session. `tools/page2pdf` is a C-only consumer of all three encodings
 and accepts `-` as standard input for pipelines.
-Both encodings replay into the same start/attribute/text/end renderer sink;
-keep CLI pipeline coverage for both formats and enforce the shared 512-page
+All encodings replay into the same start/attribute/text/end renderer sink;
+keep CLI pipeline coverage for every format and enforce the shared 512-page
 output bound.
 It must remain downstream of the IR boundary: it never accesses Flatworm DOM
 objects or the C++ API. It builds a bounded print box layout from IR attributes
@@ -347,6 +351,14 @@ and embedded styles, then paints backgrounds, borders, text, and embedded images
 with libHaru. The CLI may snapshot bounded same-origin CSS and PNG/JPEG via the
 owning session into serialized IR. Neither component claims browser/CSS layout
 compatibility beyond the documented supported subset.
+
+`tools/page2latex` is a separate downstream consumer for canonical ProwseEvent
+NDJSON only. It must remain independent of Flatworm and the C++ API, parse the
+bounded start/attribute/text/end stream strictly, and escape all page text for
+LaTeX. `--hyperref` is opt-in; templates require a `{{PAGE2LATEX_BODY}}`
+marker. `.pdf` output or `--make-pdf` invokes the explicitly configured
+`$PWTK_PAGE2LATEX_ENGINE` (default `xelatex`); LaTeX engine failures must be
+propagated rather than yielding a blank or partial PDF.
 
 ---
 
@@ -641,3 +653,54 @@ and page JavaScript) share these semantics. Preserve the documented syntax and
 matching limits, explicit errors for unsupported selectors, element receiver
 exclusion, and document-order deduplication. Extend unit and cross-layer tests
 when selector semantics change; do not claim full CSS conformance.
+
+
+## Flatworm HTML layers
+
+Flatworm HTML processing separates value-only syntax records (`html_model.hpp`),
+streaming tokenization (`html_tokenizer.cpp`),
+character references (`html_entities.cpp`), shared syntax vocabulary
+(`html_syntax.cpp`), tree construction (`html_parser.cpp`), node ownership and
+mutation (`dom_node.cpp`), and HTML encoding (`html_serializer.cpp`). The
+same parser serves document loads and DOM fragments across C++, Lua, and page
+JavaScript. It keeps the first duplicate attribute, accepts punctuation in
+attribute names, requires a delimited matching raw-text/RCDATA end tag, and
+ignores the trailing solidus on non-void HTML start tags. Numeric references
+support optional semicolons, invalid-scalar replacement, and HTML C1 remapping;
+named references remain restricted to the documented source vocabulary with
+required semicolons. Scoped omitted-end-tag recovery covers paragraphs, list
+items, definition items, options/groups, and table cells/rows/sections.
+
+Parsing fails with `ErrorCode::ResourceLimit` above 16 MiB of input, 250,000
+total nodes (including the document node), or 256 node levels below the document.
+These bounds apply to each parse, including fragments; they are not a cumulative
+quota on later DOM mutations. The parser remains a restricted tolerant HTML
+parser: no implicit html/head/body or table wrappers, foster parenting,
+adoption-agency reconstruction, foreign-content namespaces, full named-entity
+vocabulary, input encoding sniffing, or context-sensitive fragment insertion
+modes. This expansion does not imply full HTML5 conformance.
+
+Keep tokenization independent of node allocation and tree semantics; keep
+serialization and mutation out of the parser. Test recovery, malformed inputs,
+resource bounds, and C++/Lua/page-JavaScript agreement when changing this path.
+
+### Synthetic interaction completion
+
+Host-mediated synthetic clicks and typing drain bounded lifecycle work and
+queued navigation before returning. Form-control `value` prototype descriptors
+are configurable so framework setter wrappers can observe the native setter
+path. Repeated clicks on an already-active element omit the focus event.
+A rejected HTML parse preserves the previously installed document and session URL.
+
+### Python build isolation
+
+Python binding builds keep their module, package wrapper, and generated stubs
+inside each preset's binary directory. CTest imports that package. Sanitizer
+runtime discovery lives in `cmake/PythonSanitizers.cmake`; runtime preloading
+and Python-only leak suppression apply to stub generation and pytest, while
+C++ sanitizer tests retain leak checking. This prevents default and ASan builds
+from overwriting each other's Python modules in the source tree.
+
+Encrypted-storage tests retain production-cost key derivation and use a bounded
+300-second timeout to accommodate sanitizer instrumentation; other unit tests
+retain the default 60-second bound.

@@ -12,7 +12,7 @@ prowsetk \- headless browser automation and endpoint discovery
 \fIURL\fR [\fB--output\fR \fIFILE\fR] [\fB--no-javascript\fR]
 .br
 .B prowsetk serialize
-(\fB--iml\fR|\fB--vtd\fR) (\fB--url\fR \fIURL\fR|\fB--html\fR \fIHTML\fR)
+(\fB--events\fR|\fB--iml\fR|\fB--vtd\fR) (\fB--url\fR \fIURL\fR|\fB--html\fR \fIHTML\fR)
 (\fB--stdout\fR|\fB--output\fR \fIFILE\fR) [\fB--no-javascript\fR]
 .br
 .B prowsetk run
@@ -25,7 +25,7 @@ The \fBversion\fR command prints the installed version.
 by default. \fBendpoints\fR discovers candidate endpoints and emits an
 OpenAPI document; inferred endpoints carry provenance and confidence rather
 than being authoritative. \fBserialize\fR emits the loaded document as
-ProwseIML text or ProwseVTD binary data. \fBrun\fR executes a declared Lua
+newline-delimited ProwseEvent JSON, ProwseIML text, or ProwseVTD binary data. \fBrun\fR executes a declared Lua
 driver.
 .SH OPTIONS
 .TP
@@ -48,8 +48,8 @@ Output file for endpoint discovery, or a declared driver argument.
 Offline HTML source for \fBserialize\fR. When combined with \fB--url\fR,
 the URL is the document base URL rather than a navigation target.
 .TP
-.B --iml, --vtd
-Select ProwseIML or ProwseVTD output for \fBserialize\fR. Exactly one is
+.B --events, --iml, --vtd
+Select ProwseEvent NDJSON, ProwseIML, or ProwseVTD output for \fBserialize\fR. Exactly one is
 required.
 .TP
 .B --stdout

@@ -31,8 +31,10 @@ prowsetk_gtest(prowsetk_unit_tcb_storage "prowsetk.unit.tcb_storage."
     "unit;storage" test_tcb_storage.cpp)
 target_link_libraries(prowsetk_unit_tcb_storage PRIVATE ProwseTk::session)
 
+# This suite exercises production-cost key derivation on hundreds of operations;
+# ASan/UBSan instrumentation needs a larger finite budget than ordinary units.
 prowsetk_gtest(prowsetk_unit_encrypted_storage "prowsetk.unit.encrypted_storage."
-    "unit;storage" test_encrypted_storage.cpp)
+    "unit;storage" test_encrypted_storage.cpp TIMEOUT 300)
 target_link_libraries(prowsetk_unit_encrypted_storage PRIVATE ProwseTk::session)
 
 prowsetk_gtest(prowsetk_unit_dom "prowsetk.unit.document."
@@ -101,6 +103,9 @@ target_compile_definitions(prowsetk_unit_web_interface PRIVATE
 prowsetk_gtest(prowsetk_unit_ir_emitters "prowsetk.unit.ir."
     "unit;document" test_ir_emitters.cpp)
 
+prowsetk_gtest(prowsetk_unit_embedding "prowsetk.unit.embedding."
+    "unit;core;document" test_embedding.cpp)
+
 if(PROWSETK_HAVE_OPENSSL AND UNIX)
     prowsetk_gtest(prowsetk_unit_tls_network "prowsetk.unit.network.tls."
         "unit;network" test_tls_network.cpp)
@@ -111,3 +116,6 @@ endif()
 
 prowsetk_gtest(prowsetk_unit_lua_endpoint_options "prowsetk.unit.lua."
     "unit;lua;endpoint-extraction" test_lua_endpoint_options.cpp)
+
+prowsetk_gtest(prowsetk_unit_html_parser "prowsetk.unit.html-parser."
+    "unit;document" test_html_parser.cpp)

@@ -1,4 +1,4 @@
-/* page2pdf -- lay out and paint ProwseVTD or ProwseIML as a PDF.
+/* page2pdf -- lay out and paint ProwseEvent, ProwseVTD, or ProwseIML as a PDF.
  *
  * This program intentionally consumes only serialized ProwseTk IR.  It never
  * links against Flatworm or reaches into the C++ DOM, which keeps the C tool
@@ -20,6 +20,7 @@
 
 typedef enum {
     INPUT_AUTO,
+    INPUT_EVENTS,
     INPUT_IML,
     INPUT_VTD
 } InputFormat;
@@ -42,11 +43,30 @@ typedef struct {
     char error[192];
 } ImlParser;
 
+typedef struct {
+    const unsigned char *data;
+    size_t length;
+    size_t position;
+    char error[160];
+} JsonParser;
+
 static void print_usage(FILE *stream) {
     fprintf(stream,
-            "Usage: page2pdf [--format auto|iml|vtd] INPUT OUTPUT.pdf\n"
-            "Lay out serialized ProwseIML or ProwseVTD as a PDF.\n"
+            "Usage: page2pdf [--format auto|events|iml|vtd] INPUT OUTPUT.pdf\n"
+            "Lay out serialized ProwseEvent NDJSON, ProwseIML, or ProwseVTD as a PDF.\n"
             "Use '-' as INPUT to read standard input. OUTPUT must be a file.\n");
+}
+
+static void buffer_clear(Buffer *buffer) {
+    free(buffer->data);
+    buffer->data = NULL;
+    buffer->length = 0U;
+}
+
+static bool buffer_equals(const Buffer *buffer, const char *text) {
+    const size_t length = strlen(text);
+    return buffer->length == length &&
+           (length == 0U || memcmp(buffer->data, text, length) == 0);
 }
 
 static bool buffer_append(Buffer *buffer, const unsigned char *data,
@@ -220,6 +240,298 @@ static bool compile_vtd(const Buffer *input, Renderer *renderer, char *error,
     }
     if (position != input->length || renderer->frame_count != 0U) {
         snprintf(error, error_size, "incomplete ProwseVTD document");
+        return false;
+    }
+    return true;
+}
+
+/* --- ProwseEvent NDJSON -------------------------------------------------- */
+
+static void json_fail(JsonParser *parser, const char *message) {
+    if (parser->error[0] == '\0') {
+        snprintf(parser->error, sizeof(parser->error), "%s at byte %zu", message,
+                 parser->position);
+    }
+}
+
+static void json_skip_space(JsonParser *parser) {
+    while (parser->position < parser->length &&
+           (parser->data[parser->position] == ' ' ||
+            parser->data[parser->position] == '\t' ||
+            parser->data[parser->position] == '\r' ||
+            parser->data[parser->position] == '\n')) {
+        ++parser->position;
+    }
+}
+
+static bool json_take(JsonParser *parser, unsigned char expected) {
+    json_skip_space(parser);
+    if (parser->position >= parser->length || parser->data[parser->position] != expected) {
+        json_fail(parser, "invalid JSON syntax");
+        return false;
+    }
+    ++parser->position;
+    return true;
+}
+
+static bool json_append_codepoint(Buffer *out, unsigned value) {
+    unsigned char bytes[4];
+    size_t count = 0U;
+    if (value <= 0x7fU) {
+        bytes[count++] = (unsigned char)value;
+    } else if (value <= 0x7ffU) {
+        bytes[count++] = (unsigned char)(0xc0U | (value >> 6U));
+        bytes[count++] = (unsigned char)(0x80U | (value & 0x3fU));
+    } else if (value <= 0xffffU) {
+        bytes[count++] = (unsigned char)(0xe0U | (value >> 12U));
+        bytes[count++] = (unsigned char)(0x80U | ((value >> 6U) & 0x3fU));
+        bytes[count++] = (unsigned char)(0x80U | (value & 0x3fU));
+    } else if (value <= 0x10ffffU) {
+        bytes[count++] = (unsigned char)(0xf0U | (value >> 18U));
+        bytes[count++] = (unsigned char)(0x80U | ((value >> 12U) & 0x3fU));
+        bytes[count++] = (unsigned char)(0x80U | ((value >> 6U) & 0x3fU));
+        bytes[count++] = (unsigned char)(0x80U | (value & 0x3fU));
+    } else {
+        return false;
+    }
+    return buffer_append(out, bytes, count);
+}
+
+static int json_hex(unsigned char c) {
+    if (c >= '0' && c <= '9') return (int)(c - '0');
+    if (c >= 'a' && c <= 'f') return (int)(c - 'a' + 10U);
+    if (c >= 'A' && c <= 'F') return (int)(c - 'A' + 10U);
+    return -1;
+}
+
+static bool json_read_hex4(JsonParser *parser, unsigned *out) {
+    unsigned value = 0U;
+    size_t i;
+    if (parser->length - parser->position < 4U) return false;
+    for (i = 0U; i < 4U; ++i) {
+        const int digit = json_hex(parser->data[parser->position++]);
+        if (digit < 0) return false;
+        value = (value << 4U) | (unsigned)digit;
+    }
+    *out = value;
+    return true;
+}
+
+static bool json_read_string(JsonParser *parser, Buffer *out) {
+    buffer_clear(out);
+    json_skip_space(parser);
+    if (parser->position >= parser->length || parser->data[parser->position++] != '"') {
+        json_fail(parser, "expected JSON string");
+        return false;
+    }
+    while (parser->position < parser->length) {
+        unsigned char c = parser->data[parser->position++];
+        if (c == '"') return true;
+        if (c < 0x20U) {
+            json_fail(parser, "control character in JSON string");
+            return false;
+        }
+        if (c != '\\') {
+            if (!buffer_append(out, &c, 1U)) break;
+            continue;
+        }
+        if (parser->position >= parser->length) break;
+        c = parser->data[parser->position++];
+        if (c == '"' || c == '\\' || c == '/') {
+            if (!buffer_append(out, &c, 1U)) break;
+        } else if (c == 'b') {
+            c = '\b'; if (!buffer_append(out, &c, 1U)) break;
+        } else if (c == 'f') {
+            c = '\f'; if (!buffer_append(out, &c, 1U)) break;
+        } else if (c == 'n') {
+            c = '\n'; if (!buffer_append(out, &c, 1U)) break;
+        } else if (c == 'r') {
+            c = '\r'; if (!buffer_append(out, &c, 1U)) break;
+        } else if (c == 't') {
+            c = '\t'; if (!buffer_append(out, &c, 1U)) break;
+        } else if (c == 'u') {
+            unsigned codepoint;
+            if (!json_read_hex4(parser, &codepoint)) break;
+            if (codepoint >= 0xd800U && codepoint <= 0xdbffU) {
+                unsigned low;
+                if (parser->length - parser->position < 6U ||
+                    parser->data[parser->position++] != '\\' ||
+                    parser->data[parser->position++] != 'u' ||
+                    !json_read_hex4(parser, &low) || low < 0xdc00U || low > 0xdfffU) {
+                    json_fail(parser, "invalid JSON surrogate pair");
+                    return false;
+                }
+                codepoint = 0x10000U + ((codepoint - 0xd800U) << 10U) +
+                    (low - 0xdc00U);
+            } else if (codepoint >= 0xdc00U && codepoint <= 0xdfffU) {
+                json_fail(parser, "invalid JSON surrogate");
+                return false;
+            }
+            if (!json_append_codepoint(out, codepoint)) break;
+        } else {
+            json_fail(parser, "invalid JSON escape");
+            return false;
+        }
+    }
+    json_fail(parser, "unterminated or oversized JSON string");
+    return false;
+}
+
+static bool json_skip_value(JsonParser *parser, unsigned nesting) {
+    Buffer ignored = {0};
+    bool ok = true;
+    json_skip_space(parser);
+    if (nesting > 64U || parser->position >= parser->length) return false;
+    if (parser->data[parser->position] == '"') {
+        ok = json_read_string(parser, &ignored);
+    } else if (parser->data[parser->position] == '{' || parser->data[parser->position] == '[') {
+        const unsigned char open = parser->data[parser->position++];
+        const unsigned char close = open == '{' ? '}' : ']';
+        json_skip_space(parser);
+        if (parser->position < parser->length && parser->data[parser->position] == close) {
+            ++parser->position;
+        } else {
+            while (ok) {
+                if (open == '{') {
+                    ok = json_read_string(parser, &ignored) && json_take(parser, ':');
+                }
+                if (ok) ok = json_skip_value(parser, nesting + 1U);
+                json_skip_space(parser);
+                if (!ok || parser->position >= parser->length) break;
+                if (parser->data[parser->position] == close) {
+                    ++parser->position;
+                    break;
+                }
+                if (parser->data[parser->position++] != ',') {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+    } else {
+        const size_t start = parser->position;
+        while (parser->position < parser->length &&
+               !isspace(parser->data[parser->position]) &&
+               parser->data[parser->position] != ',' &&
+               parser->data[parser->position] != '}' &&
+               parser->data[parser->position] != ']') ++parser->position;
+        ok = parser->position != start;
+    }
+    buffer_clear(&ignored);
+    if (!ok) json_fail(parser, "invalid JSON value");
+    return ok;
+}
+
+static bool json_read_depth(JsonParser *parser, size_t *out) {
+    size_t value = 0U;
+    size_t start;
+    json_skip_space(parser);
+    start = parser->position;
+    while (parser->position < parser->length &&
+           isdigit(parser->data[parser->position]) != 0) {
+        const unsigned digit = (unsigned)(parser->data[parser->position++] - '0');
+        if (value > (SIZE_MAX - digit) / 10U) {
+            json_fail(parser, "JSON depth overflow");
+            return false;
+        }
+        value = value * 10U + digit;
+    }
+    if (parser->position == start || value > PAGE2PDF_MAX_NESTING) {
+        json_fail(parser, "invalid JSON depth");
+        return false;
+    }
+    *out = value;
+    return true;
+}
+
+static bool compile_event_record(Slice line, Renderer *renderer, char *error,
+                                 size_t error_size) {
+    JsonParser parser = {line.data, line.length, 0U, {0}};
+    Buffer key = {0}, kind = {0}, tag = {0}, name = {0}, value = {0};
+    bool have_kind = false, have_tag = false, have_name = false, have_value = false;
+    bool have_depth = false, ok = true;
+    size_t depth = 0U;
+    char identifier[PAGE2PDF_MAX_TAG_BYTES + 1U];
+    if (!json_take(&parser, '{')) ok = false;
+    while (ok) {
+        json_skip_space(&parser);
+        if (parser.position >= parser.length) { json_fail(&parser, "unterminated JSON object"); break; }
+        if (parser.data[parser.position] == '}') { ++parser.position; break; }
+        if (!json_read_string(&parser, &key) || !json_take(&parser, ':')) { ok = false; break; }
+        if (buffer_equals(&key, "kind")) { ok = json_read_string(&parser, &kind); have_kind = ok; }
+        else if (buffer_equals(&key, "tag")) { ok = json_read_string(&parser, &tag); have_tag = ok; }
+        else if (buffer_equals(&key, "name")) { ok = json_read_string(&parser, &name); have_name = ok; }
+        else if (buffer_equals(&key, "value")) { ok = json_read_string(&parser, &value); have_value = ok; }
+        else if (buffer_equals(&key, "depth")) { ok = json_read_depth(&parser, &depth); have_depth = ok; }
+        else ok = json_skip_value(&parser, 0U);
+        json_skip_space(&parser);
+        if (!ok || parser.position >= parser.length) break;
+        if (parser.data[parser.position] == '}') { ++parser.position; break; }
+        if (parser.data[parser.position++] != ',') { json_fail(&parser, "expected JSON object separator"); ok = false; break; }
+    }
+    json_skip_space(&parser);
+    if (ok && parser.position != parser.length) { json_fail(&parser, "trailing JSON data"); ok = false; }
+    if (ok && (!have_kind || !have_tag || !have_name || !have_value || !have_depth)) {
+        json_fail(&parser, "ProwseEvent record is missing a required field");
+        ok = false;
+    }
+    if (ok && buffer_equals(&kind, "start")) {
+        ok = copy_identifier((Slice){tag.data, tag.length}, identifier, sizeof(identifier)) &&
+             renderer_start(renderer, identifier, depth);
+    } else if (ok && buffer_equals(&kind, "attribute")) {
+        ok = copy_identifier((Slice){name.data, name.length}, identifier, sizeof(identifier)) &&
+             renderer_attribute(renderer, identifier, value.data, value.length, depth);
+    } else if (ok && buffer_equals(&kind, "text")) {
+        ok = copy_identifier((Slice){tag.data, tag.length}, identifier, sizeof(identifier)) &&
+             renderer_text(renderer, value.data, value.length, depth, identifier);
+    } else if (ok && buffer_equals(&kind, "end")) {
+        ok = copy_identifier((Slice){tag.data, tag.length}, identifier, sizeof(identifier)) &&
+             renderer_end(renderer, identifier, depth);
+    } else if (ok) {
+        json_fail(&parser, "unknown ProwseEvent kind");
+        ok = false;
+    }
+    if (!ok) snprintf(error, error_size, "%s", parser.error[0] == '\0' ?
+                      "invalid ProwseEvent record" : parser.error);
+    buffer_clear(&key); buffer_clear(&kind); buffer_clear(&tag); buffer_clear(&name); buffer_clear(&value);
+    return ok;
+}
+
+static bool compile_events(const Buffer *input, Renderer *renderer, char *error,
+                           size_t error_size) {
+    size_t position = 0U;
+    size_t record = 0U;
+    if (input->length >= 3U && input->data[0] == 0xefU && input->data[1] == 0xbbU &&
+        input->data[2] == 0xbfU) position = 3U;
+    while (position < input->length) {
+        size_t end = position;
+        Slice line;
+        while (end < input->length && input->data[end] != '\n') ++end;
+        line.data = input->data + position;
+        line.length = end - position;
+        while (line.length != 0U &&
+               (line.data[line.length - 1U] == '\r' || line.data[line.length - 1U] == ' ' ||
+                line.data[line.length - 1U] == '\t')) --line.length;
+        while (line.length != 0U && (line.data[0] == ' ' || line.data[0] == '\t')) {
+            ++line.data; --line.length;
+        }
+        if (line.length != 0U) {
+            ++record;
+            if (!compile_event_record(line, renderer, error, error_size)) {
+                char detail[192];
+                snprintf(detail, sizeof(detail), "%s", error);
+                snprintf(error, error_size, "invalid ProwseEvent record %zu: %s", record, detail);
+                return false;
+            }
+            if (renderer->error != HPDF_OK) {
+                snprintf(error, error_size, "libHaru failed while rendering event %zu", record);
+                return false;
+            }
+        }
+        position = end < input->length ? end + 1U : end;
+    }
+    if (record == 0U || renderer->frame_count != 0U) {
+        snprintf(error, error_size, "incomplete ProwseEvent stream");
         return false;
     }
     return true;
@@ -445,6 +757,9 @@ static InputFormat parse_format(const char *value) {
     if (strcmp(value, "iml") == 0) {
         return INPUT_IML;
     }
+    if (strcmp(value, "events") == 0) {
+        return INPUT_EVENTS;
+    }
     if (strcmp(value, "vtd") == 0) {
         return INPUT_VTD;
     }
@@ -468,7 +783,7 @@ int main(int argc, char **argv) {
         }
         if (strcmp(argv[i], "--format") == 0) {
             if (++i >= argc || (format = parse_format(argv[i])) == (InputFormat)-1) {
-                fprintf(stderr, "page2pdf: --format requires auto, iml, or vtd\n");
+                fprintf(stderr, "page2pdf: --format requires auto, events, iml, or vtd\n");
                 return EXIT_FAILURE;
             }
             continue;
@@ -491,8 +806,12 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
     if (format == INPUT_AUTO) {
-        format = input.length >= 5U && memcmp(input.data, "PVTD1", 5U) == 0 ?
-                 INPUT_VTD : INPUT_IML;
+        size_t first = 0U;
+        if (input.length >= 3U && input.data[0] == 0xefU && input.data[1] == 0xbbU &&
+            input.data[2] == 0xbfU) first = 3U;
+        while (first < input.length && isspace(input.data[first]) != 0) ++first;
+        format = input.length >= 5U && memcmp(input.data, "PVTD1", 5U) == 0 ? INPUT_VTD :
+                 (first < input.length && input.data[first] == '{' ? INPUT_EVENTS : INPUT_IML);
     }
     if (!renderer_init(&renderer)) {
         fprintf(stderr, "page2pdf: unable to initialize libHaru (0x%04X, %u)\n",
@@ -502,7 +821,8 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
     ok = format == INPUT_VTD ? compile_vtd(&input, &renderer, error, sizeof(error)) :
-                               compile_iml(&input, &renderer, error, sizeof(error));
+         format == INPUT_EVENTS ? compile_events(&input, &renderer, error, sizeof(error)) :
+                                compile_iml(&input, &renderer, error, sizeof(error));
     if (ok && !renderer_draw(&renderer)) {
         snprintf(error, sizeof(error), "unable to lay out or draw the document");
         ok = false;

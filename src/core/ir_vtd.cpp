@@ -62,7 +62,7 @@ void write_token(std::vector<std::uint8_t>& out, std::uint8_t type,
 }  // namespace
 
 std::vector<std::uint8_t> emit_prowse_vtd(const Document& document) {
-    const auto events = emit_prowse_xas(document);
+    const auto events = emit_prowse_events(document);
     std::vector<std::uint8_t> binary;
     binary.insert(binary.end(), std::begin(kProwseVtdMagic),
                   std::end(kProwseVtdMagic));
@@ -86,7 +86,7 @@ std::vector<std::uint8_t> emit_prowse_vtd(const Document& document) {
     return binary;
 }
 
-std::vector<ProwseXasEvent> decode_prowse_vtd(std::span<const std::uint8_t> bytes) {
+ProwseEventStream decode_prowse_vtd(std::span<const std::uint8_t> bytes) {
     if (bytes.size() < 9 || bytes[0] != 'P' || bytes[1] != 'V' ||
         bytes[2] != 'T' || bytes[3] != 'D' || bytes[4] != '1') {
         return {};
@@ -97,7 +97,7 @@ std::vector<ProwseXasEvent> decode_prowse_vtd(std::span<const std::uint8_t> byte
         return {};
     }
 
-    std::vector<ProwseXasEvent> events;
+    ProwseEventStream events;
     // Bound the reservation by the input size: every token occupies at least
     // 13 bytes (type + depth + three empty strings), so a corrupt count can
     // never force a huge allocation from a small input.
@@ -108,7 +108,7 @@ std::vector<ProwseXasEvent> decode_prowse_vtd(std::span<const std::uint8_t> byte
         }
         const std::uint8_t type = bytes[pos++];
         std::uint32_t depth = 0;
-        ProwseXasEvent event;
+        ProwseEvent event;
         if (!read_u32(bytes, pos, depth) ||
             !read_vtd_string(bytes, pos, event.xpath) ||
             !read_vtd_string(bytes, pos, event.name) ||
@@ -144,7 +144,7 @@ std::vector<ProwseXasEvent> decode_prowse_vtd(std::span<const std::uint8_t> byte
         }
         events.push_back(std::move(event));
     }
-    return pos == bytes.size() ? events : std::vector<ProwseXasEvent>{};
+    return pos == bytes.size() ? events : ProwseEventStream{};
 }
 
 }  // namespace prowsetk

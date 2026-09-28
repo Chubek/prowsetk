@@ -561,3 +561,18 @@ TEST(ScriptPlatform, ExpandedSelectorsReachPageJavascript) {
         </script>)HTML", "https://example.test/");
     ASSERT_NE(session->document()->query_selector("[data-selector-result=passed]"), nullptr);
 }
+
+TEST(ScriptPlatform, HtmlTokenizerAndFragmentRecoveryReachJavascript) {
+    Browser browser;
+    auto session = browser.create_session();
+    session->load_html(R"HTML(<html><body><div id="mount"></div><script>
+        var raw = '</scripture>';
+        var mount = document.getElementById('mount');
+        mount.innerHTML = '<ul><li><b>&#128;<li>two</ul><input NAME="first" name="last">';
+        if (raw === '</scripture>' && mount.querySelectorAll('ul > li').length === 2 &&
+            mount.querySelector('li').textContent === '\u20ac' &&
+            mount.querySelector('input').getAttribute('name') === 'first')
+            mount.setAttribute('data-result', 'passed');
+        </script></body></html>)HTML", "https://example.test/");
+    ASSERT_NE(session->document()->query_selector("#mount[data-result=passed]"), nullptr);
+}

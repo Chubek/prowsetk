@@ -85,6 +85,23 @@ TEST(Page2Pdf, RejectsMalformedVtd) {
     EXPECT_FALSE(std::filesystem::exists(output));
 }
 
+TEST(Page2Pdf, RejectsMalformedEventStream) {
+    const std::filesystem::path directory =
+        std::filesystem::path(TEST_BINARY_DIR) / "page2pdf";
+    std::filesystem::create_directories(directory);
+    const auto input = directory / "bad.events";
+    const auto output = directory / "bad-events.pdf";
+    write_text(input,
+               R"({"kind":"start","xpath":"/p[1]","tag":"p","name":"","value":"","depth":0}
+{"kind":"text","xpath":"/p[1]/text()[1]","tag":"p","name":"","value":"unterminated","depth":1}
+)");
+    std::filesystem::remove(output);
+    const std::string command = shell_quote(PAGE2PDF_BIN) + " --format events " +
+                                shell_quote(input) + " " + shell_quote(output);
+    EXPECT_NE(std::system(command.c_str()), 0);
+    EXPECT_FALSE(std::filesystem::exists(output));
+}
+
 TEST(Page2Pdf, AcceptsVtdFromStandardInput) {
     const std::filesystem::path directory =
         std::filesystem::path(TEST_BINARY_DIR) / "page2pdf";
@@ -163,13 +180,13 @@ TEST(Page2Pdf, SkipsCorruptPngInsteadOfCrashing) {
 }
 
 #ifdef PROWSETK_BIN
-TEST(Page2Pdf, CompilesCliEventStreamWithAutoDetection) {
+TEST(Page2Pdf, CompilesCliIrStreamsWithAutoDetection) {
     const auto directory = std::filesystem::path(TEST_BINARY_DIR) / "page2pdf-cli";
     std::filesystem::create_directories(directory);
     const std::string html =
         "<html><body><p>Regular <b>Bold</b> <code>Monospace</code></p>"
         "<p>Second paragraph</p></body></html>";
-    for (const std::string format : {"vtd", "iml"}) {
+    for (const std::string format : {"events", "vtd", "iml"}) {
         const auto output = directory / (format + ".pdf");
         std::filesystem::remove(output);
         const std::string command = shell_quote(PROWSETK_BIN) +

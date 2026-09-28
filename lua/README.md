@@ -6,8 +6,9 @@ ProwseTk exposes two Lua modules from `LuaRuntime`:
   userdata.
 - `lprowsext` provides XPath helpers, endpoint extraction, document
   processors, extractors, and managed WASM module handles.
-- `lprowseir` emits built-in IR formats (ProwseXAS/ProwseDOM/ProwseVTD/
-  ProwseIML) and provides XPath-driven walkers/listeners. Named IRs resolve
+- `lprowseir` emits the canonical ProwseEvent stream (`emit_events`; legacy
+  `emit_xas` and `emit_dom` remain projections), plus ProwseVTD/ProwseIML.
+  It provides XPath-driven walkers/listeners. Named IRs resolve
   through the plugin-extensible `IrEmitterRegistry` (`emit`, `emitters`);
   `dom.walk` and `xas:AddListener` fail fast on invalid XPath and propagate
   callback errors.

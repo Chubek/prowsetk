@@ -67,9 +67,9 @@ std::vector<ProwseXasEvent> filter_prowse_xas(const Document& document,
     // so filtering costs O(events * depth) hash lookups instead of
     // O(events * selected).
     std::vector<ProwseXasEvent> filtered;
-    filtered.reserve(ir.xas_events.size());
+    filtered.reserve(ir.events.size());
     std::string scope;
-    for (const auto& event : ir.xas_events) {
+    for (const auto& event : ir.events) {
         scope = event.xpath;
         while (true) {
             if (selected_paths.find(scope) != selected_paths.end()) {

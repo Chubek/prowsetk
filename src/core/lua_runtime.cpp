@@ -402,7 +402,7 @@ void push_ir_dom_node(lua_State* L, const ProwseDomNode& node) {
 }
 
 void push_ir_xas_event(lua_State* L, const ProwseXasEvent& event) {
-    lua_createtable(L, 0, 6);
+    lua_createtable(L, 0, 8);
     lua_pushlstring(L, event.kind.c_str(), event.kind.size());
     lua_setfield(L, -2, "kind");
     lua_pushlstring(L, event.xpath.c_str(), event.xpath.size());
@@ -415,6 +415,22 @@ void push_ir_xas_event(lua_State* L, const ProwseXasEvent& event) {
     lua_setfield(L, -2, "value");
     lua_pushinteger(L, static_cast<lua_Integer>(event.depth));
     lua_setfield(L, -2, "depth");
+    if (event.kind == "start") {
+        lua_pushlstring(L, event.subtree_text.c_str(), event.subtree_text.size());
+        lua_setfield(L, -2, "text");
+        lua_createtable(L, static_cast<int>(event.attributes.size()), 0);
+        for (std::size_t i = 0; i < event.attributes.size(); ++i) {
+            lua_createtable(L, 0, 2);
+            lua_pushlstring(L, event.attributes[i].name.c_str(),
+                            event.attributes[i].name.size());
+            lua_setfield(L, -2, "name");
+            lua_pushlstring(L, event.attributes[i].value.c_str(),
+                            event.attributes[i].value.size());
+            lua_setfield(L, -2, "value");
+            lua_rawseti(L, -2, static_cast<int>(i) + 1);
+        }
+        lua_setfield(L, -2, "attributes");
+    }
 }
 
 std::shared_ptr<Document> read_document_argument(lua_State* L, int* index_out) {
@@ -457,13 +473,17 @@ int lprowseir_emit_xas(lua_State* L) {
         if (document == nullptr) {
             return 1;
         }
-        const auto events = emit_prowse_xas(*document);
+        const auto events = emit_prowse_events(*document);
         for (std::size_t i = 0; i < events.size(); ++i) {
             push_ir_xas_event(L, events[i]);
             lua_rawseti(L, -2, static_cast<int>(i) + 1);
         }
         return 1;
     });
+}
+
+int lprowseir_emit_events(lua_State* L) {
+    return lprowseir_emit_xas(L);
 }
 
 int lprowseir_emit_vtd(lua_State* L) {
@@ -1987,6 +2007,8 @@ LuaRuntime::LuaRuntime() : impl_(std::make_unique<Impl>()) {
         lua_setglobal(impl_->state, "lprowsext");
 
         lua_newtable(impl_->state);  // lprowseir
+        lua_pushcfunction(impl_->state, lprowseir_emit_events);
+        lua_setfield(impl_->state, -2, "emit_events");
         lua_pushcfunction(impl_->state, lprowseir_emit_dom);
         lua_setfield(impl_->state, -2, "emit_dom");
         lua_pushcfunction(impl_->state, lprowseir_emit_xas);

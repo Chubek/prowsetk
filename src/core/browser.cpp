@@ -754,10 +754,13 @@ void Session::navigate(std::string_view url) {
 
 void Session::install_document(std::string_view html, std::string url,
                                std::string base_url) {
+    // Parse before changing session state: a resource-limit failure must leave
+    // the installed document, URL, and script observations usable.
+    auto next_document = parse_html(html, std::move(url), std::move(base_url));
     page_script_requests_.clear();
     page_script_texts_.clear();
     std::string previous_url = std::move(current_url_);
-    document_ = parse_html(html, std::move(url), std::move(base_url));
+    document_ = std::move(next_document);
     current_url_ = document_->url();
     if (script_host_ != nullptr) {
         script_host_->install(document_, document_->base_url());
@@ -943,7 +946,10 @@ bool Session::click_element(std::shared_ptr<Element> element) {
     const std::string script =
         "__prowsetkClick(" + std::to_string(handle) + ");";
     const ScriptResult result = javascript_->evaluate(script, ScriptOptions{});
-    return result.ok && result.value == "true";
+    if (!result.ok || result.value != "true") return false;
+    run_script_lifecycle();
+    follow_script_navigations();
+    return true;
 }
 
 bool Session::type_element(std::shared_ptr<Element> element,
@@ -983,7 +989,10 @@ bool Session::type_element(std::shared_ptr<Element> element,
     const std::string script =
         "__prowsetkType(" + std::to_string(handle) + ",\"" + escaped + "\");";
     const ScriptResult result = javascript_->evaluate(script, ScriptOptions{});
-    return result.ok && result.value == "true";
+    if (!result.ok || result.value != "true") return false;
+    run_script_lifecycle();
+    follow_script_navigations();
+    return true;
 }
 
 CookieJar& Session::cookies() noexcept {
