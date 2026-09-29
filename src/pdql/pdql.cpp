@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -10,6 +11,7 @@ namespace prowsetk::pdql {
 namespace {
 std::string trim(std::string s){ auto a=s.find_first_not_of(" \t\r\n"); if(a==s.npos)return {}; auto z=s.find_last_not_of(" \t\r\n"); return s.substr(a,z-a+1); }
 std::string lower(std::string s){ for(char& c:s)c=(char)std::tolower((unsigned char)c); return s; }
+std::string entities(std::string s){ const std::pair<const char*,const char*> t[]={{"&amp;","&"},{"&lt;","<"},{"&gt;",">"},{"&quot;","\""},{"&apos;","'"}}; for(auto [a,b]:t){ size_t p=0; while((p=s.find(a,p))!=std::string::npos){ s.replace(p,std::strlen(a),b); p+=std::strlen(b); }} return s; }
 std::string esc(std::string_view s){std::string o;for(char c:s){if(c=='&')o+="&amp;";else if(c=='<')o+="&lt;";else if(c=='>')o+="&gt;";else if(c=='\"')o+="&quot;";else o+=c;}return o;}
 std::string json(std::string_view s){std::string o="\"";for(char c:s){if(c=='\\'||c=='\"')o+='\\';if(c=='\n')o+="\\n";else if(c=='\r')o+="\\r";else o+=c;}return o+'"';}
 void descendants(const Node& n,std::vector<const Node*>& out){for(auto& c:n.children){out.push_back(c.get());descendants(*c,out);}}
@@ -18,11 +20,11 @@ bool glob(std::string_view pattern,std::string_view value){size_t p=0,v=0,star=s
 }
 Document Document::parse(std::string_view html){Document d;d.root_=std::make_unique<Node>();d.root_->tag="#document";std::vector<Node*> stack{d.root_.get()};size_t i=0;while(i<html.size()){
  if(html.substr(i,4)=="<!--"){auto e=html.find("-->",i+4);i=e==html.npos?html.size():e+3;continue;}
- if(html[i]!='<'){size_t e=html.find('<',i);if(e==html.npos)e=html.size();stack.back()->text+=std::string(html.substr(i,e-i));i=e;continue;}
+ if(html[i]!='<'){size_t e=html.find('<',i);if(e==html.npos)e=html.size();stack.back()->text+=entities(std::string(html.substr(i,e-i)));i=e;continue;}
  if(i+1<html.size()&&html[i+1]=='!'){auto e=html.find('>',i+2);i=e==html.npos?html.size():e+1;continue;}
  bool closing=i+1<html.size()&&html[i+1]=='/';size_t a=i+(closing?2:1),e=html.find('>',a);if(e==html.npos){stack.back()->text+=html.substr(i);break;}std::string inside=trim(std::string(html.substr(a,e-a)));i=e+1;if(inside.empty())continue;
  if(closing){std::string tag=lower(inside.substr(0,inside.find_first_of(" \t/")));for(size_t k=stack.size();k>1;--k)if(stack[k-1]->tag==tag){stack.resize(k-1);break;}continue;}
- bool self=!inside.empty()&&inside.back()=='/';if(self)inside.pop_back();size_t q=inside.find_first_of(" \t\r\n");std::string tag=lower(inside.substr(0,q));if(tag.empty())continue;auto node=std::make_unique<Node>();node->tag=tag;node->parent=stack.back();std::string rest=q==inside.npos?"":inside.substr(q+1);size_t j=0;while(j<rest.size()){while(j<rest.size()&&std::isspace((unsigned char)rest[j]))++j;if(j==rest.size())break;size_t k=j;while(k<rest.size()&&!std::isspace((unsigned char)rest[k])&&rest[k]!='=')++k;std::string key=lower(rest.substr(j,k-j));j=k;while(j<rest.size()&&std::isspace((unsigned char)rest[j]))++j;std::string val="";if(j<rest.size()&&rest[j]=='='){++j;while(j<rest.size()&&std::isspace((unsigned char)rest[j]))++j;if(j<rest.size()&&(rest[j]=='\''||rest[j]=='\"')){char quote=rest[j++];size_t v=j;while(j<rest.size()&&rest[j]!=quote)++j;val=rest.substr(v,j-v);if(j<rest.size())++j;}else{size_t v=j;while(j<rest.size()&&!std::isspace((unsigned char)rest[j]))++j;val=rest.substr(v,j-v);}}if(!key.empty())node->attributes[key]=val;}
+ bool self=!inside.empty()&&inside.back()=='/';if(self)inside.pop_back();size_t q=inside.find_first_of(" \t\r\n");std::string tag=lower(inside.substr(0,q));if(tag.empty())continue;auto node=std::make_unique<Node>();node->tag=tag;node->parent=stack.back();std::string rest=q==inside.npos?"":inside.substr(q+1);size_t j=0;while(j<rest.size()){while(j<rest.size()&&std::isspace((unsigned char)rest[j]))++j;if(j==rest.size())break;size_t k=j;while(k<rest.size()&&!std::isspace((unsigned char)rest[k])&&rest[k]!='=')++k;std::string key=lower(rest.substr(j,k-j));j=k;while(j<rest.size()&&std::isspace((unsigned char)rest[j]))++j;std::string val="";if(j<rest.size()&&rest[j]=='='){++j;while(j<rest.size()&&std::isspace((unsigned char)rest[j]))++j;if(j<rest.size()&&(rest[j]=='\''||rest[j]=='\"')){char quote=rest[j++];size_t v=j;while(j<rest.size()&&rest[j]!=quote)++j;val=rest.substr(v,j-v);if(j<rest.size())++j;}else{size_t v=j;while(j<rest.size()&&!std::isspace((unsigned char)rest[j]))++j;val=rest.substr(v,j-v);}}if(!key.empty()&&!node->attributes.contains(key))node->attributes[key]=entities(val);}
  Node* raw=node.get();stack.back()->children.push_back(std::move(node));if(!self&&tag!="br"&&tag!="img"&&tag!="hr"&&tag!="meta"&&tag!="input"&&tag!="link")stack.push_back(raw);
  }return d;}
 Query::Query(std::string_view src){std::string s=trim(std::string(src));if(s.empty())throw std::invalid_argument("empty PDQL query");auto f=lower(s).find(" from ");if(f==std::string::npos){selector_=s;fields_="text";return;}auto first=lower(s).find("select ");fields_=trim(s.substr(first==0?7:0,f-(first==0?7:0)));std::string tail=trim(s.substr(f+6));auto w=lower(tail).find(" where ");if(w!=std::string::npos){where_=trim(tail.substr(w+7));tail=trim(tail.substr(0,w));}selector_=tail;if(selector_.empty())throw std::invalid_argument("missing selector");}
@@ -37,7 +39,6 @@ std::string serialize(const std::vector<Row>& rows,Format f){std::ostringstream 
 }
 struct pt_pdql_document{prowsetk::pdql::Document value;}; struct pt_pdql_query{prowsetk::pdql::Query* value;};struct pt_pdql_result{std::vector<prowsetk::pdql::Row> value;};
 namespace {void seterr(char**e,const char*m){if(e){*e=(char*)std::malloc(std::strlen(m)+1);if(*e)std::strcpy(*e,m);}}}
-#include <cstring>
 extern "C" {
 pt_pdql_document*pt_pdql_document_create(const char*h,char**e){if(e)*e=nullptr;try{if(!h)throw std::invalid_argument("null HTML");auto*d=new pt_pdql_document;d->value=prowsetk::pdql::Document::parse(h);return d;}catch(const std::exception&x){seterr(e,x.what());return nullptr;}}
 void pt_pdql_document_free(pt_pdql_document*d){delete d;}
@@ -46,7 +47,7 @@ size_t pt_pdql_node_child_count(const pt_pdql_node*n){return n?((const prowsetk:
 pt_pdql_node*pt_pdql_node_child(const pt_pdql_node*n,size_t i){if(!n)return nullptr;auto&c=((const prowsetk::pdql::Node*)n)->children;return i<c.size()?(pt_pdql_node*)c[i].get():nullptr;}
 const char*pt_pdql_node_tag(const pt_pdql_node*n){return n?((const prowsetk::pdql::Node*)n)->tag.c_str():nullptr;}
 const char*pt_pdql_node_text(const pt_pdql_node*n){return n?((const prowsetk::pdql::Node*)n)->text.c_str():nullptr;}
-const char*pt_pdql_node_attribute(const pt_pdql_node*n,const char*k){if(!n||!k)return nullptr;auto&i=((const prowsetk::pdql::Node*)n)->attributes;auto x=i.find(k);return x==i.end()?nullptr:x->second.c_str();}
+const char*pt_pdql_node_attribute(const pt_pdql_node*n,const char*k){if(!n||!k)return nullptr;auto&i=((const prowsetk::pdql::Node*)n)->attributes;std::string key(k); for(char& c:key)c=(char)std::tolower((unsigned char)c); auto x=i.find(key);return x==i.end()?nullptr:x->second.c_str();}
 pt_pdql_query*pt_pdql_query_compile(const char*s,char**e){if(e)*e=nullptr;try{if(!s)throw std::invalid_argument("null query");return new pt_pdql_query{new prowsetk::pdql::Query(s)};}catch(const std::exception&x){seterr(e,x.what());return nullptr;}}
 void pt_pdql_query_free(pt_pdql_query*q){if(q){delete q->value;delete q;}}
 pt_pdql_result*pt_pdql_query_execute(const pt_pdql_query*q,const pt_pdql_document*d,char**e){if(e)*e=nullptr;try{if(!q||!d)throw std::invalid_argument("null query or document");return new pt_pdql_result{q->value->execute(d->value)};}catch(const std::exception&x){seterr(e,x.what());return nullptr;}}
