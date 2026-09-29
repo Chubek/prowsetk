@@ -1,5 +1,6 @@
 set(PROWSETK_CORE_SOURCES
     prowsetk.cpp
+    pdql/pdql.cpp
     core/error.cpp
     core/capability.cpp
     core/event.cpp

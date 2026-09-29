@@ -1,4 +1,4 @@
-# AGENTS.md — ProwseTk Implementation Guide
+z AGENTS.md — ProwseTk Implementation Guide
 
 This file is derived from `README.md` and is binding for every agent that
 implements, extends, or reviews ProwseTk. Read `README.md` first; it is the
@@ -704,3 +704,371 @@ from overwriting each other's Python modules in the source tree.
 Encrypted-storage tests retain production-cost key derivation and use a bounded
 300-second timeout to accommodate sanitizer instrumentation; other unit tests
 retain the default 60-second bound.
+
+## DOM and DOM Maniplators
+
+This is an addition to ProwseTk that will allow further uses of it. What you will add 
+to ProwseTk's core engine is a *queryable DOM*. At the moment, the DOM is weak. What
+you will add is a DOM that can be queried, manipulated, and serialized. 
+
+In a browser, the DOM is part of the rendering engine. At the moment, ProwseTk uses 
+event-based IRs which handle the task of rendering to middlewares. I want you to
+create a DOM which is not about rendering, rather, it's about querying the page via
+XPath, and a query language knowin as "PDQL" or "ProwseTk DOM Query Language".
+We provide the Lua drivers with `lpdql` library, which allows Lua drivers to
+query the DOM and serialize it. We also add a command in the CLI for making
+a PDQL query. **We also expose PDQL in the ProwseTk C/C++ API**.
+
+PDQL is a declarative language with basic computational facilities. Also, 
+PDQL has the feature to let loose "marionattes" into the DOM, and serialize
+the result of the query to JSON, YAML, XML and S-Expressions. PDQL can be mixed
+with XPath. We can also use regular expressions in PDQL (regex using `third_party/re2`).
+Another thing to note is that, HTML tags in PDQL are delimited by angle brackets, e.g.
+`<h1>`. Glob patterns apply, e.g. `<h*>` means all heading tags. Glob patterns
+can be used all over PDQL.
+
+The architecture of it is depitcted below:
+```
+                      +-----------------------------------+
+                      |      HTML / Event IR Source       |
+                      +-----------------+-----------------+
+                                        | (Parse / Ingest)
+                                        v
+                      +-----------------------------------+
+                      |      ProwseTk Queryable DOM       |
+                      |  (Tree, Attributes, XPath Index)  |
+                      +-----------------+-----------------+
+                                        |
+                 +----------------------+----------------------+
+                 |                                             |
+                 v                                             v
+       +--------------------+                        +--------------------+
+       |   PDQL Engine      |                        |  RE2 & XPath       |
+       |  (AST, Marionette  | <--------------------> |  Engines           |
+       |   Traversals)      |                        +--------------------+
+       +---------+----------+
+                 |
+     +-----------+-----------+-------------------+
+     |                       |                   |
+     v                       v                   v
++-------------+      +---------------+   +---------------+
+| C/C++ API   |      |  Lua (lpdql)  |   |  CLI Driver   |
+| prowsetk.h  |      |   Bindings    |   | prowsetk-cli  |
++-------------+      +---------------+   +---------------+
+     |
+     v Serializers
++-------------------------------------------------------+
+|        JSON   |   YAML   |   XML   |   S-Expressions  |
++-------------------------------------------------------+
+```
+
+## 1. PDQL Language Specification & Syntax
+
+PDQL is a declarative query language built around DOM structural patterns, tag globs (`<h*>`), XPath mixins (`xpath(...)`), regular expressions (`re2`), and **Marionettes** (autonomous micro-traversals that crawl child contexts, perform local computations, and emit projection maps).
+
+### Key Features
+1. **Delimited Tags & Globs:** `<h*>`, `<div*>` match element nodes matching standard glob patterns.
+2. **XPath Integration:** `xpath("//main//article")` (or `$(//main//article)`) or inline predicates `[@data-type="post"]`. **XPath is provided by `third_party/pugixml`**.
+3. **RE2 Integration:** `rx"pattern"` can match attributes, inner text, or node content.
+4. **Basic Computational Facilities:** `count()`, `sum()`, `avg()`, string transformations, and boolean condition guards.
+5. **Marionettes:** Sub-query walkers declared with `marionette { ... }` that walk nested subtrees and extract structured records.
+6. **Serialization Targets:** Output targets specified with `serialize as [json | yaml | xml | sexpr]`.
+
+---
+
+## 2. PDQL Syntax Examples
+
+### Example 1: Basic Tag Globbing with RE2 Text Filter
+Extract all heading levels (`<h1>` through `<h6>`) where the text mentions "Engine" or "DOM", outputting as JSON:
+
+```pdql
+query HeadingsQuery {
+    from <h*>
+    where text matches rx"^(?i).*(engine|dom).*"
+    select {
+        tag: node.tag_name,
+        level: node.tag_name.replace("h", ""),
+        title: node.text.trim()
+    }
+    serialize as json
+}
+```
+
+---
+
+### Example 2: Mixing PDQL with XPath and Computations
+Select cards inside a catalog, perform arithmetic on scraped values, and output as YAML:
+
+```pdql
+query ProductCatalog {
+    from xpath("//div[contains(@class, 'product-card')]")
+    where number(node.attr("data-price")) > 100
+    select {
+        sku: node.attr("data-sku"),
+        title: find(<h3*>) -> first().text,
+        base_price: number(node.attr("data-price")),
+        tax: number(node.attr("data-price")) * 0.09,
+        final_price: number(node.attr("data-price")) * 1.09
+    }
+    serialize as yaml
+}
+```
+
+---
+
+### Example 3: Deep Traversal Using Marionettes
+A Marionette walks deep into an article node, recursively collects comments, author metadata, and linked resources, serializing to S-Expressions:
+
+```pdql
+query ForumThread {
+    from <article*>
+    where node.attr("id") matches rx"^thread-[0-9]+"
+    select {
+        thread_id: node.attr("id"),
+        header: find(<h1*>) -> text,
+        
+        -- Marionette crawling thread comments
+        comments: marionette {
+            crawl <div*> where class matches rx".*comment-box.*"
+            select {
+                author: find(<span* class="author">) -> text,
+                karma: number(find(<span* class="karma">) -> text.fallback("0")),
+                body: find(<p*>) -> text,
+                mentions: find(<a*>) -> filter(rx"^@\w+") -> collect(text)
+            }
+        },
+        
+        total_comments: count(comments)
+    }
+    serialize as sexpr
+}
+```
+
+**Corresponding S-Expression Output:**
+```lisp
+((thread_id "thread-4021")
+ (header "ProwseTk 2.0 Architectural Update")
+ (comments
+   (((author "alice") (karma 14) (body "Great approach.") (mentions ("@bob")))
+    ((author "bob") (karma 8) (body "XPath + RE2 is fast.") (mentions ()))))
+ (total_comments 2))
+```
+
+---
+
+## 3. C / C++ Engine Header (`include/prowsetk/pdql.h`)
+
+This exposes the queryable DOM, RE2 integration, PDQL parser/evaluator, and serialization formats to C and C++ consumers.
+
+```c
+#ifndef PROWSETK_PDQL_H
+#define PROWSETK_PDQL_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <stddef.h>
+#include <stdbool.h>
+
+/* Opaque Handles */
+typedef struct pt_dom_document pt_dom_document_t;
+typedef struct pt_dom_node     pt_dom_node_t;
+typedef struct pt_pdql_query   pt_pdql_query_t;
+typedef struct pt_pdql_result  pt_pdql_result_t;
+
+typedef enum {
+    PT_SERIALIZE_JSON = 0,
+    PT_SERIALIZE_YAML,
+    PT_SERIALIZE_XML,
+    PT_SERIALIZE_SEXPR
+} pt_serialize_format_t;
+
+/* --- DOM Construction & Querying --- */
+pt_dom_document_t* pt_dom_create_from_html(const char* html, size_t len);
+void               pt_dom_free(pt_dom_document_t* doc);
+
+/* Node manipulations */
+const char*        pt_dom_node_tag(const pt_dom_node_t* node);
+const char*        pt_dom_node_attr(const pt_dom_node_t* node, const char* attr_name);
+const char*        pt_dom_node_text(const pt_dom_node_t* node);
+pt_dom_node_t*     pt_dom_node_parent(const pt_dom_node_t* node);
+
+/* --- PDQL Engine --- */
+pt_pdql_query_t*   pt_pdql_compile(const char* pdql_src, char** error_out);
+void               pt_pdql_query_free(pt_pdql_query_t* query);
+
+pt_pdql_result_t*  pt_pdql_execute(pt_pdql_query_t* query, pt_dom_document_t* doc);
+void               pt_pdql_result_free(pt_pdql_result_t* res);
+
+/* --- Serialization --- */
+char*              pt_pdql_serialize(pt_pdql_result_t* res, pt_serialize_format_t fmt);
+void               pt_pdql_str_free(char* s);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* PROWSETK_PDQL_H */
+```
+
+---
+
+## 4. Lua Driver Bindings (`lpdql`)
+
+Drivers written in Lua can query documents, manipulate node subtrees, and retrieve results directly as native Lua tables or formatted strings.
+
+### Lua C-Module Registration (`lpdql.c`)
+```c
+#include <lua.h>
+#include <lauxlib.h>
+#include "prowsetk/pdql.h"
+
+static int lpdql_query(lua_State* L) {
+    pt_dom_document_t** udoc = (pt_dom_document_t**)luaL_checkudata(L, 1, "ProwseTk.DOM");
+    const char* query_str = luaL_checkstring(L, 2);
+    const char* format_str = luaL_optstring(L, 3, "json");
+
+    char* err = NULL;
+    pt_pdql_query_t* q = pt_pdql_compile(query_str, &err);
+    if (!q) {
+        lua_pushnil(L);
+        lua_pushstring(L, err ? err : "PDQL parse error");
+        return 2;
+    }
+
+    pt_pdql_result_t* res = pt_pdql_execute(q, *udoc);
+    
+    pt_serialize_format_t fmt = PT_SERIALIZE_JSON;
+    if (strcmp(format_str, "yaml") == 0) fmt = PT_SERIALIZE_YAML;
+    else if (strcmp(format_str, "xml") == 0) fmt = PT_SERIALIZE_XML;
+    else if (strcmp(format_str, "sexpr") == 0) fmt = PT_SERIALIZE_SEXPR;
+
+    char* serialized = pt_pdql_serialize(res, fmt);
+    lua_pushstring(L, serialized);
+
+    pt_pdql_str_free(serialized);
+    pt_pdql_result_free(res);
+    pt_pdql_query_free(q);
+    return 1;
+}
+
+int luaopen_lpdql(lua_State* L) {
+    static const struct luaL_Reg lpdql_funcs[] = {
+        {"query", lpdql_query},
+        {NULL, NULL}
+    };
+    luaL_newlib(L, lpdql_funcs);
+    return 1;
+}
+```
+
+### Usage in Lua Driver Script:
+```lua
+local lpdql = require("lpdql")
+
+function handle_page_driver(dom)
+    local query = [[
+        query ScrapeArticles {
+            from <article*>
+            select {
+                title: find(<h1*>) -> text,
+                author: find(<span* class="author">) -> text,
+                link: node.attr("data-url")
+            }
+            serialize as json
+        }
+    ]]
+
+    local json_output, err = lpdql.query(dom, query, "json")
+    if err then
+        print("Driver PDQL Error: " .. err)
+        return
+    end
+
+    print("Scraped payload: " .. json_output)
+end
+```
+
+---
+
+## 5. CLI Command Implementation
+
+Adds a `pdql` sub-command to the ProwseTk CLI tool:
+
+```bash
+prowsetk pdql --query "query { from <h*> select { t: node.text } serialize as json }" --file page.html
+prowsetk pdql -q "from xpath('//table') select { rows: count(<tr*>) }" -s yaml -i page.html
+```
+
+### CLI Implementation (`src/cli/cmd_pdql.c`):
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "prowsetk/pdql.h"
+
+int cmd_pdql(int argc, char** argv) {
+    const char* file_path = NULL;
+    const char* query_src = NULL;
+    pt_serialize_format_t fmt = PT_SERIALIZE_JSON;
+
+    for (int i = 1; i < argc; i++) {
+        if ((strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--query") == 0) && i + 1 < argc) {
+            query_src = argv[++i];
+        } else if ((strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--file") == 0) && i + 1 < argc) {
+            file_path = argv[++i];
+        } else if ((strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--serialize") == 0) && i + 1 < argc) {
+            const char* s = argv[++i];
+            if (strcmp(s, "yaml") == 0) fmt = PT_SERIALIZE_YAML;
+            else if (strcmp(s, "xml") == 0) fmt = PT_SERIALIZE_XML;
+            else if (strcmp(s, "sexpr") == 0) fmt = PT_SERIALIZE_SEXPR;
+            else fmt = PT_SERIALIZE_JSON;
+        }
+    }
+
+    if (!file_path || !query_src) {
+        fprintf(stderr, "Usage: prowsetk pdql -i <html_file> -q <query> [-s json|yaml|xml|sexpr]\n");
+        return 1;
+    }
+
+    /* Read HTML file */
+    FILE* f = fopen(file_path, "rb");
+    if (!f) { perror("Failed to open input file"); return 1; }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char* buf = (char*)malloc(sz + 1);
+    fread(buf, 1, sz, f);
+    buf[sz] = '\0';
+    fclose(f);
+
+    /* Construct Queryable DOM */
+    pt_dom_document_t* doc = pt_dom_create_from_html(buf, sz);
+    free(buf);
+
+    /* Compile & Run PDQL */
+    char* err = NULL;
+    pt_pdql_query_t* q = pt_pdql_compile(query_src, &err);
+    if (!q) {
+        fprintf(stderr, "PDQL Compilation Error: %s\n", err ? err : "unknown");
+        pt_dom_free(doc);
+        return 1;
+    }
+
+    pt_pdql_result_t* res = pt_pdql_execute(q, doc);
+    char* output = pt_pdql_serialize(res, fmt);
+    printf("%s\n", output);
+
+    /* Cleanup */
+    pt_pdql_str_free(output);
+    pt_pdql_result_free(res);
+    pt_pdql_query_free(q);
+    pt_dom_free(doc);
+
+    return 0;
+}
+```
+
+---
+
