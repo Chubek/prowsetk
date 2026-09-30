@@ -2325,12 +2325,14 @@ retain the default 60-second bound.
 
 ### Prowse-TUI help and configuration
 
-`prowse-tui` includes a dedicated Unix-man-style help pager. `:help` opens the
-pager, `:help list` shows its topic index, `:help open PAGE` opens a topic, and
-`:help find REGEX` searches all topics. Within help, `/` searches the current
-page, `n` and `?` move through matches, cursor keys navigate links and `Esc`
-returns to the live page. The built-in topics cover navigation, commands,
-search, configuration, and extensions.
+`prowse-tui` includes a dedicated Termscript-friendly help pager. Help pages
+use the bounded `.tsh` format: headings begin with `#`, key hints use `@key`,
+and links use `[label](help:topic)`. `:help` opens the pager, `:help list`
+shows its topic index, `:help open PAGE` opens a topic, and `:help find REGEX`
+searches all topics. Within help, `/` searches the current page, `n` and `?`
+move through matches, cursor keys activate links, and `Esc` returns to the live
+page. The built-in topics cover navigation, commands, search, configuration,
+and extensions.
 
 `:config` opens the editable configuration view. It reads
 `$XDG_CONFIG_HOME/prowse/ProwseTUI.toml`, falling back to

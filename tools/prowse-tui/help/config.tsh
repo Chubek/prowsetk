@@ -1,0 +1,11 @@
+# Configuration
+The config view stages changes and writes ProwseTUI.toml atomically.
+
+## Commands
+@key :config             open the editor
+@key :config bind A KEY  change an action key
+@key :config proxy URL   set a host mediated proxy
+@key :config save        persist staged changes
+@key :config reload      discard staged changes
+
+@link Back to commands help:commands

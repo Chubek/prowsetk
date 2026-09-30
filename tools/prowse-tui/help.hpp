@@ -11,7 +11,10 @@ struct HelpLine {
     std::string target;
     std::size_t target_line = 0;
 };
-// A bounded, non-executing subset of the Unix man macro language.
+// A bounded, non-executing pager format: headings begin with #, key hints
+// with @key, and links use [label](help:topic).  Legacy man sources remain
+// accepted for installed help collections.
+std::vector<HelpLine> render_help(std::string_view source, std::size_t width);
 std::vector<HelpLine> render_man(std::string_view source, std::size_t width);
 std::map<std::string, std::string> bundled_help();
 class HelpPager {

@@ -1,0 +1,10 @@
+# Extensions
+Prowse-TUI keeps page scripting, Lua extensions, and native plugins separate.
+
+## Lua
+Lua extensions run through the owning session and inherit redaction and network policy.
+
+## Native plugins
+Native plugins use the versioned C ABI. They are loaded from the configuration view and activated on the next launch.
+
+@link Back to overview help:overview

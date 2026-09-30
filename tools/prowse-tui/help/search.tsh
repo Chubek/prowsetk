@@ -1,0 +1,10 @@
+# Search
+The help pager keeps navigation history and supports keyboard search.
+
+## Search keys
+@key /               search the current page
+@key n               next match
+@key ?               previous match
+@key :help find REGEX search all topics
+
+@link Return to overview help:overview

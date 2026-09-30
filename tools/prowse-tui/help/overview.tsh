@@ -1,0 +1,18 @@
+# Prowse-TUI
+Programmable, headless browsing from a keyboard driven terminal interface.
+
+## Navigation
+@key j / Down     move down
+@key k / Up       move up
+@key Space / b    page down / page up
+@key g / G        jump to top / bottom
+@key Enter / l    follow the selected link
+@key Esc / h      close the current view
+
+## Help
+- Commands help:commands
+- Search help:search
+- Configuration help:config
+- Extensions help:extensions
+
+@link Open commands help:commands

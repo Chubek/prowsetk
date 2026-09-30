@@ -62,6 +62,22 @@ std::vector<std::size_t> matches(const std::vector<HelpLine>& lines, std::string
     for (std::size_t i = 0; i < lines.size(); ++i) if (regex.matches(lines[i].text)) result.push_back(i);
     return result;
 }
+std::vector<HelpLine> render_markup(std::string_view source, std::size_t width) {
+    if (source.size() > 256 * 1024) throw std::runtime_error("Help page exceeds 256 KiB");
+    width = std::clamp<std::size_t>(width, 10, 500); std::vector<HelpLine> out; std::string paragraph;
+    auto flush = [&] { if (paragraph.empty()) return; std::istringstream words(paragraph); std::string word, line; while (words >> word) { if (!line.empty() && line.size()+1+word.size()>width) { out.push_back({line,{},0}); line.clear(); } if (!line.empty()) line += ' '; line += word; } if (!line.empty()) out.push_back({line,{},0}); paragraph.clear(); };
+    std::istringstream input{std::string(source)}; std::string line;
+    while (std::getline(input,line)) {
+        if (line.empty()) { flush(); if (!out.empty() && !out.back().text.empty()) out.push_back({}); continue; }
+        if (line.starts_with("#")) { flush(); auto n=line.find_first_not_of('#'); auto title=unescape(line.substr(n==std::string::npos?line.size():n)); out.push_back({title,"",0}); continue; }
+        if (line.starts_with("@key ")) { flush(); out.push_back({unescape(line.substr(5)),"",0}); continue; }
+        if (line.starts_with("@link ")) { flush(); auto split=line.find(' ' ,6); if(split!=std::string::npos){auto label=line.substr(6,split-6),target=line.substr(split+1);out.push_back({unescape(label),target,0});} continue; }
+        if (line.starts_with("- ")) { flush(); auto open=line.find('['), close=line.find("](",open); if(open!=std::string::npos&&close!=std::string::npos&&line.back()==')'){out.push_back({unescape(line.substr(open+1,close-open-1)),line.substr(close+2,line.size()-close-3),0});} else paragraph += line.substr(2); continue; }
+        if (!paragraph.empty()) paragraph += ' ';
+        paragraph += unescape(line);
+    }
+    flush(); if (out.size()>20000) throw std::runtime_error("Help layout exceeds line limit"); return out;
+}
 }
 std::map<std::string, std::string> bundled_help() {
     std::map<std::string, std::string> result;
@@ -121,6 +137,10 @@ std::vector<HelpLine> render_man(std::string_view source, std::size_t width) {
     if (out.size() > 20000) throw std::runtime_error("Help layout exceeds line limit");
     return out;
 }
+std::vector<HelpLine> render_help(std::string_view source, std::size_t width) {
+    if (source.find("@key ") != std::string_view::npos || source.find("@link ") != std::string_view::npos || source.starts_with("#")) return render_markup(source, width);
+    return render_man(source, width);
+}
 HelpPager::HelpPager(std::map<std::string, std::string> sources) : sources_(std::move(sources)) {
     if (sources_.size() > 128) throw std::runtime_error("Too many help pages");
     for (const auto& [name, source] : sources_) {
@@ -137,11 +157,11 @@ void HelpPager::show(View next) {
 }
 void HelpPager::layout(View& view) const {
     view.lines.clear();
-    if (!view.page.empty()) view.lines = render_man(sources_.at(view.page), width_);
+    if (!view.page.empty()) view.lines = render_help(sources_.at(view.page), width_);
     else if (!view.find_pattern.empty()) {
         Regex regex(view.find_pattern);
         for (const auto& [name, source] : sources_) {
-            auto lines = render_man(source, width_);
+            auto lines = render_help(source, width_);
             for (std::size_t i = 0; i < lines.size(); ++i) {
                 if (regex.matches(lines[i].text)) view.lines.push_back({name + ": " + lines[i].text, "help:" + name, i});
                 if (view.lines.size() >= 20000) throw std::runtime_error("Too many help results; narrow the regex");

@@ -29,7 +29,6 @@ git submodule add https://github.com/facebook/zstd.git		    third_party/zstd
 git submodule add https://github.com/jarro2783/cxxopts.git    	    third_party/cxxopts
 git submodule add https://github.com/libfuse/libfuse.git	    third_party/libfuse
 git submodule add https://github.com/hthetiot/Tokyo-Cabinet.git	    third_party/Tokyo-Cabinet
-git submodule add https://github.com/termbox/termbox2.git	    third_party/termbox2
 git submodule add https://github.com/libtom/libtomcrypt.git	    third_party/libtomcrypt
 git submodule add https://github.com/wjakob/nanobind.git	    third_party/nanobind
 git submodule add https://github.com/justmirror/libmnl.git	    third_party/libmnl

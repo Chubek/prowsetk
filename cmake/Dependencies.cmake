@@ -255,10 +255,42 @@ if(PROWSETK_ENABLE_HTML5 AND EXISTS "${PROJECT_SOURCE_DIR}/third_party/gumbo-par
     prowsetk_install_library(prowsetk_gumbo)
     set(PROWSETK_HAVE_GUMBO ON)
 endif()
-if(EXISTS "${PROJECT_SOURCE_DIR}/third_party/termbox2/termbox2.h")
-    add_library(prowsetk_termbox INTERFACE)
-    target_include_directories(prowsetk_termbox INTERFACE "${PROJECT_SOURCE_DIR}/third_party/termbox2")
-    add_library(ProwseTk::termbox ALIAS prowsetk_termbox)
+# Termlib is the terminal and Termscript substrate for prowse-tui.  The
+# upstream checkout is intentionally kept untouched; its standalone CMake
+# file assumes the original domlibs directory layout, so these small targets
+# list the stable public/core sources explicitly and generate its parser here.
+if(EXISTS "${PROJECT_SOURCE_DIR}/third_party/termlib/termlib.h")
+    set(_pwtk_termlib "${PROJECT_SOURCE_DIR}/third_party/termlib")
+    find_program(PROWSETK_TERMLIB_PERL perl REQUIRED)
+    set(_pwtk_termlib_parser "${CMAKE_CURRENT_BINARY_DIR}/termlib/termscript_parser.c")
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/termlib")
+    add_custom_command(
+        OUTPUT "${_pwtk_termlib_parser}"
+        COMMAND "${PROWSETK_TERMLIB_PERL}" "${_pwtk_termlib}/scripts/aurocks.pl"
+                --entrypoint ts_gram_parse "${_pwtk_termlib}/termscript/Termscript.g"
+                > "${_pwtk_termlib_parser}"
+        DEPENDS "${_pwtk_termlib}/scripts/aurocks.pl"
+                "${_pwtk_termlib}/termscript/Termscript.g"
+        VERBATIM)
+    add_library(prowsetk_termlib STATIC
+        "${_pwtk_termlib}/termlib.c"
+        "${_pwtk_termlib}/src/dt_util.c"
+        "${_pwtk_termlib}/src/dt_terminfo.c"
+        "${_pwtk_termlib}/src/dt_tiexpand.c"
+        "${_pwtk_termlib}/src/dt_tty.c")
+    target_include_directories(prowsetk_termlib PUBLIC "${_pwtk_termlib}")
+    target_include_directories(prowsetk_termlib PRIVATE "${_pwtk_termlib}/src")
+    target_link_libraries(prowsetk_termlib PUBLIC Threads::Threads)
+    add_library(ProwseTk::termlib ALIAS prowsetk_termlib)
+
+    add_library(prowsetk_termscript STATIC
+        "${_pwtk_termlib}/termscript/ts_runtime.c"
+        "${_pwtk_termlib_parser}")
+    target_include_directories(prowsetk_termscript PUBLIC
+        "${_pwtk_termlib}" "${_pwtk_termlib}/termscript")
+    target_link_libraries(prowsetk_termscript PUBLIC Threads::Threads)
+    add_library(ProwseTk::termscript ALIAS prowsetk_termscript)
+    set_source_files_properties("${_pwtk_termlib_parser}" PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
 # libmnl is an optional netlink helper for host networking diagnostics. It is
