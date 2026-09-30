@@ -260,3 +260,18 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/third_party/termbox2/termbox2.h")
     target_include_directories(prowsetk_termbox INTERFACE "${PROJECT_SOURCE_DIR}/third_party/termbox2")
     add_library(ProwseTk::termbox ALIAS prowsetk_termbox)
 endif()
+
+# libmnl is an optional netlink helper for host networking diagnostics. It is
+# intentionally not used for proxy transport; HTTP/SOCKS proxying stays in the
+# host-mediated NetworkClient and works without libmnl.
+if(EXISTS "${PROJECT_SOURCE_DIR}/third_party/libmnl/src/socket.c")
+    add_library(prowsetk_libmnl STATIC
+        "${PROJECT_SOURCE_DIR}/third_party/libmnl/src/socket.c"
+        "${PROJECT_SOURCE_DIR}/third_party/libmnl/src/nlmsg.c"
+        "${PROJECT_SOURCE_DIR}/third_party/libmnl/src/attr.c"
+        "${PROJECT_SOURCE_DIR}/third_party/libmnl/src/callback.c")
+    target_include_directories(prowsetk_libmnl PUBLIC
+        "${PROJECT_SOURCE_DIR}/third_party/libmnl/include"
+        "${PROJECT_SOURCE_DIR}/third_party/libmnl/src")
+    add_library(ProwseTk::mnl ALIAS prowsetk_libmnl)
+endif()

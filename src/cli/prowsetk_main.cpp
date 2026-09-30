@@ -55,6 +55,7 @@ struct Arguments {
     std::string driver;
     std::string config_path = "Prowse.toml";
     std::string user_agent;
+    std::string proxy;
     std::string cookies_json_path;
     std::vector<std::pair<std::string, std::string>> run_args;
 };
@@ -101,6 +102,8 @@ bool parse_arguments(int argc, char** argv, Arguments& args) {
                 args.config_path = argv[++i];
             } else if (arg == "--user-agent" && i + 1 < argc) {
                 args.user_agent = argv[++i];
+            } else if (arg == "--proxy" && i + 1 < argc) {
+                args.proxy = argv[++i];
             } else if (arg == "--cookies-json" && i + 1 < argc) {
                 args.cookies_json_path = argv[++i];
             } else if (arg.rfind("--", 0) == 0 && i + 1 < argc) {
@@ -150,6 +153,8 @@ bool parse_arguments(int argc, char** argv, Arguments& args) {
                 return false;
             }
             args.serialization_format = SerializationFormat::Vtd;
+        } else if (arg == "--proxy" && i + 1 < argc) {
+            args.proxy = argv[++i];
         } else if (arg == "--javascript") {
             args.javascript = true;
         } else if (arg == "--no-javascript") {
@@ -173,7 +178,7 @@ void print_usage(std::ostream& out) {
         << "  prowsetk serialize (--events|--iml|--vtd) (--url URL|--html HTML) "
            "(--stdout|--output FILE) [--no-javascript]\n"
         << "  prowsetk run <driver> [--arg VALUE ...] [--config Prowse.toml] "
-           "[--user-agent VALUE] [--cookies-json FILE]\n";
+           "[--user-agent VALUE] [--proxy URL] [--cookies-json FILE]\n";
 }
 
 int run_serve(const Arguments& args) {
@@ -236,6 +241,7 @@ int run_endpoints(const Arguments& args) {
 
     prowsetk::BrowserConfig config;
     config.javascript = args.javascript;
+    if (!args.proxy.empty()) config.proxy = prowsetk::parse_proxy_url(args.proxy);
 
     prowsetk::Browser browser(std::move(config));
     auto session = browser.create_session();
@@ -280,6 +286,7 @@ int run_serialize(const Arguments& args) {
 
     prowsetk::BrowserConfig config;
     config.javascript = args.javascript;
+    if (!args.proxy.empty()) config.proxy = prowsetk::parse_proxy_url(args.proxy);
     prowsetk::Browser browser(std::move(config));
     auto session = browser.create_session();
     if (!args.html.empty()) {
@@ -435,6 +442,8 @@ int run_driver(const Arguments& args) {
             "cookies_json", "path", cookies_path.string()});
     }
     lua_args.push_back(prowsetk::LuaArgument{
+        "proxy", "string", config.network_proxy});
+    lua_args.push_back(prowsetk::LuaArgument{
         "assistant_browser_enabled", "boolean",
         config.assistant_browser.enabled ? "true" : "false"});
     lua_args.push_back(prowsetk::LuaArgument{
@@ -461,6 +470,8 @@ int run_driver(const Arguments& args) {
     browser_config.timeout_ms = config.timeout_ms;
     browser_config.observe_network = config.observe_network;
     browser_config.unsupported_api_behavior = config.unsupported_api_behavior;
+    if (!config.network_proxy.empty()) browser_config.proxy = prowsetk::parse_proxy_url(config.network_proxy);
+    if (!args.proxy.empty()) browser_config.proxy = prowsetk::parse_proxy_url(args.proxy);
 
     prowsetk::Browser browser(std::move(browser_config));
     try {

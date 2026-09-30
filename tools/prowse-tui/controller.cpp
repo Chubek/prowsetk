@@ -137,6 +137,7 @@ std::string Controller::command(std::string_view input) {
 void Controller::initialize_settings(const std::filesystem::path& path) {
     config_path = path;
     const auto loaded = load_settings(path);
+    if (!loaded.proxy.empty()) browser.network_client().set_proxy(parse_proxy_url(loaded.proxy));
     settings = loaded; draft_settings = loaded; config_dirty = false;
     for (const auto& plugin : settings.native_plugins) {
         try { browser.plugins().load_native(extension_path(path, plugin)); }
@@ -185,7 +186,8 @@ std::string Controller::config_command(std::string_view input) {
             std::string action, key, extra; binding >> action >> key;
             if (action.empty() || key.empty() || binding >> extra) throw std::runtime_error("Use config bind ACTION KEY");
             next.bind(action, key);
-        } else if (verb == "add-lua") next.lua_extensions.push_back(rest);
+        } else if (verb == "proxy") { next.proxy = rest; if (!rest.empty()) parse_proxy_url(rest);
+    } else if (verb == "add-lua") next.lua_extensions.push_back(rest);
         else if (verb == "add-plugin") next.native_plugins.push_back(rest);
         else if (verb == "remove-lua" || verb == "remove-plugin") {
             auto& paths = verb == "remove-lua" ? next.lua_extensions : next.native_plugins;

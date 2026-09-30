@@ -134,3 +134,6 @@
 [submodule "third_party/libtomcrypt"]
 	path = third_party/libtomcrypt
 	url = https://github.com/libtom/libtomcrypt.git
+[submodule "third_party/libmnl"]
+	path = third_party/libmnl
+	url = https://github.com/justmirror/libmnl.git

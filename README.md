@@ -2339,3 +2339,22 @@ paths, and native plugin paths. Changes are staged and saved atomically with
 `:config save`; keybindings apply immediately, while extensions load at the next
 launch. Unknown TOML fields, duplicate bindings, invalid paths, and oversized
 configuration files are rejected.
+
+### Proxy transport
+
+The host-mediated `NetworkClient` supports HTTP, HTTPS, and SOCKS5 proxies. A
+request-level `HttpRequest::proxy` overrides the browser-level
+`BrowserConfig::proxy`; when neither is set, the socket client selects
+`HTTPS_PROXY`/`https_proxy` for HTTPS, `HTTP_PROXY`/`http_proxy` for HTTP, and
+then `ALL_PROXY`/`all_proxy`. Proxy URLs use `http://host:port`,
+`https://host:port`, or `socks5://[user:pass@]host:port`. Proxy credentials are
+never included in redacted diagnostics.
+
+The `prowsetk` CLI accepts `--proxy URL` for navigation, endpoint extraction,
+and serialization. `Prowse.toml` accepts `[network].proxy`, and Lua driver
+arguments include the resolved `proxy` string. Prowse-TUI stores the proxy in
+`ProwseTUI.toml` with `:config proxy URL` and `:config save`.
+
+`third_party/libmnl` is exposed as the optional `ProwseTk::mnl` host networking
+diagnostics target. It is not used to implement proxy transport; proxy
+protocols remain in the portable, host-mediated socket client.

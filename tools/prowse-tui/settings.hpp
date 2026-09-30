@@ -14,6 +14,7 @@ struct Settings {
         {"help", "F1"}, {"config", "F2"}};
     std::vector<std::string> lua_extensions;
     std::vector<std::string> native_plugins;
+    std::string proxy;
     std::string action(std::string_view key) const;
     void validate() const;
     void bind(std::string_view action, std::string_view key);

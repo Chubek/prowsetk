@@ -74,6 +74,10 @@ Settings parse_settings(std::string_view text) {
                 if (!string || !result.keys.contains(std::string(action.str()))) throw std::runtime_error("Unknown action or invalid keybinding type");
                 result.keys[std::string(action.str())] = *string;
             }
+        } else if (name == "proxy") {
+            auto string = value.value<std::string>();
+            if (!string) throw std::runtime_error("proxy must be a string");
+            result.proxy = *string;
         } else if (name == "lua_extensions" || name == "native_plugins") {
             const auto* array = value.as_array();
             if (!array) throw std::runtime_error("Extensions must be arrays of paths");
@@ -100,6 +104,7 @@ std::string encode_settings(const Settings& settings) {
     for (const auto& path : settings.lua_extensions) lua.push_back(path);
     for (const auto& path : settings.native_plugins) native.push_back(path);
     root.insert("keys", std::move(keys)); root.insert("lua_extensions", std::move(lua)); root.insert("native_plugins", std::move(native));
+    if (!settings.proxy.empty()) root.insert("proxy", settings.proxy);
     std::ostringstream out;
     out << "# Prowse-TUI configuration. Extensions load on the next launch.\n" << root << '\n';
     return out.str();

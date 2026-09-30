@@ -235,6 +235,7 @@ void apply_response_cookies(Browser& browser, const Url& origin,
 Browser::Browser(BrowserConfig config) : config_(std::move(config)) {
     try {
         network_ = make_socket_network_client();
+        network_->set_proxy(config_.proxy);
     } catch (...) {
         network_ = std::make_unique<MemoryNetworkClient>();
     }
@@ -273,6 +274,7 @@ std::shared_ptr<Session> Browser::create_session(SessionConfig config) {
 
 void Browser::set_network_client(std::unique_ptr<NetworkClient> client) {
     if (client != nullptr) {
+        client->set_proxy(config_.proxy);
         network_ = std::move(client);
     }
 }
@@ -593,6 +595,7 @@ HttpRequest Session::build_request(std::string_view url) {
     request.url = std::string(url);
     request.timeout_ms = browser_->config().timeout_ms;
     request.max_response_bytes = browser_->config().max_response_bytes;
+    request.proxy = browser_->config().proxy;
     request.headers = headers_;
     if (header_value(request.headers, "User-Agent").empty()) {
         request.headers.emplace_back("User-Agent",

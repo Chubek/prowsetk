@@ -42,6 +42,7 @@ struct BrowserConfig {
     std::size_t max_response_bytes = 32u * 1024u * 1024u;
     std::string unsupported_api_behavior = "warn";
     bool observe_network = false;
+    ProxyConfig proxy;
     RedactionPolicy redaction = RedactionPolicy::defaults();
 };
 

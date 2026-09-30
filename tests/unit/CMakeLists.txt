@@ -119,3 +119,5 @@ prowsetk_gtest(prowsetk_unit_lua_endpoint_options "prowsetk.unit.lua."
 
 prowsetk_gtest(prowsetk_unit_html_parser "prowsetk.unit.html-parser."
     "unit;document" test_html_parser.cpp)
+
+prowsetk_gtest(prowsetk_unit_proxy "prowsetk.unit.proxy." "unit;network" test_proxy.cpp)

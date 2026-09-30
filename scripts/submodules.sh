@@ -32,4 +32,4 @@ git submodule add https://github.com/hthetiot/Tokyo-Cabinet.git	    third_party/
 git submodule add https://github.com/termbox/termbox2.git	    third_party/termbox2
 git submodule add https://github.com/libtom/libtomcrypt.git	    third_party/libtomcrypt
 git submodule add https://github.com/wjakob/nanobind.git	    third_party/nanobind
-
+git submodule add https://github.com/justmirror/libmnl.git	    third_party/libmnl

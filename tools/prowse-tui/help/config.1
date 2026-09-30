@@ -15,6 +15,7 @@ Esc returns to the browser and keeps staged changes until exit.
 Saved keybindings apply immediately. Extension changes take effect next launch.
 .SH COMMANDS
 .nf
+:config proxy socks5://127.0.0.1:9050
 :config bind down J
 :config add-lua extensions/my automation.lua
 :config add-plugin plugins/my_plugin.so
@@ -32,6 +33,7 @@ The colon, Esc, Enter, arrow keys, PageUp, PageDown, Home, End and Ctrl-C
 remain available as fixed controls. Rebindings affect normal mode only.
 .SH TOML EXAMPLE
 .nf
+proxy = "http://proxy.example:8080"
 lua_extensions = ["extensions/example.lua"]
 native_plugins = ["plugins/example.so"]
 

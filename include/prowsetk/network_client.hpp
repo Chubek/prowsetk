@@ -11,6 +11,19 @@
 
 namespace prowsetk {
 
+enum class ProxyScheme { None, Http, Https, Socks5 };
+struct ProxyConfig {
+    ProxyScheme scheme = ProxyScheme::None;
+    std::string host;
+    std::string port;
+    std::string username;
+    std::string password;
+    bool enabled() const noexcept { return scheme != ProxyScheme::None && !host.empty() && !port.empty(); }
+};
+ProxyConfig parse_proxy_url(std::string_view value);
+ProxyConfig proxy_from_environment(std::string_view target_url);
+std::string proxy_to_string(const ProxyConfig& proxy, bool redact = true);
+
 struct HttpRequest {
     std::string method = "GET";
     std::string url;
@@ -18,6 +31,7 @@ struct HttpRequest {
     std::string body;
     int timeout_ms = 30000;
     std::size_t max_response_bytes = 32u * 1024u * 1024u;
+    ProxyConfig proxy;
 };
 
 struct HttpResponse {
@@ -40,6 +54,8 @@ public:
     virtual HttpResponse send(const HttpRequest& request) = 0;
 
     virtual std::string name() const { return "network"; }
+    virtual void set_proxy(ProxyConfig proxy) { (void)proxy; }
+    virtual ProxyConfig proxy() const { return {}; }
 };
 
 // Deterministic, hermetic client for tests and offline automation. Responses
@@ -54,6 +70,8 @@ public:
 
     HttpResponse send(const HttpRequest& request) override;
     std::string name() const override { return "memory"; }
+    void set_proxy(ProxyConfig proxy) override { (void)proxy; }
+
 
     const std::vector<HttpRequest>& requests() const;
 
