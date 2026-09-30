@@ -1,0 +1,30 @@
+.TH SEARCH 1 "September 2026" "ProwseTk" "Prowse-TUI Help"
+.SH NAME
+search \- regex search within and across help pages
+.SH LOCAL SEARCH
+Press / in the help pager to open the search prompt. Enter a POSIX extended
+regular expression and press Enter. Esc cancels the prompt without changing
+the previous search. n advances to the next matching line and ? goes backwards.
+Both directions wrap. One result is recorded per matching line.
+An invalid regex leaves the prior search and cursor intact.
+An expression with no matches reports zero matches and clears highlights.
+.SH GLOBAL SEARCH
+.B :help find navigation|plugin
+Search the text of all help pages, including headings and link labels.
+The result list is navigable with j/k or Up/Down. Enter opens the selected page
+at the matching line. h goes back to the results. / also searches this index.
+.SH EXAMPLES
+.nf
+:help find Lua|native
+:help open commands
+/endpoint.*discovery
+n
+?
+.fi
+.SH LIMITS
+Patterns contain at most 1024 bytes. Help pages are at most 256 KiB;
+there are at most 128 pages and 20000 displayed results.
+Searching is case-sensitive and line-based; resize reflows the searchable text.
+.SH SEE ALSO
+.MR overview 1
+.MR commands 1

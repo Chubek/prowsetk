@@ -2084,6 +2084,15 @@ bool LuaRuntime::available() noexcept {
 
 void LuaRuntime::bind_browser(Browser* browser) { impl_->bound_browser = browser; }
 
+void LuaRuntime::bind_session(const std::shared_ptr<Session>& session) {
+#ifdef PROWSETK_HAVE_LUA
+    push_session(impl_->state, session);
+    lua_setglobal(impl_->state, "session");
+#else
+    (void)session;
+#endif
+}
+
 Browser* LuaRuntime::bound_browser() noexcept { return impl_->bound_browser; }
 
 void LuaRuntime::add_subscription(EventDispatcher* dispatcher,

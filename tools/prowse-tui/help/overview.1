@@ -1,0 +1,42 @@
+.TH PROWSE-TUI 1 "September 2026" "ProwseTk" "Prowse-TUI Help"
+.SH NAME
+prowse-tui \- programmable terminal browser and help pager
+.SH DESCRIPTION
+Prowse-TUI presents Flatworm pages in a terminal. Press : to enter a command.
+The help pager is independent of the live page. Closing it restores the page
+and its scroll position; help navigation never replaces the live session.
+.SH NAVIGATION
+Use j and k or the arrow keys to move the cursor. Space and PageDown advance
+a screen; b and PageUp go back. g goes to the top and G to the bottom.
+Enter, l or Right follows the selected hyperlink. h or Left goes back.
+Esc or q closes help. In the browser q quits. F1 opens help and F2 opens config.
+.SH HELP COMMANDS
+.TP
+.B :help
+Open this overview.
+.TP
+.B :help list
+Open the selectable help index. Move with j/k or Up/Down and press Enter.
+.TP
+.B :help open commands
+Open the named help page.
+.TP
+.B :help find regex
+Search all rendered help pages. Select a result to open its matching line.
+.SH SEARCH
+Press / to enter a POSIX extended regex within the current help view.
+Press n for the next matching line and ? for the previous matching line.
+Search wraps at either end. Matching lines are highlighted.
+.SH TOPICS
+.UR help:commands
+Browser and automation commands
+.UE
+.UR help:search
+Searching help pages
+.UE
+.UR help:config
+Keybindings and configuration
+.UE
+.UR help:extensions
+Lua extensions and native plugins
+.UE

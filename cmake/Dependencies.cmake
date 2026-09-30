@@ -230,3 +230,33 @@ if(PROWSETK_BUILD_TESTS)
         message(STATUS "ProwseTk: GoogleTest not found; using fallback runner")
     endif()
 endif()
+
+# Optional HTML5 document adapters and terminal frontend.
+option(PROWSETK_ENABLE_HTML5 "Build vendored HTML5 document parsers" ON)
+if(PROWSETK_ENABLE_HTML5 AND EXISTS "${PROJECT_SOURCE_DIR}/third_party/lexbor/CMakeLists.txt")
+    set(LEXBOR_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(LEXBOR_BUILD_STATIC ON CACHE BOOL "" FORCE)
+    set(LEXBOR_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${PROJECT_SOURCE_DIR}/third_party/lexbor" "${CMAKE_BINARY_DIR}/third_party/lexbor" EXCLUDE_FROM_ALL)
+    add_library(ProwseTk::lexbor ALIAS lexbor_static)
+    prowsetk_install_library(lexbor_static)
+    set(PROWSETK_HAVE_LEXBOR ON)
+endif()
+if(PROWSETK_ENABLE_HTML5 AND EXISTS "${PROJECT_SOURCE_DIR}/third_party/gumbo-parser/src/gumbo.h")
+    set(_gumbo "${PROJECT_SOURCE_DIR}/third_party/gumbo-parser/src")
+    add_library(prowsetk_gumbo STATIC
+        ${_gumbo}/attribute.c ${_gumbo}/char_ref.c ${_gumbo}/error.c
+        ${_gumbo}/parser.c ${_gumbo}/string_buffer.c ${_gumbo}/string_piece.c
+        ${_gumbo}/tag.c ${_gumbo}/tokenizer.c ${_gumbo}/utf8.c
+        ${_gumbo}/util.c ${_gumbo}/vector.c)
+    set_target_properties(prowsetk_gumbo PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(prowsetk_gumbo PUBLIC "$<BUILD_INTERFACE:${_gumbo}>")
+    add_library(ProwseTk::gumbo ALIAS prowsetk_gumbo)
+    prowsetk_install_library(prowsetk_gumbo)
+    set(PROWSETK_HAVE_GUMBO ON)
+endif()
+if(EXISTS "${PROJECT_SOURCE_DIR}/third_party/termbox2/termbox2.h")
+    add_library(prowsetk_termbox INTERFACE)
+    target_include_directories(prowsetk_termbox INTERFACE "${PROJECT_SOURCE_DIR}/third_party/termbox2")
+    add_library(ProwseTk::termbox ALIAS prowsetk_termbox)
+endif()

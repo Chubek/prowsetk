@@ -29,6 +29,7 @@ set(PROWSETK_CORE_SOURCES
     core/embedding.cpp
     core/web_interface.cpp
     core/playwright.cpp
+    flatworm/html5_parser.cpp
     flatworm/html_parser.cpp
     flatworm/html_tokenizer.cpp
     flatworm/html_syntax.cpp
@@ -118,3 +119,11 @@ endif()
 if(PROWSETK_BUILD_CLI)
     add_subdirectory(cli)
 endif()
+
+foreach(backend LEXBOR GUMBO)
+    if(PROWSETK_HAVE_${backend})
+        string(TOLOWER "${backend}" lower_backend)
+        target_compile_definitions(prowsetk_core PRIVATE PROWSETK_HAVE_${backend}=1)
+        target_link_libraries(prowsetk_core PRIVATE ProwseTk::${lower_backend})
+    endif()
+endforeach()

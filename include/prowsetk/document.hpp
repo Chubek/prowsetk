@@ -156,6 +156,11 @@ private:
     std::string base_url_;
 };
 
+enum class HtmlParser { Builtin, Auto, Lexbor, Gumbo };
+bool html_parser_available(HtmlParser parser) noexcept;
+std::shared_ptr<Document> parse_html_with(HtmlParser parser, std::string_view html,
+    std::string url = {}, std::string base_url = {});
+
 // Parses `html` into a Document. The parser tolerates
 // malformed markup; it is not a full HTML5 tree-construction implementation.
 // Throws Error(ResourceLimit) above 16 MiB input, 250,000 total nodes

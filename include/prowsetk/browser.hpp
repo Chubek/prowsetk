@@ -33,6 +33,9 @@ struct BrowserConfig {
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
     bool javascript = true;
+    // Restrict page-script subrequests; inline scripts can still mutate the DOM.
+    bool navigation_javascript_only = false;
+    HtmlParser html_parser = HtmlParser::Builtin;
     bool follow_redirects = true;
     int max_redirects = 10;
     int timeout_ms = 30000;

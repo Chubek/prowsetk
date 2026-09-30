@@ -2322,3 +2322,20 @@ from overwriting each other's Python modules in the source tree.
 Encrypted-storage tests retain production-cost key derivation and use a bounded
 300-second timeout to accommodate sanitizer instrumentation; other unit tests
 retain the default 60-second bound.
+
+### Prowse-TUI help and configuration
+
+`prowse-tui` includes a dedicated Unix-man-style help pager. `:help` opens the
+pager, `:help list` shows its topic index, `:help open PAGE` opens a topic, and
+`:help find REGEX` searches all topics. Within help, `/` searches the current
+page, `n` and `?` move through matches, cursor keys navigate links and `Esc`
+returns to the live page. The built-in topics cover navigation, commands,
+search, configuration, and extensions.
+
+`:config` opens the editable configuration view. It reads
+`$XDG_CONFIG_HOME/prowse/ProwseTUI.toml`, falling back to
+`$HOME/.config/prowse/ProwseTUI.toml`, and supports keybindings, Lua extension
+paths, and native plugin paths. Changes are staged and saved atomically with
+`:config save`; keybindings apply immediately, while extensions load at the next
+launch. Unknown TOML fields, duplicate bindings, invalid paths, and oversized
+configuration files are rejected.

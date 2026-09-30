@@ -47,6 +47,9 @@ public:
     // loading scripts that `require("lprowse")`.
     void bind_browser(Browser* browser);
 
+    // Exposes a managed, live session as global `session` for host automation.
+    void bind_session(const std::shared_ptr<Session>& session);
+
     // The browser bound by bind_browser, or nullptr.
     Browser* bound_browser() noexcept;
 

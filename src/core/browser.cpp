@@ -342,6 +342,7 @@ Session::Session(Browser* browser, SessionConfig config, std::string id)
     script_host_ = std::make_unique<FlatwormScriptHost>();
     script_host_->set_request_hook([this](const HostRequest& host_request) {
         HostResponse out;
+        if (browser_->config().navigation_javascript_only) return out;
         try {
             HttpRequest request;
             request.method = host_request.method;
@@ -756,7 +757,7 @@ void Session::install_document(std::string_view html, std::string url,
                                std::string base_url) {
     // Parse before changing session state: a resource-limit failure must leave
     // the installed document, URL, and script observations usable.
-    auto next_document = parse_html(html, std::move(url), std::move(base_url));
+    auto next_document = parse_html_with(browser_->config().html_parser, html, std::move(url), std::move(base_url));
     page_script_requests_.clear();
     page_script_texts_.clear();
     std::string previous_url = std::move(current_url_);
@@ -844,6 +845,7 @@ void Session::install_document(std::string_view html, std::string url,
             if (!script->has_attribute("src")) {
                 return script->text();
             }
+            if (browser_->config().navigation_javascript_only) return {};
             // External scripts are fetched host-mediated and executed so that
             // pages behave like real browsers and endpoint discovery can see
             // their network calls (README "Parsing HTML and CSS").
