@@ -265,12 +265,27 @@ endif()
 # intentionally not used for proxy transport; HTTP/SOCKS proxying stays in the
 # host-mediated NetworkClient and works without libmnl.
 if(EXISTS "${PROJECT_SOURCE_DIR}/third_party/libmnl/src/socket.c")
+    include(CheckCSourceCompiles)
+    set(_prowsetk_libmnl_config_dir "${PROJECT_BINARY_DIR}/generated/libmnl")
+    file(MAKE_DIRECTORY "${_prowsetk_libmnl_config_dir}")
+    check_c_source_compiles(
+        "__attribute__((visibility(\"hidden\"))) int hidden_symbol(void) { return 0; }\nint main(void) { return hidden_symbol(); }"
+        PROWSETK_LIBMNL_HAVE_VISIBILITY_HIDDEN)
+    if(PROWSETK_LIBMNL_HAVE_VISIBILITY_HIDDEN)
+        set(HAVE_VISIBILITY_HIDDEN 1)
+    else()
+        unset(HAVE_VISIBILITY_HIDDEN)
+    endif()
+    configure_file(
+        "${PROJECT_SOURCE_DIR}/cmake/libmnl-config.h.in"
+        "${_prowsetk_libmnl_config_dir}/config.h")
     add_library(prowsetk_libmnl STATIC
         "${PROJECT_SOURCE_DIR}/third_party/libmnl/src/socket.c"
         "${PROJECT_SOURCE_DIR}/third_party/libmnl/src/nlmsg.c"
         "${PROJECT_SOURCE_DIR}/third_party/libmnl/src/attr.c"
         "${PROJECT_SOURCE_DIR}/third_party/libmnl/src/callback.c")
     target_include_directories(prowsetk_libmnl PUBLIC
+        "${_prowsetk_libmnl_config_dir}"
         "${PROJECT_SOURCE_DIR}/third_party/libmnl/include"
         "${PROJECT_SOURCE_DIR}/third_party/libmnl/src")
     add_library(ProwseTk::mnl ALIAS prowsetk_libmnl)
