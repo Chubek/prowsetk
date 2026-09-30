@@ -65,6 +65,12 @@ do
         "beacon", "plugins.beacon.lua.beacon")
     if ok then beacon_spec = module end
 end
+local ebpf_interface = nil
+do
+    local ok, module = pcall(require_first,
+        "ebpf_interface", "plugins.ebpf-interface.lua.ebpf_interface")
+    if ok then ebpf_interface = module end
+end
 
 local function trim(value)
     return tostring(value or ""):match("^%s*(.-)%s*$")
@@ -1844,6 +1850,10 @@ function main(args)
         end
         write_file(output, yaml)
         write_file(postman, postman_json)
+        if ebpf_interface and args.ebpf_output and args.ebpf_output ~= "" and
+           ebpf_interface.render_observations then
+            write_file(args.ebpf_output, ebpf_interface.render_observations(endpoints or {}))
+        end
 
         print("booking-dotcom-admin: wrote heuristic OpenAPI and Postman outputs")
     end)

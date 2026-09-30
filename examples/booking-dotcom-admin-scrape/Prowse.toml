@@ -37,6 +37,26 @@ overwrite = true
 formats = ["yaml", "json"]
 
 [[plugins]]
+name = "ebpf-interface"
+description = "Optional libbpf/eBPF endpoint observation for host-mediated page traffic"
+type = "native"
+path = "../../build/default/plugins/ebpf-interface/libprowsetk_ebpf_interface.so"
+enabled = true
+autoload = true
+capabilities = [
+    "ebpf",
+    "libbpf",
+    "endpoint-observation",
+    "network-tracing",
+    "bpf-object",
+    "bpf-program",
+    "bpf-map",
+    "bpf-link",
+    "ring-buffer",
+    "perf-buffer"
+]
+
+[[plugins]]
 name = "captcha-handler"
 description = "Detect Booking.com anti-bot challenges and expose host-mediated handling plans"
 type = "native"
@@ -121,6 +141,7 @@ arguments = [
     { name = "output_dir", type = "path", required = false, default = "_scraped/booking-dotcom-admin" },
     { name = "output", type = "path", required = false, default = "_scraped/booking-dotcom-admin/BookingDotcomAdminPanel.yaml" },
     { name = "postman", type = "path", required = false, default = "_scraped/booking-dotcom-admin/BookingDotcomAdminPanel.postman_collection.json" },
+    { name = "ebpf_output", type = "path", required = false, default = "_scraped/booking-dotcom-admin/ebpf-endpoints.json" },
     { name = "max_depth", type = "integer", required = false, default = 2 },
     { name = "max_pages", type = "integer", required = false, default = 100 },
     { name = "max_api_depth", type = "integer", required = false, default = 2 },

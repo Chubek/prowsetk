@@ -1,5 +1,24 @@
 include_guard(GLOBAL)
 
+# libbpf is optional and Linux-only in practice. The plugin still builds in a
+# capability-reporting mode when it is unavailable.
+set(PROWSETK_HAVE_LIBBPF OFF CACHE INTERNAL "libbpf available")
+if(PROWSETK_ENABLE_EBPF)
+    find_path(PROWSETK_LIBBPF_INCLUDE_DIR libbpf.h
+        PATHS "${PROJECT_SOURCE_DIR}/third_party/libbpf/src" /usr/include /usr/local/include)
+    find_library(PROWSETK_LIBBPF_LIBRARY NAMES bpf libbpf)
+    if(PROWSETK_LIBBPF_INCLUDE_DIR AND PROWSETK_LIBBPF_LIBRARY)
+        add_library(prowsetk_libbpf UNKNOWN IMPORTED)
+        set_target_properties(prowsetk_libbpf PROPERTIES
+            IMPORTED_LOCATION "${PROWSETK_LIBBPF_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${PROWSETK_LIBBPF_INCLUDE_DIR}")
+        add_library(ProwseTk::libbpf ALIAS prowsetk_libbpf)
+        set(PROWSETK_HAVE_LIBBPF ON CACHE INTERNAL "libbpf available")
+    else()
+        message(STATUS "ProwseTk: libbpf requested but no linkable libbpf was found; eBPF facade remains disabled")
+    endif()
+endif()
+
 # OpenSSL's supported CMake discovery uses FindOpenSSL. HTTPS remains optional;
 # the vendored upstream uses its own Configure build, so install it first when
 # a system package is unavailable (OPENSSL_ROOT_DIR selects that installation).

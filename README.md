@@ -2054,6 +2054,13 @@ WASM does not replace the other extension mechanisms. Use each for its strengths
 
 ## Dependencies
 
+The optional `plugins/ebpf-interface` plugin uses libbpf when
+`PROWSETK_ENABLE_EBPF=ON` and a linkable libbpf installation is available.
+The plugin always builds a disabled capability-reporting facade when libbpf or
+the required kernel support is unavailable. Host-mediated ProwseTk request and
+response hooks remain available in either mode; the plugin never opens sockets
+on behalf of a page or exposes raw libbpf handles to Lua.
+
 ProwseTk may use the following libraries, either as required dependencies or
 optional components depending on the build configuration.
 
@@ -2071,6 +2078,7 @@ optional components depending on the build configuration.
 | `libdom` | DOM tree construction (NetSurf) |
 | `libev` | Event loop |
 | `libmagic` | File and content-type detection |
+| `libbpf` | Optional eBPF object, program, map, link, ring-buffer, and perf-buffer integration |
 | `libmill` | Concurrency and coroutine utilities |
 | `libtomcrypt` | Encrypted storage primitives (PBKDF2-HMAC-SHA256 and AES-GCM) |
 | `llhttp` | HTTP/1.1 message parsing |

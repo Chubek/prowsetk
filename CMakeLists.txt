@@ -19,6 +19,7 @@ option(PROWSETK_BUILD_CLI      "Build the prowsetk command-line interface" ON)
 option(PROWSETK_ENABLE_WASM    "Enable the WebAssembly plugin runtime"   OFF)
 set(PROWSETK_WASM_RUNTIME "wasmtime" CACHE STRING "WASM runtime backend")
 option(PROWSETK_ENABLE_WASI    "Enable unrestricted WASI capabilities"   OFF)
+option(PROWSETK_ENABLE_EBPF   "Enable the optional libbpf/eBPF interface" OFF)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
