@@ -42,7 +42,7 @@ std::filesystem::path events_fixture(const std::filesystem::path& directory) {
 }  // namespace
 
 TEST(Page2Latex, WritesEscapedLatexWithHyperref) {
-    const auto directory = std::filesystem::path(TEST_BINARY_DIR) / "page2latex";
+    const auto directory = std::filesystem::path(TEST_BINARY_DIR) / "page2latex-hyperref";
     std::filesystem::create_directories(directory);
     const auto input = events_fixture(directory);
     const auto output = directory / "page.tex";
@@ -57,7 +57,7 @@ TEST(Page2Latex, WritesEscapedLatexWithHyperref) {
 }
 
 TEST(Page2Latex, AppliesBodyTemplate) {
-    const auto directory = std::filesystem::path(TEST_BINARY_DIR) / "page2latex";
+    const auto directory = std::filesystem::path(TEST_BINARY_DIR) / "page2latex-template";
     std::filesystem::create_directories(directory);
     const auto input = events_fixture(directory);
     const auto template_file = directory / "template.tex";
@@ -78,7 +78,7 @@ TEST(Page2Latex, CompilesPdfWithConfiguredEngine) {
     GTEST_SKIP() << "XeLaTeX is not available in this build environment";
 #else
     ASSERT_EQ(setenv("PWTK_PAGE2LATEX_ENGINE", PAGE2LATEX_ENGINE, 1), 0);
-    const auto directory = std::filesystem::path(TEST_BINARY_DIR) / "page2latex";
+    const auto directory = std::filesystem::path(TEST_BINARY_DIR) / "page2latex-pdf";
     std::filesystem::create_directories(directory);
     const auto input = events_fixture(directory);
     const auto output = directory / "page.pdf";

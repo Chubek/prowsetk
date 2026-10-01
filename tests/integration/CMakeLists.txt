@@ -104,3 +104,14 @@ if(PROWSETK_BUILD_CLI)
     target_include_directories(prowsetk_integration_cli PRIVATE
         "${PROJECT_SOURCE_DIR}/src/cli")
 endif()
+if(TARGET ptkspiderd AND PROWSETK_HAVE_LUA AND PROWSETK_HAVE_QUICKJS)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME prowsetk.integration.spider.daemon
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_spider_daemon.py"
+                "$<TARGET_FILE:ptkspiderd>" "$<TARGET_FILE:ptkspiderctl>")
+        set_tests_properties(prowsetk.integration.spider.daemon PROPERTIES
+            LABELS "integration;plugin;lua;storage" TIMEOUT 60
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+endif()

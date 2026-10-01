@@ -1,0 +1,2 @@
+#pragma once
+inline constexpr const char* spider_lua_source = R"PWTK_LUA(@SPIDER_LUA_SOURCE@)PWTK_LUA";

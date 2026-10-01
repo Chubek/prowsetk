@@ -502,6 +502,16 @@ the engine's event loop, timers, request hooks, and session lifecycle events.
 
 ## Plugin System
 
+The repository includes `plugins/spider`: `ptkspiderd` supervises persistent,
+named Flatworm crawler workers and `ptkspiderctl` controls their sessions,
+synthetic clicks/typing, Lua drivers and queryable LMDB caches. `lspider` binds
+drivers to an existing spider session. Durable breadth-first frontiers,
+same-origin transport enforcement, bounded robots-aware crawling, retries,
+scheduled recrawls, process watchdogs and paused restart recovery support
+long-running operation. The plugin requires Linux, LMDB and `lmdbxx`; its native
+ABI remains version 2. See `plugins/spider/README.md` for commands, resource
+limits, redaction and recovery semantics.
+
 The repository includes `plugins/beacon`, a Firefox Native Messaging bridge
 for user-approved inspection of a connected tab. A local `beacond` broker
 tracks bounded Flash sessions, `beaconctl` registers and polls Flashes from
@@ -2082,6 +2092,8 @@ optional components depending on the build configuration.
 | `libmill` | Concurrency and coroutine utilities |
 | `libtomcrypt` | Encrypted storage primitives (PBKDF2-HMAC-SHA256 and AES-GCM) |
 | `llhttp` | HTTP/1.1 message parsing |
+| `lmdb` | Durable bounded cache and crawler frontier for the optional spider plugin |
+| `lmdbxx` | Header-only C++ RAII wrapper used by the spider's LMDB backend |
 | `lua` | Automation and extension runtime |
 | `mbedtls` | TLS primitives |
 | `nexus` | Optional HTTP/3 (QUIC) transport |

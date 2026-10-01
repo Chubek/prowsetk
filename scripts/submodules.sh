@@ -33,3 +33,5 @@ git submodule add https://github.com/libtom/libtomcrypt.git	    third_party/libt
 git submodule add https://github.com/wjakob/nanobind.git	    third_party/nanobind
 git submodule add https://github.com/justmirror/libmnl.git	    third_party/libmnl
 git submodule add https://github.com/libbpf/libbpf.git		    third_party/libbpf
+git submodule add https://github.com/hoytech/lmdbxx.git             third_party/lmdbxx
+git submodule add https://github.com/LMDB/lmdb.git                  third_party/lmdb

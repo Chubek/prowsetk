@@ -1,5 +1,36 @@
 include_guard(GLOBAL)
 
+# Spider persistence: lmdbxx is a header-only wrapper over LMDB. Keep the
+# plugin optional when either dependency is absent; never substitute RAM.
+find_package(lmdb CONFIG QUIET)
+find_path(PROWSETK_LMDB_INCLUDE_DIR lmdb.h)
+find_library(PROWSETK_LMDB_LIBRARY NAMES lmdb)
+find_path(PROWSETK_LMDBXX_INCLUDE_DIR lmdb++.h
+    PATHS "${PROJECT_SOURCE_DIR}/third_party/lmdbxx")
+if(PROWSETK_LMDB_INCLUDE_DIR AND PROWSETK_LMDB_LIBRARY)
+    add_library(prowsetk_lmdb UNKNOWN IMPORTED)
+    set_target_properties(prowsetk_lmdb PROPERTIES
+        IMPORTED_LOCATION "${PROWSETK_LMDB_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${PROWSETK_LMDB_INCLUDE_DIR}")
+elseif(EXISTS "${PROJECT_SOURCE_DIR}/third_party/lmdb/libraries/liblmdb/mdb.c")
+    find_package(Threads REQUIRED)
+    add_library(prowsetk_lmdb STATIC
+        "${PROJECT_SOURCE_DIR}/third_party/lmdb/libraries/liblmdb/mdb.c"
+        "${PROJECT_SOURCE_DIR}/third_party/lmdb/libraries/liblmdb/midl.c")
+    target_include_directories(prowsetk_lmdb PUBLIC
+        "${PROJECT_SOURCE_DIR}/third_party/lmdb/libraries/liblmdb")
+    set_target_properties(prowsetk_lmdb PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_link_libraries(prowsetk_lmdb PUBLIC Threads::Threads)
+endif()
+if(TARGET prowsetk_lmdb AND PROWSETK_LMDBXX_INCLUDE_DIR)
+    add_library(ProwseTk::lmdb ALIAS prowsetk_lmdb)
+    add_library(prowsetk_lmdbxx INTERFACE)
+    target_include_directories(prowsetk_lmdbxx SYSTEM INTERFACE
+        "${PROWSETK_LMDBXX_INCLUDE_DIR}")
+    target_link_libraries(prowsetk_lmdbxx INTERFACE ProwseTk::lmdb)
+    add_library(ProwseTk::lmdbxx ALIAS prowsetk_lmdbxx)
+endif()
+
 # libbpf is optional and Linux-only in practice. The plugin still builds in a
 # capability-reporting mode when it is unavailable.
 set(PROWSETK_HAVE_LIBBPF OFF CACHE INTERNAL "libbpf available")

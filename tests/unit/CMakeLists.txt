@@ -121,3 +121,12 @@ prowsetk_gtest(prowsetk_unit_html_parser "prowsetk.unit.html-parser."
     "unit;document" test_html_parser.cpp)
 
 prowsetk_gtest(prowsetk_unit_proxy "prowsetk.unit.proxy." "unit;network" test_proxy.cpp)
+if(TARGET prowsetk_spider_static)
+    prowsetk_gtest(prowsetk_unit_spider "prowsetk.unit.spider."
+        "unit;plugin;storage;lua" test_spider.cpp)
+    target_link_libraries(prowsetk_unit_spider PRIVATE prowsetk_spider_static)
+    target_compile_definitions(prowsetk_unit_spider PRIVATE
+        TEST_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+        SPIDER_PLUGIN_PATH="$<TARGET_FILE:prowsetk_spider>")
+    add_dependencies(prowsetk_unit_spider prowsetk_spider)
+endif()

@@ -138,3 +138,11 @@
 [submodule "third_party/libbpf"]
 	path = third_party/libbpf
 	url = https://github.com/libbpf/libbpf.git
+
+[submodule "third_party/lmdbxx"]
+	path = third_party/lmdbxx
+	url = https://github.com/hoytech/lmdbxx.git
+
+[submodule "third_party/lmdb"]
+	path = third_party/lmdb
+	url = https://github.com/LMDB/lmdb.git

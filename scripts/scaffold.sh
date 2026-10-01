@@ -321,6 +321,14 @@ write_file "${ROOT}/.gitmodules" <<'GITMODULES_EOF'
 [submodule "third_party/zstd"]
 	path = third_party/zstd
 	url = https://github.com/facebook/zstd.git
+
+[submodule "third_party/lmdbxx"]
+	path = third_party/lmdbxx
+	url = https://github.com/hoytech/lmdbxx.git
+
+[submodule "third_party/lmdb"]
+	path = third_party/lmdb
+	url = https://github.com/LMDB/lmdb.git
 GITMODULES_EOF
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,14 @@
+[Unit]
+Description=ProwseTk persistent spider daemon
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ptkspiderd
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=10
+UMask=0077
+
+[Install]
+WantedBy=default.target

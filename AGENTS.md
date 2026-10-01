@@ -295,6 +295,32 @@ the work is not done.
 
 # Additions & Revisions
 
+## Persistent spider plugin
+
+`plugins/spider` builds `ptkspiderd`, `ptkspiderctl`, and the version-2 native
+plugin on Linux when LMDB and `third_party/lmdbxx` are available. Each named
+worker owns its Browser/Session and private LMDB environment; crawler and
+driver network requests, redirects and page-script requests stay host-mediated
+and same-origin. Keep the daemon's nonblocking IPC loop separate from worker
+browser execution. Never execute controller arguments through a shell.
+
+Preserve bounded durable breadth-first frontiers, robots-aware automatic GET
+visits, bounded retries, periodic watch epochs, cache retention, partial-client
+timeouts, process watchdogs and paused restart recovery. The current frontier
+task is removed only with a committed page/state transition. Driver runtime
+state and session credentials are process-local; do not claim they survive a
+restart. The last sanitized snapshot, frontier and watch schedule do survive.
+
+`lspider` uses managed `lprowse` session handles. Driver cache/frontier writes
+are staged until main(args) returns 0; browser actions are immediate. Drivers
+are trusted automation, not a sandbox. Cache/control output removes private
+form values, script content, sensitive attributes and query parameters by
+default, and never emits raw cookies/headers or detailed driver errors.
+Owner-only cache/socket permissions remain required. Keep new tests under
+`tests/unit/test_spider.cpp` and `tests/integration/test_spider_daemon.py`,
+registered with labels and finite timeouts. See `plugins/spider/README.md`
+for the exact supported command, robots and recovery contracts.
+
 ## The IR Emitters
 
 Although ProwseTk is a headless browser and it does not render anything, the engine can generate an *intermediate representation* for the page. Its canonical in-memory IR is the ProwseEvent stream; the Lua engine exposes `lprowseir` for handling it and its wire encodings:
@@ -1071,4 +1097,3 @@ int cmd_pdql(int argc, char** argv) {
 ```
 
 ---
-
