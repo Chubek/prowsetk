@@ -67,11 +67,13 @@ assert(data.title == 'Local report')
 ```
 
 Installing an extractor subscribes it to `document_created` notifications on
-that browser. Keep the extractor alive for the subscription's lifetime.
-Automatic callback return values are not an output archive; store needed values
-in extension-owned state. Automatic callback errors are suppressed by this
-notification path. Explicit `extractor:run(document)` returns its result and
-propagates callback errors; without a callback it returns nil.
+that browser. Keep the extractor reachable for as long as its callback should
+run: collecting it makes the callback inert and unregisters it at runtime
+teardown, as described in [Chapter 9](09-lua-control-api.md). Automatic callback
+return values are not an output archive; store needed values in extension-owned
+state. Automatic callback errors are suppressed by this notification path.
+Explicit `extractor:run(document)` returns its result and propagates callback
+errors; without a callback it returns nil.
 
 Document callbacks operate on the document as it exists at the notification
 stage. Run explicit extraction after navigation/interactions when you need

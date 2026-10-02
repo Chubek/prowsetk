@@ -1,5 +1,34 @@
 include_guard(GLOBAL)
 
+# ai-oracle uses OpenAIpp's wire/authentication helpers with NetworkClient,
+# rather than its socket-owning HttpClient. Its nested headers stay private to
+# the plugin; neither cpp-httplib nor the DSL is part of ProwseTk's public API.
+if(PROWSETK_BUILD_AI_ORACLE)
+    find_package(openaipp CONFIG QUIET)
+    find_package(nlohmann_json CONFIG QUIET)
+    set(_prowsetk_openaipp "${PROJECT_SOURCE_DIR}/third_party/openaipp")
+    if(TARGET openaipp::openaipp)
+        add_library(ProwseTk::openaipp ALIAS openaipp::openaipp)
+    elseif(EXISTS "${_prowsetk_openaipp}/include/OpenAI.hpp"
+            AND EXISTS "${_prowsetk_openaipp}/third_party/cpp-httplib/httplib.h"
+            AND EXISTS "${_prowsetk_openaipp}/third_party/MetaTk/DSLtk/DSLtk.hpp")
+        add_library(prowsetk_openaipp INTERFACE)
+        target_include_directories(prowsetk_openaipp SYSTEM INTERFACE
+            "${_prowsetk_openaipp}/include"
+            "${_prowsetk_openaipp}/third_party/cpp-httplib"
+            "${_prowsetk_openaipp}/third_party")
+        add_library(ProwseTk::openaipp ALIAS prowsetk_openaipp)
+    endif()
+    if(TARGET nlohmann_json::nlohmann_json)
+        add_library(ProwseTk::oracle_json ALIAS nlohmann_json::nlohmann_json)
+    elseif(EXISTS "${_prowsetk_openaipp}/third_party/nlohmann-json/include/nlohmann/json.hpp")
+        add_library(prowsetk_oracle_json INTERFACE)
+        target_include_directories(prowsetk_oracle_json SYSTEM INTERFACE
+            "${_prowsetk_openaipp}/third_party/nlohmann-json/include")
+        add_library(ProwseTk::oracle_json ALIAS prowsetk_oracle_json)
+    endif()
+endif()
+
 # Spider persistence: lmdbxx is a header-only wrapper over LMDB. Keep the
 # plugin optional when either dependency is absent; never substitute RAM.
 find_package(lmdb CONFIG QUIET)
@@ -310,6 +339,7 @@ endif()
 # file assumes the original domlibs directory layout, so these small targets
 # list the stable public/core sources explicitly and generate its parser here.
 if(EXISTS "${PROJECT_SOURCE_DIR}/third_party/termlib/termlib.h")
+    find_package(Threads REQUIRED)
     set(_pwtk_termlib "${PROJECT_SOURCE_DIR}/third_party/termlib")
     find_program(PROWSETK_TERMLIB_PERL perl REQUIRED)
     set(_pwtk_termlib_parser "${CMAKE_CURRENT_BINARY_DIR}/termlib/termscript_parser.c")

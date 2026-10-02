@@ -218,6 +218,10 @@ write_file "${ROOT}/.gitmodules" <<'GITMODULES_EOF'
 	path = third_party/fmt
 	url = https://github.com/fmtlib/fmt.git
 
+[submodule "third_party/openaipp"]
+	path = third_party/openaipp
+	url = https://github.com/Chubek/OpenAIpp.git
+
 [submodule "third_party/gumbo-parser"]
 	path = third_party/gumbo-parser
 	url = https://github.com/google/gumbo-parser.git

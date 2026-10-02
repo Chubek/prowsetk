@@ -57,19 +57,25 @@ For example, use `cmake --preset asan`, `cmake --build --preset asan`, and
 | `PROWSETK_ENABLE_WASI` | `OFF` | WASI capability setting |
 | `PROWSETK_ENABLE_EBPF` | `OFF` | Enable optional libbpf integration |
 | `PROWSETK_BUILD_SPIDER` | `ON` | Build spider when Linux/LMDB/lmdbxx are available |
+| `PROWSETK_BUILD_AI_ORACLE` | `ON` | Build the AI oracle when OpenAIpp and JSON headers are available |
 | `PROWSETK_BUILD_PYTHON` | `ON` | Build Python bindings when Python development support is found |
 | `PROWSETK_BUILD_TUI` | `ON` | Build terminal tools when the Termlib/Termscript source is available |
 
 Dependency discovery is centralized in `cmake/Dependencies.cmake`. Lua enables
 driver APIs; tomlplusplus enables project and tool configuration; pugixml enables
 XPath; OpenSSL 3 enables certificate-verified HTTPS; libHaru enables `page2pdf`.
-Python bindings also need their Python/nanobind toolchain. The root README lists
+Python bindings also need their Python/nanobind toolchain. OpenAIpp and its nested
+cpp-httplib, MetaTk/DSLtk, and nlohmann-json headers enable the AI oracle
+described in [Chapter 21](21-native-and-wasm-plugins.md). The root README lists
 the complete dependency inventory.
 
 `crawler` builds on POSIX with Lua and tomlplusplus. Pagewatch requires Linux
 and those libraries. Spider additionally requires LMDB and lmdbxx. Missing
 optional dependencies produce a disabled feature or omit its target; inspect
-the configure output before assuming a binary was built.
+the configure output before assuming a binary was built. A build with
+`PROWSETK_BUILD_AI_ORACLE=OFF`, or one where the OpenAIpp headers are absent,
+reports `ai-oracle: OpenAIpp/JSON headers unavailable, skipping` and omits the
+oracle targets without affecting the rest of the build.
 
 Prowse-TUI requires the source tree at `third_party/termlib`, including
 `termlib.h`, its Termscript grammar/runtime, and parser-generator script, plus
@@ -91,7 +97,11 @@ export PATH="$PWD/build/install/bin:$PATH"
 Installations include executables, public headers, the exported CMake package,
 and plugin/tool data under `share/prowsetk/`. Crawler and pagewatch embed their
 Lua modules. Other driver/plugin Lua recipes need the corresponding source or
-installed module path described in [Chapter 11](11-lua-extensions.md).
+installed module path described in [Chapter 11](11-lua-extensions.md). Optional
+plugin native libraries install under `lib/prowsetk/plugins`, their callable Lua
+modules under `lib/prowsetk/lua`, and their headers under
+`include/prowsetk/plugins`; add the module directory to `LUA_CPATH` before
+`require`-ing it, as described in [Chapter 21](21-native-and-wasm-plugins.md).
 
 ## Tests and documentation
 

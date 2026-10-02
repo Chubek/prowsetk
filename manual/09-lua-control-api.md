@@ -88,10 +88,59 @@ end)
 assert(ok and value == 'https://example.test')
 ```
 
-Native API errors raise Lua errors. C++ embedding reports a failed LuaResult
-when a top-level call fails. Keep the host Browser and bound Session alive
-for the runtime's use; userdata manages references and subscriptions, without
-exposing engine pointers.
+## Managed handle lifetime
+
+Session, document, element, and extractor values are managed userdata. They own
+references to the corresponding C++ objects and never expose engine pointers.
+
+Collecting a handle is a supported way to end its lifecycle. The finalizer first
+invalidates the callbacks the handle owns, so a collected session or extractor
+stops receiving events, and then releases the shared lifetime guard that those
+subscriptions referenced. A collected handle's dispatcher entry is not removed
+at that point; it becomes inert, and runtime teardown removes it along with every
+other subscription and its registry reference.
+
+A browser created by `prowse.browser.new()` is owned by Lua, and sessions refer
+to their browser by pointer. Releasing such a browser is deferred while any of
+its sessions are still alive, so the browser handle may be dropped before them:
+
+```lua
+local session = require('lprowse').browser.new():create_session()
+session:load_html('<p>x</p>')   -- the browser is still alive here
+```
+
+The browser is deleted once its last session is finalized, including through a
+document or element handle that still holds that session. A browser supplied by
+the host through `bind_browser` is never owned by Lua and is never destroyed by
+collection.
+
+This means a subscription is only effective while its owning handle is
+reachable:
+
+```lua
+local prowse = require('lprowse')
+local browser = prowse.browser.new()
+local events = 0
+
+local driver = browser:create_session()
+driver:on('document_created', function() events = events + 1 end)
+driver:load_html('<p>first</p>')            -- events == 1
+
+do
+    local watched = browser:create_session()
+    watched:on('document_created', function() events = events + 100 end)
+    watched:load_html('<p>second</p>')      -- events == 101 while reachable
+end
+collectgarbage('collect')
+collectgarbage('collect')
+
+driver:load_html('<p>third</p>')            -- events == 102, not 202
+```
+
+Retain a handle in a variable, table, or upvalue for as long as its callbacks
+must run. Native API errors raise Lua errors. C++ embedding reports a failed
+LuaResult when a top-level call fails. Keep the host Browser and bound Session
+alive for the runtime's use.
 
 Generic LuaRuntime opens Lua's standard libraries and does not enforce a
 per-call instruction or memory budget. Specialized daemon hosts add their own

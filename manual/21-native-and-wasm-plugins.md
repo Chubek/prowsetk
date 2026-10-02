@@ -117,4 +117,26 @@ levels, redaction, and bounded CTest coverage. Add dependencies centrally in
 
 Reference: `ProwseTk-Plugin.h`, `plugin_registry.hpp`, `wasm_runtime.hpp`, `wit/`.
 
+## AI oracle service
+
+`plugins/ai-oracle` provides explicit OpenAI Responses API inquiries for other
+plugins and drivers. It uses OpenAIpp's wire/header helpers through the host
+NetworkClient, and ships an exported `ProwseTk::ai_oracle` C++/C library, an
+ABI-v2 native shared plugin with opaque C service symbols, and a callable
+`ai_oracle` Lua module. The native registry facade is network-free; each oracle
+client owns its explicit enablement, key, model, endpoint, and budgets.
+
+Lua modules are installed in `lib/prowsetk/lua`; add that directory to
+`LUA_CPATH` before `require("ai_oracle")`. `new(options, send_callback?)` creates
+a client; `ask`, `captcha`, and `crawl` return advisory results or
+`nil, message, error_code`. The default transport is the core NetworkClient;
+a callback supports host-selected API sessions/policies and hermetic tests.
+
+Detached HTML/context redaction, embedded PNG/JPEG input, JSON-object output,
+request/response/time/token/attempt bounds, and rejected redirects are part of
+the supported contract. The caller applies recommendations through existing
+automation interfaces and checks actual CAPTCHA/login/crawl outcomes. See the
+[plugin reference](../plugins/ai-oracle/README.md) for complete configuration,
+ownership, transport requirements, examples, and limits.
+
 **Next:** [Intermediate representations](22-intermediate-representations.md).

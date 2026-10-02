@@ -97,6 +97,10 @@ prowsetk_install_library(prowsetk_core)
 
 add_subdirectory(session)
 
+if(PROWSETK_BUILD_AI_ORACLE)
+    add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/ai-oracle" "${CMAKE_BINARY_DIR}/plugins/ai-oracle")
+endif()
+
 if(EXISTS "${PROJECT_SOURCE_DIR}/plugins/scrape-endpoints/CMakeLists.txt")
     add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/scrape-endpoints" "${CMAKE_BINARY_DIR}/plugins/scrape-endpoints")
 endif()

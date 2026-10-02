@@ -1,6 +1,7 @@
 #ifndef PROWSETK_BROWSER_HPP
 #define PROWSETK_BROWSER_HPP
 
+#include <atomic>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -64,6 +65,13 @@ public:
 
     std::shared_ptr<Session> create_session(SessionConfig config = {});
 
+    // Sessions whose shared ownership is still held. Reaches zero when every
+    // `Session` has been destroyed, which is when an owner may safely release
+    // the browser itself.
+    std::size_t live_session_count() const noexcept {
+        return live_sessions_.load(std::memory_order_acquire);
+    }
+
     void set_network_client(std::unique_ptr<NetworkClient> client);
     NetworkClient& network_client();
     const NetworkClient& network_client() const;
@@ -99,6 +107,8 @@ private:
     std::unique_ptr<WasmRuntime> wasm_;
     std::unique_ptr<LuaRuntime> lua_;
     std::size_t session_counter_ = 0;
+    // Live `Session` objects created by this browser.
+    std::atomic<std::size_t> live_sessions_{0};
 };
 
 // One host-mediated request issued by page JavaScript (`fetch`,

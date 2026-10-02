@@ -265,6 +265,9 @@ std::shared_ptr<Session> Browser::create_session(SessionConfig config) {
     const std::string id = "session-" + std::to_string(++session_counter_);
     auto session = std::shared_ptr<Session>(
         new Session(this, std::move(config), id));
+    // Counted before the session is observable so an owner polling
+    // live_session_count() never sees a premature zero.
+    live_sessions_.fetch_add(1, std::memory_order_acq_rel);
     Event event;
     event.type = EventType::SessionCreated;
     event.name = id;
@@ -455,7 +458,11 @@ Session::Session(Browser* browser, SessionConfig config, std::string id)
 
 Session::~Session() {
     if (browser_ != nullptr) {
+        // Release the live-session claim last: a concurrent owner deciding
+        // whether it may free the browser must not observe a zero that still
+        // has a live `Session` behind it.
         browser_->storage().release_session(id_);
+        browser_->live_sessions_.fetch_sub(1, std::memory_order_acq_rel);
     }
 }
 

@@ -56,7 +56,7 @@ files define the callable interfaces.
 20. [schema-grabber](20-schema-grabber.md) — inferred request/response schemas
     and typed URL parameters.
 21. [Native and WASM plugins](21-native-and-wasm-plugins.md) — registry lifecycle,
-    C ABI, WIT contracts, and runtime availability.
+    C ABI, WIT contracts, runtime availability, and the AI oracle service.
 
 ### Intermediate representations and tools
 
@@ -102,8 +102,10 @@ files define the callable interfaces.
 | Core API and Flatworm | 5–8, 12–15 | `include/prowsetk/`, `src/core/`, `src/flatworm/`, `src/pdql/` |
 | CLI and project settings | 3–4, 10 | `src/cli/prowsetk_main.cpp`, `src/core/project_config.cpp`, `drivers/` |
 | Native Lua modules and extensions | 8–11, 22 | `src/core/lua_runtime.cpp`, `lua/` |
+| Managed Lua handle lifetime | 9, 11 | `src/core/lua_runtime.cpp` userdata finalizers, `Browser::live_session_count()` |
 | Authentication/discovery plugins | 16–20 | `plugins/scrape-endpoints`, `ezlogin`, `captcha-handler`, `restful-resolver`, `schema-grabber` |
 | Plugin ABI and WASM design | 21 | `ProwseTk-Plugin.h`, `plugin_registry.hpp`, `wasm_runtime.hpp`, `wit/` |
+| AI oracle service | 21 | `plugins/ai-oracle`, `tests/unit/test_ai_oracle*`, `tests/integration/test_ai_oracle.cpp` |
 | IR consumers | 22–23 | `src/core/ir_*.cpp`, `tools/page2pdf`, `tools/page2latex` |
 | Crawling and watching | 24–26 | `tools/crawler`, `tools/pagewatch`, `plugins/spider`, `tools/automation` |
 | Browser handoff | 16, 18, 24, 27 | assistant-browser settings, `plugins/beacon`, Booking.com examples |

@@ -1,6 +1,16 @@
 prowsetk_gtest(prowsetk_unit_version "prowsetk.unit.version."
     "unit;core" test_version.cpp)
 
+if(TARGET ProwseTk::ai_oracle)
+    prowsetk_gtest(prowsetk_unit_ai_oracle "prowsetk.unit.ai-oracle."
+        "unit;plugin" test_ai_oracle.cpp test_ai_oracle_c.c)
+    target_link_libraries(prowsetk_unit_ai_oracle PRIVATE
+        ProwseTk::ai_oracle ProwseTk::oracle_json)
+    target_compile_definitions(prowsetk_unit_ai_oracle PRIVATE
+        AI_ORACLE_PLUGIN_PATH="$<TARGET_FILE:prowsetk_ai_oracle>")
+    add_dependencies(prowsetk_unit_ai_oracle prowsetk_ai_oracle)
+endif()
+
 prowsetk_gtest(prowsetk_unit_scrape2postman "prowsetk.unit.scrape2postman."
     "unit;plugin;endpoint-extraction" test_scrape2postman.cpp)
 target_link_libraries(prowsetk_unit_scrape2postman PRIVATE prowsetk_scrape_endpoints_static)
@@ -128,6 +138,9 @@ endif()
 
 prowsetk_gtest(prowsetk_unit_lua_endpoint_options "prowsetk.unit.lua."
     "unit;lua;endpoint-extraction" test_lua_endpoint_options.cpp)
+
+prowsetk_gtest(prowsetk_unit_lua_runtime "prowsetk.unit.lua-runtime."
+    "unit;lua" test_lua_runtime.cpp)
 
 prowsetk_gtest(prowsetk_unit_html_parser "prowsetk.unit.html-parser."
     "unit;document" test_html_parser.cpp)

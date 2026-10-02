@@ -679,8 +679,13 @@ int browser_gc(lua_State* L) {
     if (userdata->owned && userdata->browser != nullptr) {
         if (LuaRuntime* runtime = runtime_from_state(L)) {
             runtime->release_subscriptions(&userdata->browser->events());
+            // Sessions hold a raw Browser* and Session::~Session dereferences
+            // it, so freeing the browser here would dangle every session that
+            // outlives this userdata. Hand ownership to the runtime instead.
+            runtime->defer_owned_browser(userdata->browser);
+        } else {
+            delete userdata->browser;
         }
-        delete userdata->browser;
     }
     userdata->browser = nullptr;
     return 0;
@@ -818,9 +823,15 @@ int session_gc(lua_State* L) {
     auto* userdata = check_session(L, 1);
     if (userdata->alive != nullptr) {
         userdata->alive->store(false);
+        userdata->alive.reset();
     }
     delete userdata->session;
     userdata->session = nullptr;
+    // Dropping the last session may be the point at which a Lua-owned browser
+    // that was deferred by browser_gc can finally be released.
+    if (LuaRuntime* runtime = runtime_from_state(L)) {
+        runtime->flush_owned_browsers();
+    }
     return 0;
 }
 
@@ -1706,6 +1717,7 @@ int extractor_gc(lua_State* L) {
     auto* userdata = check_extractor(L, 1);
     if (userdata->alive != nullptr) {
         userdata->alive->store(false);
+        userdata->alive.reset();
     }
     if (userdata->on_document_ref != LUA_NOREF) {
         luaL_unref(L, LUA_REGISTRYINDEX, userdata->on_document_ref);
@@ -2004,6 +2016,8 @@ struct LuaRuntime::Impl {
 #ifdef PROWSETK_HAVE_LUA
     lua_State* state = nullptr;
     std::vector<LuaSubscription> subscriptions;
+    // Lua-owned browsers awaiting their last session.
+    std::vector<Browser*> owned_browsers;
 #endif
 };
 
@@ -2174,6 +2188,11 @@ LuaRuntime::~LuaRuntime() {
             }
         }
         impl_->subscriptions.clear();
+        // lua_close finalizes every userdata, so sessions are gone by now.
+        flush_owned_browsers();
+        // A deferred browser whose sessions are still shared with a C++ owner
+        // cannot be deleted safely; leaking it is the only correct outcome.
+        impl_->owned_browsers.clear();
         lua_close(impl_->state);
         impl_->state = nullptr;
     }
@@ -2260,6 +2279,33 @@ bool LuaRuntime::unsubscribe_subscription(std::uint64_t subscription_id) {
 #else
     (void)subscription_id;
     return false;
+#endif
+}
+
+void LuaRuntime::defer_owned_browser(Browser* browser) {
+#ifdef PROWSETK_HAVE_LUA
+    if (browser == nullptr) return;
+    if (std::find(impl_->owned_browsers.begin(), impl_->owned_browsers.end(),
+                  browser) == impl_->owned_browsers.end()) {
+        impl_->owned_browsers.push_back(browser);
+    }
+    flush_owned_browsers();
+#else
+    (void)browser;
+#endif
+}
+
+void LuaRuntime::flush_owned_browsers() {
+#ifdef PROWSETK_HAVE_LUA
+    for (auto it = impl_->owned_browsers.begin();
+         it != impl_->owned_browsers.end();) {
+        if ((*it)->live_session_count() == 0) {
+            delete *it;
+            it = impl_->owned_browsers.erase(it);
+        } else {
+            ++it;
+        }
+    }
 #endif
 }
 

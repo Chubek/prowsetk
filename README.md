@@ -456,7 +456,9 @@ the normal session event and lifetime rules; Lua never owns the underlying C++
 objects.
 
 Lua scripts may be loaded from files, passed as strings, or embedded directly
-into C++ applications.
+into C++ applications. Collected session and extractor userdata invalidate their
+callbacks and release their shared lifetime guards; runtime teardown removes
+the corresponding event subscriptions.
 
 ## Lua Extensions (`lprowsext`)
 
@@ -507,6 +509,16 @@ Lua extensions expose both synchronous and asynchronous behavior. They may use
 the engine's event loop, timers, request hooks, and session lifecycle events.
 
 ## Plugin System
+
+The repository includes `plugins/ai-oracle`, an optional OpenAI Responses API
+oracle built with `third_party/openaipp`. C++ helpers, an opaque C service API,
+and the callable `ai_oracle` Lua module provide bounded text/image inquiries for
+CAPTCHA assistance and structured crawl recommendations. Each client requires
+explicit enablement and a key; requests go through the host NetworkClient with
+timeouts, input/output/token limits, and a finite attempt budget. Page snapshots
+and structured context receive default redaction, and results retain advisory
+provenance. See `plugins/ai-oracle/README.md` for configuration, composition,
+Lua module loading, and supported behavior.
 
 The repository includes `plugins/spider`: `ptkspiderd` supervises persistent,
 named Flatworm crawler workers and `ptkspiderctl` controls their sessions,
@@ -2155,6 +2167,7 @@ optional components depending on the build configuration.
 | `mbedtls` | TLS primitives |
 | `nanobind` | Python bindings; requires Python 3.9+ development support |
 | `nexus` | Optional HTTP/3 (QUIC) transport |
+| `openaipp` | Optional OpenAI wire/authentication helpers for `plugins/ai-oracle`; includes cpp-httplib, MetaTk/DSLtk, and nlohmann-json headers |
 | `openssl` | Optional verified HTTPS for the POSIX socket transport (3.0+) |
 | `pugixml` | XML handling and XPath |
 | `quickjs` | Page JavaScript runtime |
@@ -2175,6 +2188,11 @@ optional components depending on the build configuration.
 Build options disable optional dependencies when their functionality is not
 required. Dependency versions, licensing, build options, and feature mappings are
 documented with the build system.
+
+`PROWSETK_BUILD_AI_ORACLE` defaults to `ON`; the target is skipped when OpenAIpp
+or its JSON headers are absent. The plugin uses OpenAIpp's header-only helpers
+with ProwseTk's NetworkClient rather than the upstream socket client. Verified
+live API access uses the existing optional OpenSSL transport; tests are offline.
 
 The current root build requires LibTomCrypt and Tokyo Cabinet source trees for
 the session-support library. Python bindings need the nanobind source when

@@ -35,3 +35,4 @@ git submodule add https://github.com/justmirror/libmnl.git	    third_party/libmn
 git submodule add https://github.com/libbpf/libbpf.git		    third_party/libbpf
 git submodule add https://github.com/hoytech/lmdbxx.git             third_party/lmdbxx
 git submodule add https://github.com/LMDB/lmdb.git                  third_party/lmdb
+git submodule add https://github.com/Chubek/OpenAIpp.git            third_party/openaipp

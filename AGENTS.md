@@ -302,6 +302,31 @@ the work is not done.
 
 # Additions & Revisions
 
+## AI oracle
+
+`plugins/ai-oracle` uses OpenAIpp's JSON/authentication helpers behind the host
+`NetworkClient` boundary. Keep dependency discovery in
+`cmake/Dependencies.cmake`; missing optional headers or
+`PROWSETK_BUILD_AI_ORACLE=OFF` must preserve the rest of the build. Inquiries are
+explicit per-client calls through `Oracle`, the opaque C service, or `ai_oracle`
+Lua userdata. Loading the ABI-v2 native facade must remain network-free.
+
+Preserve disabled defaults, HTTPS-only explicit API bases, redirect rejection,
+bounded input/response/JSON depth/token/attempt budgets, detached DOM sanitization,
+recursive structured redaction, and secret-free errors. Embedded images are
+caller-supplied PNG/JPEG data URLs, transmitted verbatim within the input budget;
+never fetch arbitrary image URLs or claim pixel redaction. Responses remain
+advisory with provenance; CAPTCHA clearance, authentication, browser actions and
+crawler policy stay with the calling plugin/driver. Never execute model output
+as Lua, JavaScript, shell commands, or native tools. Lua transport callbacks may
+not close or reenter the same active client. Keep unit and integration coverage
+under `tests/`, using hermetic host transports rather than live OpenAI calls.
+Managed Lua session/extractor finalizers must release their shared lifetime
+guards after invalidating callbacks; retain GC and leak-enabled coverage. A
+Lua-owned `Browser` must outlive its sessions: `browser_gc` defers the delete
+until `Browser::live_session_count()` reaches zero, so never delete an owned
+browser directly or restore a session's raw browser pointer to a shared owner.
+
 ## Persistent spider plugin
 
 `plugins/spider` builds `ptkspiderd`, `ptkspiderctl`, and the version-2 native

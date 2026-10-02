@@ -1,6 +1,21 @@
 prowsetk_gtest(prowsetk_integration_navigation "prowsetk.integration.network."
     "integration;network" test_navigation.cpp)
 
+if(TARGET ProwseTk::ai_oracle)
+    prowsetk_gtest(prowsetk_integration_ai_oracle "prowsetk.integration.ai-oracle."
+        "integration;plugin;lua" test_ai_oracle.cpp)
+    target_link_libraries(prowsetk_integration_ai_oracle PRIVATE
+        ProwseTk::ai_oracle ProwseTk::oracle_json)
+    target_compile_definitions(prowsetk_integration_ai_oracle PRIVATE
+        AI_ORACLE_PLUGIN_PATH="$<TARGET_FILE:prowsetk_ai_oracle>")
+    add_dependencies(prowsetk_integration_ai_oracle prowsetk_ai_oracle)
+    if(TARGET prowsetk_ai_oracle_lua)
+        target_compile_definitions(prowsetk_integration_ai_oracle PRIVATE
+            AI_ORACLE_LUA_PATH="$<TARGET_FILE:prowsetk_ai_oracle_lua>")
+        add_dependencies(prowsetk_integration_ai_oracle prowsetk_ai_oracle_lua)
+    endif()
+endif()
+
 prowsetk_gtest(prowsetk_integration_script_platform
     "prowsetk.integration.script_platform."
     "integration;javascript;document" test_script_platform.cpp)

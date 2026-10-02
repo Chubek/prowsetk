@@ -85,6 +85,16 @@ public:
     // Removes a single subscription by id. Returns whether it was found.
     bool unsubscribe_subscription(std::uint64_t subscription_id);
 
+    // Takes over a Lua-owned Browser whose userdata was collected. Sessions
+    // reach their browser through a raw pointer, so the browser may only be
+    // deleted once it reports no live sessions. Releasing is deferred here and
+    // performed by the next `flush_owned_browsers()` call.
+    void defer_owned_browser(Browser* browser);
+
+    // Deletes every deferred browser that no longer has live sessions. Called
+    // when a session is finalized and during runtime teardown.
+    void flush_owned_browsers();
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

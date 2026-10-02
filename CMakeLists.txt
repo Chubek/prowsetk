@@ -7,6 +7,8 @@ project(ProwseTk
 
 option(PROWSETK_ENABLE_JAVASCRIPT
     "Build the QuickJS page JavaScript runtime" ON)
+option(PROWSETK_BUILD_AI_ORACLE
+    "Build the optional OpenAI oracle plugin when its headers are available" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(ProwseTkHelpers)
