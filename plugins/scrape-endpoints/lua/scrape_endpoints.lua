@@ -444,7 +444,7 @@ for _, key in ipairs({"token", "access_token", "refresh_token", "id_token",
     "api_key", "apikey", "password", "passwd", "secret", "client_secret",
     "session", "sessionid", "auth", "signature", "sig"}) do sensitive[key] = true end
 
-local function postman_safe_url(value, redact)
+local function safe_export_url(value, redact)
     value = value or ""
     if not redact then return value end
     value = value:gsub("#.*$", "")
@@ -503,17 +503,17 @@ function scrape_endpoints.render_postman_json(endpoints, spec)
             end
             request_url = request_url .. fragment
         end
-        local url = postman_safe_url(request_url, redact)
+        local url = safe_export_url(request_url, redact)
         local confidence = tonumber(ep.confidence) or 0
         if confidence ~= confidence then confidence = 0 end
         confidence = math.max(0, math.min(1, confidence))
         local description = "Heuristic discovery; inferred request. Confidence: " .. tostring(confidence)
         if spec.include_provenance ~= false then
-            description = description .. "\nSource: " .. postman_safe_url(ep.source, redact)
+            description = description .. "\nSource: " .. safe_export_url(ep.source, redact)
                 .. "\nDiscovery method: " .. (ep.discovery_method or "")
-            if ep.final_url then description = description .. "\nFinal URL: " .. postman_safe_url(ep.final_url, redact) end
+            if ep.final_url then description = description .. "\nFinal URL: " .. safe_export_url(ep.final_url, redact) end
             for _, hop in ipairs(ep.redirect_chain or {}) do
-                description = description .. "\nRedirect: " .. postman_safe_url(hop, redact)
+                description = description .. "\nRedirect: " .. safe_export_url(hop, redact)
             end
             if ep.status then description = description .. "\nObserved HTTP status: " .. tostring(ep.status) end
             if ep.resolve_error then description = description .. "\nResolution failed." end
@@ -878,17 +878,13 @@ function scrape_endpoints.render_openapi_yaml(endpoints, spec)
                 end
                 if opts.include_provenance ~= false then
                     lines[#lines+1] = "      x-prowsetk-provenance:"
-                    local source_url = ep.source or ""
-                    local ep_url = ep.url or ""
-                    if redact then
-                        -- Simple redaction: remove query params with sensitive names
-                        source_url = source_url:gsub("[?&][^&]*(token|secret|password|key|auth)[^&]*", "")
-                        ep_url = ep_url:gsub("[?&][^&]*(token|secret|password|key|auth)[^&]*", "")
-                    end
+                    local source_url = safe_export_url(ep.source, redact)
+                    local ep_url = safe_export_url(ep.url, redact)
+                    local final_url = safe_export_url(ep.final_url, redact)
                     lines[#lines+1] = "        source: '" .. source_url:gsub("'", "''") .. "'"
                     lines[#lines+1] = "        url: '" .. ep_url:gsub("'", "''") .. "'"
-                    if ep.final_url and ep.final_url ~= ep_url then
-                        lines[#lines+1] = "        final-url: '" .. ep.final_url:gsub("'", "''") .. "'"
+                    if ep.final_url and final_url ~= ep_url then
+                        lines[#lines+1] = "        final-url: '" .. final_url:gsub("'", "''") .. "'"
                     end
                     lines[#lines+1] = "        discovery-method: '" .. (ep.discovery_method or ""):gsub("'", "''") .. "'"
                     lines[#lines+1] = "        confidence: " .. string.format("%.2f", ep.confidence or 0)

@@ -1,0 +1,24 @@
+[crawler]
+url = "https://example.com/"
+query = "select tag, text from <h*>"
+max_pages = 100
+max_depth = 2
+max_frontier = 1000
+max_requests = 1000
+respect_robots = true
+blocked_paths = ["*/logout*", "*/signout*", "*/delete*"]
+output = "output/pages.jsonl"
+openapi = "output/openapi.yaml"
+postman = "output/postman.json"
+
+[engine]
+javascript = true
+timeout_ms = 10000
+
+[login]
+mode = "none"
+
+[assistant]
+enabled = false
+command = "assistant-browser"
+wait_timeout_ms = 300000

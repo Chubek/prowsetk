@@ -16,6 +16,7 @@
 #include "prowsetk/endpoint_extraction.hpp"
 #include "prowsetk/error.hpp"
 #include "prowsetk/ir.hpp"
+#include "prowsetk/pdql.hpp"
 #include "prowsetk/url.hpp"
 #include "prowsetk/xpath.hpp"
 
@@ -1016,6 +1017,8 @@ int session_request(lua_State* L) {
         HttpRequest request;
         request.method = method;
         request.url = url;
+        request.timeout_ms = (*userdata->session)->browser().config().timeout_ms;
+        request.max_response_bytes = (*userdata->session)->browser().config().max_response_bytes;
         if (lua_istable(L, 4)) {
             lua_getfield(L, 4, "headers");
             if (lua_istable(L, -1)) {
@@ -1472,6 +1475,89 @@ int session_type_element(lua_State* L) {
                        ->type_element(*element_userdata->element, text)
                    ? 1
                    : 0);
+        return 1;
+    });
+}
+
+int lpdql_validate(lua_State* L) {
+    return protect(L, [&]() -> int {
+        const pdql::Query query(luaL_checkstring(L, 1));
+        lua_pushboolean(L, 1);
+        return 1;
+    });
+}
+
+int url_resolve(lua_State* L) {
+    return protect(L, [&]() -> int {
+        const char* base = luaL_checkstring(L, 1);
+        const char* reference = luaL_checkstring(L, 2);
+        const auto resolved = resolve_url(base, reference);
+        lua_pushlstring(L, resolved.data(), resolved.size());
+        return 1;
+    });
+}
+int url_normalize(lua_State* L) {
+    return protect(L, [&]() -> int {
+        auto url = parse_url(normalize_url(luaL_checkstring(L, 1)));
+        url.fragment.clear(); url.has_fragment = false;
+        const auto normalized = url.to_string();
+        lua_pushlstring(L, normalized.data(), normalized.size());
+        return 1;
+    });
+}
+int url_origin(lua_State* L) {
+    return protect(L, [&]() -> int {
+        const auto url = parse_url(luaL_checkstring(L, 1));
+        if (!url.userinfo.empty() || !url.has_host() || (url.scheme != "http" && url.scheme != "https"))
+            throw Error(ErrorCode::InvalidUrl, "expected an HTTP(S) URL without userinfo");
+        const auto origin = url.origin();
+        lua_pushlstring(L, origin.data(), origin.size());
+        return 1;
+    });
+}
+int url_redact(lua_State* L) {
+    return protect(L, [&]() -> int {
+        const auto value = Redactor().redact_url(luaL_checkstring(L, 1));
+        lua_pushlstring(L, value.data(), value.size());
+        return 1;
+    });
+}
+
+int lpdql_query(lua_State* L) {
+    return protect(L, [&]() -> int {
+        const auto document = document_from(L, 1);
+        const char* source = luaL_checkstring(L, 2);
+        const std::string format = luaL_optstring(L, 3, "json");
+        if (!document) throw Error(ErrorCode::InvalidArgument, "lpdql requires a loaded document or session");
+        const auto rows = pdql::Query(source).execute(*document);
+        pdql::Format encoding = pdql::Format::Json;
+        if (format == "yaml") encoding = pdql::Format::Yaml;
+        else if (format == "xml") encoding = pdql::Format::Xml;
+        else if (format == "sexpr") encoding = pdql::Format::SExpr;
+        else if (format != "json") throw Error(ErrorCode::InvalidArgument, "unknown PDQL format");
+        const auto serialized = pdql::serialize(rows, encoding);
+        lua_pushlstring(L, serialized.data(), serialized.size());
+        return 1;
+    });
+}
+
+int lpdql_rows(lua_State* L) {
+    return protect(L, [&]() -> int {
+        const auto document = document_from(L, 1);
+        const char* source = luaL_checkstring(L, 2);
+        if (!document) throw Error(ErrorCode::InvalidArgument, "lpdql requires a loaded document or session");
+        const auto rows = pdql::Query(source).execute(*document);
+        lua_newtable(L);
+        int index = 1;
+        for (const auto& row : rows) {
+            lua_newtable(L);
+            for (const auto& [name, value] : row.fields) {
+                if (value.numeric) lua_pushnumber(L, std::stod(value.text));
+                else lua_pushlstring(L, value.text.data(), value.text.size());
+                lua_setfield(L, -2, name.c_str());
+            }
+            lua_rawseti(L, -2, index++);
+        }
         return 1;
     });
 }
@@ -1947,8 +2033,28 @@ LuaRuntime::LuaRuntime() : impl_(std::make_unique<Impl>()) {
         lua_pushcfunction(impl_->state, browser_new);
         lua_setfield(impl_->state, -2, "new");
         lua_setfield(impl_->state, -2, "browser");
+        lua_newtable(impl_->state);
+        lua_pushcfunction(impl_->state, url_resolve);
+        lua_setfield(impl_->state, -2, "resolve");
+        lua_pushcfunction(impl_->state, url_normalize);
+        lua_setfield(impl_->state, -2, "normalize");
+        lua_pushcfunction(impl_->state, url_origin);
+        lua_setfield(impl_->state, -2, "origin");
+        lua_pushcfunction(impl_->state, url_redact);
+        lua_setfield(impl_->state, -2, "redact");
+        lua_setfield(impl_->state, -2, "url");
         set_loaded_module(impl_->state, "lprowse", -1);
         lua_setglobal(impl_->state, "lprowse");
+
+        lua_newtable(impl_->state);
+        lua_pushcfunction(impl_->state, lpdql_query);
+        lua_setfield(impl_->state, -2, "query");
+        lua_pushcfunction(impl_->state, lpdql_rows);
+        lua_setfield(impl_->state, -2, "rows");
+        lua_pushcfunction(impl_->state, lpdql_validate);
+        lua_setfield(impl_->state, -2, "validate");
+        set_loaded_module(impl_->state, "lpdql", -1);
+        lua_setglobal(impl_->state, "lpdql");
 
         // ------------------------------------------------------------------
         // lprowsext: the Lua extension layer. Submodules expose XPath DOM

@@ -55,6 +55,20 @@ int run_command(const std::string& command) {
 #endif
 }
 
+TEST(CliCrawler, BookingExampleRunsOfflineThroughProwseConfig) {
+#ifndef PROWSETK_HAVE_LUA
+    GTEST_SKIP() << "Lua unavailable";
+#endif
+#ifndef PROWSETK_HAVE_TOMLPLUSPLUS
+    GTEST_SKIP() << "TOML unavailable";
+#endif
+    const auto output = std::string(TEST_BINARY_DIR) + "/cli_booking_crawler.jsonl";
+    const auto config = std::string(PROWSETK_SOURCE_DIR) + "/tools/crawler/booking-dotcom-admin/Prowse.toml";
+    EXPECT_EQ(run_command(quote_shell(PROWSETK_CLI_BIN) + " run booking-dotcom-admin --config " +
+        quote_shell(config) + " --html " + quote_shell("<h1>CLI booking crawler</h1>") + " --output " + quote_shell(output)), 0);
+    EXPECT_NE(read_file(output).find("CLI booking crawler"), std::string::npos);
+}
+
 // Writes a Prowse.toml that declares the shipped drivers with absolute script
 // paths, so the CLI test exercises the real driver scripts.
 void write_fixture_config(const std::string& path) {

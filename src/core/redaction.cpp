@@ -26,6 +26,24 @@ bool contains_case_insensitive(const std::vector<std::string>& names,
                        });
 }
 
+std::string decode_parameter_name(std::string_view name) {
+    auto hex = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    std::string result;
+    for (std::size_t i = 0; i < name.size(); ++i) {
+        if (name[i] == '%' && i + 2 < name.size()) {
+            const int high = hex(name[i + 1]), low = hex(name[i + 2]);
+            if (high >= 0 && low >= 0) { result += static_cast<char>((high << 4) | low); i += 2; continue; }
+        }
+        result += name[i] == '+' ? ' ' : name[i];
+    }
+    return result;
+}
+
 }  // namespace
 
 RedactionPolicy RedactionPolicy::defaults() {
@@ -84,9 +102,10 @@ std::string Redactor::redact_url(std::string_view url) const {
     } catch (...) {
         return std::string(url);
     }
-    if (!parsed.has_query) {
-        return std::string(url);
-    }
+    const bool private_components = !parsed.userinfo.empty() || parsed.has_fragment;
+    parsed.userinfo.clear();
+    parsed.fragment.clear(); parsed.has_fragment = false;
+    if (!parsed.has_query) return private_components ? parsed.to_string() : std::string(url);
 
     std::string rebuilt;
     std::size_t start = 0;
@@ -105,7 +124,7 @@ std::string Redactor::redact_url(std::string_view url) const {
             rebuilt += "&";
         }
         first = false;
-        if (is_sensitive_query_parameter(key)) {
+        if (is_sensitive_query_parameter(decode_parameter_name(key))) {
             rebuilt += key + "=" + policy_.replacement;
         } else {
             rebuilt += pair;

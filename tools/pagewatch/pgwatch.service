@@ -1,0 +1,16 @@
+[Unit]
+Description=ProwseTk DOM page watchers
+After=network.target
+
+[Service]
+Type=simple
+User=pagewatch
+RuntimeDirectory=pagewatch
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/local/bin/pgwatchd --config /etc/pagewatch/Pagewatch.toml
+Restart=on-failure
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

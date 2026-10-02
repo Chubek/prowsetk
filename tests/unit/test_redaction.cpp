@@ -41,6 +41,15 @@ TEST(Redaction, RedactsHeaderList) {
     EXPECT_EQ(redacted[1].second, "application/json");
 }
 
+TEST(Redaction, EncodedParametersUserinfoAndFragmentsStayPrivate) {
+    const Redactor redactor;
+    const auto url = redactor.redact_url("https://private-user:private-pass@api.test/x?t%6Fken=private-query&page=2#private-fragment");
+    EXPECT_EQ(url.find("private-"), std::string::npos);
+    EXPECT_NE(url.find("t%6Fken=[REDACTED]"), std::string::npos);
+    EXPECT_NE(url.find("page=2"), std::string::npos);
+    EXPECT_EQ(redactor.redact_url("https://private-user:private-pass@api.test/x#private-fragment"), "https://api.test/x");
+}
+
 TEST(Redaction, CustomPolicy) {
     RedactionPolicy policy;
     policy.header_names = {"x-custom"};

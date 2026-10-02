@@ -1,0 +1,20 @@
+[project]
+name = "booking-admin-crawler"
+root = "."
+
+[[drivers]]
+name = "booking-dotcom-admin"
+script = "driver.lua"
+arguments = [
+  { name = "url", type = "url", default = "https://admin.booking.com/" },
+  { name = "html", type = "string" },
+  { name = "output", type = "path" },
+  { name = "query", type = "string", default = "select tag, text from <h*>" },
+  { name = "max_pages", type = "integer", default = 100 },
+  { name = "max_depth", type = "integer", default = 3 },
+  { name = "login_mode", type = "string", default = "form" },
+  { name = "username_env", type = "string", default = "BOOKING_DOTCOM_USER" },
+  { name = "password_env", type = "string", default = "BOOKING_DOTCOM_PASS" },
+  { name = "success_selector", type = "string", default = "a[href*='logout'], [data-testid='account-menu']" },
+  { name = "trusted_origins", type = "string", default = "https://account.booking.com" }
+]

@@ -40,6 +40,18 @@ target_link_libraries(prowsetk_unit_encrypted_storage PRIVATE ProwseTk::session)
 prowsetk_gtest(prowsetk_unit_dom "prowsetk.unit.document."
     "unit;document" test_dom.cpp)
 
+prowsetk_gtest(prowsetk_unit_pdql "prowsetk.unit.pdql."
+    "unit;document;lua" test_pdql.cpp)
+if(PROWSETK_HAVE_PUGIXML)
+    target_compile_definitions(prowsetk_unit_pdql PRIVATE PROWSETK_HAVE_PUGIXML=1)
+endif()
+if(TARGET prowsetk_pagewatch)
+    prowsetk_gtest(prowsetk_unit_pagewatch "prowsetk.unit.pagewatch."
+        "unit;document;lua;storage" test_pagewatch.cpp)
+    target_link_libraries(prowsetk_unit_pagewatch PRIVATE prowsetk_pagewatch)
+    target_compile_definitions(prowsetk_unit_pagewatch PRIVATE TEST_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+endif()
+
 prowsetk_gtest(prowsetk_unit_css "prowsetk.unit.document.css."
     "unit;document" test_css_selector.cpp)
 

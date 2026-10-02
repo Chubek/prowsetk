@@ -54,6 +54,20 @@ TEST(Drivers, LoadAndExposeEntrypoint) {
     }
 }
 
+TEST(Drivers, CrawlerBookingExampleUsesOfflineDriverContract) {
+    if (!LuaRuntime::available()) GTEST_SKIP();
+    LuaRuntime lua;
+    const auto path = std::string(PROWSETK_SOURCE_DIR) + "/tools/crawler/booking-dotcom-admin/driver.lua";
+    ASSERT_TRUE(lua.run_file(path).ok) << lua.last_error();
+    std::string code;
+    ASSERT_TRUE(lua.call_function("main", {
+        {"url", "url", "https://admin.booking.com/"},
+        {"html", "string", "<h1>Booking offline</h1>"},
+        {"login_mode", "string", "form"}}, &code).ok) << lua.last_error();
+    EXPECT_EQ(code, "0");
+    ASSERT_TRUE(lua.run("assert(__crawler_result{kind='pages'}:find('Booking offline',1,true))").ok) << lua.last_error();
+}
+
 TEST(Drivers, CrawlSiteWritesPageMetadata) {
     if (!LuaRuntime::available()) {
         GTEST_SKIP() << "ProwseTk was built without Lua support";

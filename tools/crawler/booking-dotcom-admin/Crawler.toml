@@ -1,0 +1,32 @@
+[crawler]
+url = "https://admin.booking.com/"
+query = 'select tag, text from xpath("//main//h1 | //main//h2 | //main//table")'
+max_pages = 100
+max_depth = 3
+max_requests = 1000
+respect_robots = true
+blocked_paths = ["*/logout*", "*/signout*", "*/delete*", "*/cancel*"]
+cookies_json = "cookies.json"
+output = "output/pages.jsonl"
+openapi = "output/booking-admin.yaml"
+postman = "output/booking-admin.postman.json"
+
+[login]
+mode = "form"
+url = "https://admin.booking.com/"
+username_env = "BOOKING_DOTCOM_USER"
+password_env = "BOOKING_DOTCOM_PASS"
+as_token_env = "BOOKING_DOTCOM_AS_TOKEN"
+dotenv = ".env"
+success_selector = 'a[href*="logout"], button[data-action="logout"], [data-testid="account-menu"]'
+trusted_origins = ["https://account.booking.com"]
+
+[engine]
+javascript = true
+timeout_ms = 30000
+
+[assistant]
+enabled = false
+command = "firefox"
+wait_timeout_ms = 300000
+# Or set project = "Assistant/Prowse.toml" and driver = "assist".

@@ -79,11 +79,18 @@ prowsetk/
 ├── drivers/
 ├── examples/
 ├── resources/
+├── manual/
 └── scripts/
 ```
 
 `third_party/` is populated from `.gitmodules` and is excluded by `.gitignore`.
 `scripts/scaffold.sh` creates or refreshes this skeleton.
+
+`manual/README.md` indexes 30 separate numbered Markdown chapters covering the
+implemented engine, APIs, Lua extensions, plugins and tools. Keep examples and
+support levels aligned with callable interfaces when extending those surfaces.
+`scripts/build-docs.sh` checks chapter completeness and builds combined HTML and
+LaTeX through Pandoc, using `scripts/manual-links.lua` for navigation links.
 
 ## 4. Build System Requirements
 
@@ -561,8 +568,10 @@ content.
 ## Anti-bot detection and Captcha Handler
 
 Core anti-bot detection is heuristic and reports provenance, confidence, and
-signals through `AntiBotDetector`, `Session:detect_anti_bot`, and the
-`anti_bot_detected` event. Do not present detections as authoritative proof.
+signals through `AntiBotDetector`, C++ `Session::anti_bot_detection()`, and the
+`anti_bot_detected` event. Lua subscribes to that event or uses captcha-handler's
+response helper; its generic Session method table has no `detect_anti_bot()`.
+Do not present detections as authoritative proof.
 
 `plugins/captcha-handler` builds on that subsystem and exposes host-mediated
 handling plans only. It may prompt a user, call a configured solver API, dispatch
@@ -593,8 +602,10 @@ content.
 ## Anti-bot detection and Captcha Handler
 
 Core anti-bot detection is heuristic and reports provenance, confidence, and
-signals through `AntiBotDetector`, `Session:detect_anti_bot`, and the
-`anti_bot_detected` event. Do not present detections as authoritative proof.
+signals through `AntiBotDetector`, C++ `Session::anti_bot_detection()`, and the
+`anti_bot_detected` event. Lua subscribes to that event or uses captcha-handler's
+response helper; its generic Session method table has no `detect_anti_bot()`.
+Do not present detections as authoritative proof.
 
 `plugins/captcha-handler` builds on that subsystem and exposes host-mediated
 handling plans only. It may prompt a user, call a configured solver API, dispatch
@@ -732,6 +743,44 @@ Encrypted-storage tests retain production-cost key derivation and use a bounded
 retain the default 60-second bound.
 
 ## DOM and DOM Maniplators
+
+### Implemented PDQL and automation tools
+
+`tools/crawler` is the POSIX Lua/TOML crawler host. Keep crawl scheduling in
+`lua/lcrawler.lua`, reuse the ezlogin and scrape-endpoints Lua plugin APIs, and
+enforce origin/request bounds at the host transport boundary (including
+redirects and page scripts). Preserve robots checks, bounded breadth-first
+frontiers, offline HTML mode, positive DOM login evidence, default redaction
+and explicit incomplete-coverage summaries. Assistant projects/browser commands
+require user approval and bounded argv-based process execution; installed
+assistant projects resolve `prowsetk` beside explicit crawler paths or on `PATH`.
+Successful handoffs still require fresh session data and login confirmation. The
+Booking.com configuration lives in `tools/crawler/booking-dotcom-admin`.
+
+`tools/pagewatch` is Linux-only. `pgwatchd` keeps nonblocking control IPC
+separate from each Lua/Flatworm worker and from configured Lua actions.
+`pgwatchctl` copies watcher scripts/configurations into owner-only deployment
+directories under `/var/run/pagewatch` by default. `lpgwatch` queries managed
+sessions with core `lpdql`; compare bounded, sanitized projections, not raw
+page credentials. Preserve process watchdogs (including coroutine loops), worker
+termination on abrupt daemon death, partial-client timeouts, same-UID socket
+policy, bounded queues, explicit lost
+history and paused restart recovery. Browser/Lua state, pending actions and
+event history do not persist; `/var/run` does not imply reboot persistence.
+
+The implemented PDQL slice is bounded tag globs, core XPath, projections,
+equality guards, trimming and numeric aggregates, with JSON/YAML/XML/S-expression
+serialization. `lpdql.query`/`rows`/`validate` and the C/C++ APIs share it.
+Unsupported language features fail explicitly; the specification below is a
+design direction, not a claim of full marionette/RE2 support. PDQL HTML input
+uses Flatworm's bounded parser rather than a second HTML tokenizer. New live
+DOM querying has default snapshot redaction and does not mutate the page.
+
+Keep unit coverage in `tests/unit/test_pdql.cpp` / `test_pagewatch.cpp`, crawler
+integration in `tests/integration/test_crawler.cpp` / `test_crawler_cli.py`,
+and daemon/control integration in `test_pagewatch_daemon.py`. Driver adapters
+also retain `test_drivers.cpp` and `test_cli.cpp` coverage. See the tool READMEs
+for the exact supported contracts.
 
 This is an addition to ProwseTk that will allow further uses of it. What you will add 
 to ProwseTk's core engine is a *queryable DOM*. At the moment, the DOM is weak. What

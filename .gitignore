@@ -39,6 +39,8 @@ _scraped/
 # ProwseTk runtime state
 # ---------------------------------------------------------------------------
 .prowse/
+/tools/crawler/**/output/
+/tools/crawler/**/cookies.json
 *.prowse-cache
 .cache
 .absyncache

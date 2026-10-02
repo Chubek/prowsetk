@@ -8,7 +8,8 @@ Commands are entered with : and are bounded to the current session.
 @key :select CSS     count matching elements
 @key :click CSS      perform a synthetic click
 @key :set CSS VALUE  type into a control
-@key :links FILE     save redacted links
+@key :links          list redacted links
+@key :urls FILE      save redacted links
 @key :endpoints FILE export heuristic OpenAPI
 
 - Search help:search

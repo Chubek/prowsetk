@@ -31,7 +31,8 @@ public:
     // Returns the value unchanged unless the header name is sensitive.
     std::string redact_header(std::string_view name, std::string_view value) const;
 
-    // Rewrites the query string of `url`, replacing sensitive parameter values.
+    // Rewrites the query string of `url`, replacing sensitive parameter values
+    // (including percent-encoded names), and strips userinfo and fragments.
     std::string redact_url(std::string_view url) const;
 
     std::vector<std::pair<std::string, std::string>> redact_headers(

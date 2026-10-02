@@ -1,0 +1,8 @@
+prowsetk_add_executable(crawler main.cpp)
+target_link_libraries(crawler PRIVATE prowsetk_automation)
+if(TARGET prowsetk_cli)
+    target_compile_definitions(crawler PRIVATE PROWSETK_CLI_BUILD_PATH="$<TARGET_FILE:prowsetk_cli>")
+endif()
+install(TARGETS crawler RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(FILES Crawler.toml driver.lua README.md DESTINATION "${CMAKE_INSTALL_DATADIR}/prowsetk/crawler")
+install(DIRECTORY lua booking-dotcom-admin DESTINATION "${CMAKE_INSTALL_DATADIR}/prowsetk/crawler")

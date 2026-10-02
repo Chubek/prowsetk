@@ -33,6 +33,15 @@ names, password/token JSON keys, secret-bearing form values) keep their type
 but lose their example to `[REDACTED]` by default. Network access stays
 host-mediated; the plugin never opens sockets and never logs secrets.
 
+The evidence hierarchy and full body/schema budgets above describe the C++
+implementation. The current Lua helper covers typed URL parameters, matching
+form request fields, and GET-response JSON inference. Script-literal/generic
+request-body fallbacks and `ResolvedBody` reuse use the C++ API. Lua normalizes
+`max_body_bytes` but does not enforce its truncation before JSON decoding;
+configure the owning Browser/transport response-size bound for Lua probes.
+See [Manual Chapter 20](../../manual/20-schema-grabber.md) for API differences
+and offline composition examples.
+
 ## Lua
 
 ```lua

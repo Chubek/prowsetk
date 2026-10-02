@@ -21,6 +21,13 @@ full RESTful API surface is discovered.
 Discovery is heuristic and never authoritative. Network access stays
 host-mediated; the plugin never opens sockets and never logs secrets.
 
+The C++ helpers produce the OpenAPI artifact and `x-prowsetk-restful` summary.
+The Lua helper returns endpoints, resolution records, counters, completeness,
+and warnings; a surrounding driver exports them through scrape-endpoints or
+schema-grabber and attaches summary metadata explicitly. Loading the native
+shared plugin registers metadata but does not automatically perform resolution.
+See [Manual Chapter 19](../../manual/19-restful-resolver.md).
+
 ## Lua
 
 ```lua

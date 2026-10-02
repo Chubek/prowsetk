@@ -33,9 +33,11 @@ fi
 
 mkdir -p -- "$output_dir/html" "$output_dir/latex"
 pandoc --standalone --toc --metadata title='ProwseTk Manual' \
+    --lua-filter "$project_root/scripts/manual-links.lua" \
     -f markdown -t html5 -o "$output_dir/html/index.html" \
     "$manual_dir/README.md" "${chapters[@]}"
 pandoc --standalone --toc --metadata title='ProwseTk Manual' \
+    --lua-filter "$project_root/scripts/manual-links.lua" \
     -f markdown -t latex -o "$output_dir/latex/prowsetk.tex" \
     "$manual_dir/README.md" "${chapters[@]}"
 printf 'Built %s and %s\n' "$output_dir/html/index.html" \

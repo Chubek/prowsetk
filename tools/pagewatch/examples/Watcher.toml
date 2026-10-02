@@ -1,0 +1,10 @@
+[watcher]
+url = "https://example.com/"
+query = 'select tag, text from xpath("//main//h1 | //main//h2")'
+interval_ms = 30000
+worker_timeout_ms = 60000
+# html_file = "page.html" # deterministic offline polling
+
+[engine]
+javascript = true
+timeout_ms = 10000

@@ -2,11 +2,18 @@
 
 Python interface for [ProwseTk](https://github.com/prowsetk/prowsetk) — headless, programmable browser toolkit.
 
-Uses [nanobind](https://github.com/wjakob/nanobind) to bind C++ to Python. All ProwseTk features are accessible, plus Python-exclusive conveniences.
+Uses [nanobind](https://github.com/wjakob/nanobind) to bind the core C++ interfaces
+to Python, with Python-exclusive conveniences. See
+[Manual Chapter 28](../../manual/28-web-and-python-interfaces.md) for examples
+and current support levels.
 
 ## Features
 
-- **Full coverage**: `Browser`, `Session`, `Document`, `Element`, `NetworkClient`, `Storage`, `JavaScriptRuntime`, `LuaRuntime`, `WebPlatform`, `CapabilitySet`, `EventDispatcher`, `EndpointExtractor`, IR (`ProwseXAS`/`ProwseDOM`/`ProwseVTD`/`ProwseIML`), `PluginRegistry`, `WasmRuntime`, `ProjectConfig` (`Prowse.toml`), `WebInterface`, `Redaction`, URL utilities, XPath.
+- **Core bindings**: `Browser`, `Session`, `Document`, `Element`, `NetworkClient`, `Storage`, `JavaScriptRuntime`, `LuaRuntime`, `WebPlatform`, `CapabilitySet`, `EventDispatcher`, `EndpointExtractor`, IR (`ProwseXAS`/`ProwseDOM`/`ProwseVTD`/`ProwseIML`), `PluginRegistry`, `WasmRuntime`, `ProjectConfig` (`Prowse.toml`), `WebInterface`, `Redaction`, URL utilities, XPath.
+
+  Newer PDQL and canonical ProwseEvent entrypoints are available through C/C++
+  and Lua rather than direct Python bindings. Capability restrictions and the
+  current disabled WASM runtime also apply in Python.
 
 - **Python-exclusive**:
   - Context managers: `with Browser() as b:` / `with b.create_session() as s:`

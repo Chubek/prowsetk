@@ -78,6 +78,32 @@ prowsetk_gtest(prowsetk_integration_drivers "prowsetk.integration.driver."
 target_compile_definitions(prowsetk_integration_drivers PRIVATE
     PROWSETK_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     TEST_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+
+if(TARGET crawler)
+    prowsetk_gtest(prowsetk_integration_crawler "prowsetk.integration.crawler."
+        "integration;lua;document;endpoint-extraction" test_crawler.cpp)
+    target_link_libraries(prowsetk_integration_crawler PRIVATE prowsetk_automation)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME prowsetk.integration.crawler.command
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_crawler_cli.py"
+                "$<TARGET_FILE:crawler>" "${PROJECT_SOURCE_DIR}")
+        set_tests_properties(prowsetk.integration.crawler.command PROPERTIES
+            LABELS "integration;lua;document;endpoint-extraction" TIMEOUT 60
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+endif()
+if(TARGET pgwatchd)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME prowsetk.integration.pagewatch.daemon
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_pagewatch_daemon.py"
+                "$<TARGET_FILE:pgwatchd>" "$<TARGET_FILE:pgwatchctl>")
+        set_tests_properties(prowsetk.integration.pagewatch.daemon PROPERTIES
+            LABELS "integration;lua;document;storage" TIMEOUT 60
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+endif()
 if(PROWSETK_HAVE_LUA)
     target_compile_definitions(prowsetk_integration_drivers PRIVATE
         PROWSETK_HAVE_LUA=1)

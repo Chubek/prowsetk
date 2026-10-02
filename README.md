@@ -11,8 +11,14 @@ ProwseTk does not depend on WebKit, Blink, or Gecko. It ships its own lightweigh
 engine, **Flatworm**, optimized for automation and programmability rather than
 complete browser compatibility or pixel-perfect rendering.
 
+Read the [ProwseTk Manual](manual/README.md) for 30 chapters covering installation,
+the core APIs, Lua drivers/extensions, plugins, tools, and client interfaces.
+It includes practical examples, configuration references, resource bounds, and
+the current implementation's support levels.
+
 ## Table of Contents
 
+- [Manual](manual/README.md)
 - [Design Goals](#design-goals)
 - [Architecture](#architecture)
 - [Flatworm](#flatworm)
@@ -32,6 +38,7 @@ complete browser compatibility or pixel-perfect rendering.
 - [Security and Resource Limits](#security-and-resource-limits)
 - [Project Configuration (`Prowse.toml`)](#project-configuration-prowsetoml)
 - [Drivers](#drivers)
+- [Automation Tools](#automation-tools)
 - [Build and Runtime Strategy](#build-and-runtime-strategy)
 - [Dependencies](#dependencies)
 - [Compatibility Policy](#compatibility-policy)
@@ -146,17 +153,16 @@ Flatworm does not require:
 
 ## Parsing HTML and CSS
 
-ProwseTk does not render pages, but it retains the capability to do so. It parses
-page HTML into a DOM (Document Object Model), which enables JavaScript evaluation
-and a broad range of document-processing capabilities. The DOM is provided by
-NetSurf's DOM library (`libdom`). HTML parsing uses `lexbor`, with
-`gumbo-parser` available as a lenient fallback.
+ProwseTk parses page HTML into Flatworm's DOM (Document Object Model), enabling
+JavaScript evaluation and document processing. `BrowserConfig::html_parser`
+defaults to **Flatworm's built-in tolerant parser**, a dependency-free
+implementation of the `Document`/`Element`/CSS-selector slice. Optional `lexbor`
+and `gumbo-parser` backends copy their parsed trees into that shared DOM model;
+`HtmlParser::Auto` prefers Lexbor, then Gumbo, then the built-in parser. NetSurf's
+`libdom` remains a declared dependency rather than the current DOM owner.
 
-The current core also ships **Flatworm's built-in tolerant parser**, a
-dependency-free implementation of the `Document`/`Element`/CSS-selector slice.
-It exists so the engine configures, builds, and tests with no third-party HTML
-toolchain present, and it defines the DOM contract that the `lexbor` and
-`gumbo-parser` backends will satisfy. Selector support covers type, class, id,
+The built-in parser keeps the engine usable without a third-party HTML
+toolchain. Selector support covers type, class, id,
 attribute operators, the descendant/child/adjacent/general-sibling combinators,
 selector lists, Unicode CSS escapes, explicit ASCII case-insensitive (`i`) and
 case-sensitive (`s`) attribute flags, and structural child/of-type pseudo-classes
@@ -1060,6 +1066,9 @@ Postman exports omit static assets and paths that contain JavaScript function
 expressions or arrow functions. Query parameters are not treated as path code;
 `api_only = false` retains unfiltered discoveries. Recursive JSON discoveries
 use the same filter before export.
+Lua OpenAPI and Postman exporters share URL redaction for query parameters,
+percent-encoded parameter names, URL userinfo and provenance/redirect URLs.
+Core URL redaction also strips userinfo and fragments before tool output.
 
 The host-facing WIT inputs and outputs:
 
@@ -1370,28 +1379,17 @@ isolated JavaScript environment for page scripts.
 
 ## Asynchronous Operation
 
-ProwseTk supports both synchronous and asynchronous usage.
+The current public navigation, request, script, and Lua calls are synchronous.
+Embedders arrange asynchronous scheduling through their own task/thread
+infrastructure and serialize access to each session's mutable state.
+There are no public `navigate_async` or `request_async` methods today.
 
-Synchronous APIs suit:
-
-- Small scraping tools
-- Command-line applications
-- Simple document extraction
-- One-shot endpoint discovery
-
-Asynchronous APIs suit:
-
-- Multiple concurrent sessions
-- Crawling
-- Long-running automation
-- Network-heavy workflows
-- Timers and event handlers
-- Streaming extraction
-- Interactive Lua applications
-
-Lua APIs may use callbacks, promises, coroutines, or another documented
-asynchronous abstraction. The chosen mechanism integrates with the engine's event
-loop without requiring a graphical application framework.
+Crawler orchestrates one session; pagewatch and spider supervise independent
+browser workers in separate processes. The service-layer gateway queues work
+above the synchronous core. Page promises, timers, and microtasks run through
+bounded lifecycle flushes, without requiring a graphical application framework.
+See [Manual Chapter 6](manual/06-sessions-and-networking.md) for host scheduling
+and [Chapter 12](manual/12-javascript.md) for page-script lifecycle behavior.
 
 ## Events and Hooks
 
@@ -1520,9 +1518,12 @@ Plugins and Lua extensions declare the capabilities they require.
 
 ## Project Configuration (`Prowse.toml`)
 
-A ProwseTk project is configured through `Prowse.toml`. A boilerplate file is
-created with `prowsetk init`. The file specifies driver scripts, extensions,
-plugins, special commands, and related settings.
+A ProwseTk project is configured through an authored `Prowse.toml` or a copied
+example. The file specifies driver scripts, extensions, plugins, special
+commands, and related settings. The current CLI implements `run` for declared
+drivers; the broader configuration below also contains host-consumed and
+design-level settings. See [Manual Chapter 4](manual/04-project-configuration.md)
+for the settings the CLI currently applies.
 
 ```toml
 # Prowse.toml
@@ -2006,13 +2007,69 @@ user-consented addon flow (List Flashes, Connect to Flash, Send Network
 Info) before polling the bounded queue. Offline `--html` runs never flash,
 and `--beacon_json FILE-CONTENTS` stays the hermetic alternative.
 
+## Automation Tools
+
+### Lua crawler
+
+`tools/crawler` builds `crawler`, a TOML-configured, Lua-driven breadth-first
+page crawler. It reuses ezlogin for authentication, scrape-endpoints for merged
+OpenAPI/Postman discovery, and the core PDQL engine for page information.
+Same-origin page visits, transport-level origin/request limits, robots rules,
+deduplication and bounded frontiers keep runs finite. An optional approved
+assistant browser or `Prowse.toml` assistant project can supply fresh session
+cookies before one retry; login still requires positive DOM evidence.
+
+```sh
+build/default/tools/crawler/crawler --config tools/crawler/Crawler.toml
+build/default/tools/crawler/crawler \
+  --config tools/crawler/booking-dotcom-admin/Crawler.toml
+```
+
+Every driver supports offline `--html`; output is sanitized JSONL with optional
+heuristic API specifications. See [tools/crawler/README.md](tools/crawler/README.md)
+for configuration, bounds, Lua hooks and the Booking.com example.
+
+### DOM pagewatch
+
+`tools/pagewatch` builds Linux `pgwatchd` and `pgwatchctl`. Each deployed Lua
+script uses `lpgwatch` to register a PDQL projection over its managed Flatworm
+session. Workers periodically reload their source, sample the resulting DOM,
+and notify the daemon through IPC when selected data changes. The daemon keeps
+sanitized snapshots and bounded update queues and may run a configured Lua
+action in a separately supervised process.
+
+```sh
+build/default/tools/pagewatch/pgwatchd --config tools/pagewatch/Pagewatch.toml
+build/default/tools/pagewatch/pgwatchctl deploy headings \
+  tools/pagewatch/examples/headings.lua --config tools/pagewatch/examples/Watcher.toml
+build/default/tools/pagewatch/pgwatchctl data headings
+```
+
+The default runtime root is `/var/run/pagewatch`, owner-only and owned by the
+daemon account; `--directory DIR` supports local unprivileged use. Deployments,
+snapshots and counters recover paused on daemon restart. Lua/browser state,
+event queues and pending actions are process-local. Monitoring is polling and
+can miss transient changes between samples. See
+[tools/pagewatch/README.md](tools/pagewatch/README.md) for commands, deployment,
+action contracts, recovery and resource limits.
+
+The core `lpdql` module exposes `query(document_or_session, source, format)`,
+`rows(document_or_session, source)` and `validate(source)`. Queries use an
+isolated snapshot of the current DOM and default redaction; the live page is
+not mutated by selection. The supported PDQL slice includes tag globs, true
+core XPath, named projections, equality guards, trimming and basic numeric
+aggregates. Unsupported expressions fail explicitly; the full proposed
+marionette/RE2 language is not implemented. C and C++ APIs remain available in
+`pdql.h` / `pdql.hpp`. Both tools reuse existing Lua, tomlplusplus and optional
+pugixml dependencies and need no WASM toolchain.
+
 ## Build and Runtime Strategy
 
 The command reference lives in `man/man1/prowsetk.1` and
-`man/man5/Prowse.toml.5`. `scripts/build-docs.sh [output-directory]` builds
-HTML and LaTeX from `manual/` with Pandoc once the 30-chapter manual has been
-written and its implementation coverage verified. It fails explicitly if the
-manual is incomplete; generated output defaults to `build/docs/`.
+`man/man5/Prowse.toml.5`. The [manual index](manual/README.md) links all 30
+Markdown chapters. `scripts/build-docs.sh [output-directory]` builds combined
+HTML and LaTeX with Pandoc, checking chapter completeness and resolving manual
+navigation links. Generated output defaults to `build/docs/`.
 
 The WASM adapter currently returns a disabled runtime even with
 `PROWSETK_ENABLE_WASM=ON`. The WASM preset checks the disabled-path contract;
@@ -2096,6 +2153,7 @@ optional components depending on the build configuration.
 | `lmdbxx` | Header-only C++ RAII wrapper used by the spider's LMDB backend |
 | `lua` | Automation and extension runtime |
 | `mbedtls` | TLS primitives |
+| `nanobind` | Python bindings; requires Python 3.9+ development support |
 | `nexus` | Optional HTTP/3 (QUIC) transport |
 | `openssl` | Optional verified HTTPS for the POSIX socket transport (3.0+) |
 | `pugixml` | XML handling and XPath |
@@ -2103,7 +2161,9 @@ optional components depending on the build configuration.
 | `re2` | Safe regular-expression matching |
 | `simdjson` | High-performance JSON parsing |
 | `spdlog` | Structured and asynchronous logging |
+| `termlib` | Optional terminal/Termscript substrate for Prowse-TUI; parser generation uses Perl |
 | `tomlplusplus` | `Prowse.toml` parsing |
+| `Tokyo-Cabinet` | Persistent storage backend in the session-support library |
 | `uriparser` | URI parsing and normalization |
 | `uvwasi` | WASI system-call support |
 | `wasi-libc` | C standard library for WASM |
@@ -2115,6 +2175,15 @@ optional components depending on the build configuration.
 Build options disable optional dependencies when their functionality is not
 required. Dependency versions, licensing, build options, and feature mappings are
 documented with the build system.
+
+The current root build requires LibTomCrypt and Tokyo Cabinet source trees for
+the session-support library. Python bindings need the nanobind source when
+Python development support is found. Tokyo Cabinet, nanobind, and Termlib are
+consumed directly from `third_party/` but are not currently declared in
+`.gitmodules`; see [Manual Chapter 2](manual/02-build-and-installation.md) for
+the build prerequisites and optional-target checks. The dependency inventory
+also includes design-level integrations; `cmake/Dependencies.cmake` defines
+which ones the current build uses.
 
 ### Page IR to PDF
 
@@ -2236,12 +2305,12 @@ int main() {
     auto session = browser.create_session();
     session->navigate("https://example.com");
 
-    const auto& document = session->document();
+    const auto document = session->document();
 
-    std::cout << document.title() << '\n';
+    std::cout << document->title() << '\n';
 
-    for (const auto& link : document.query_selector_all("a")) {
-        std::cout << link.attribute("href") << '\n';
+    for (const auto& link : document->query_selector_all("a")) {
+        std::cout << link->attribute("href") << '\n';
     }
 
     return 0;
@@ -2256,13 +2325,13 @@ local prowse = require("lprowse")
 local browser = prowse.browser.new({
     javascript = true,
     follow_redirects = true,
-    timeout = 30
+    timeout_ms = 30000
 })
 
 local session = browser:create_session()
 
 session:on("console", function(message)
-    print("[page]", message.text)
+    print("[page]", message.message)
 end)
 
 session:navigate("https://example.com")
@@ -2309,10 +2378,12 @@ prowsetk/
 ├── tests/                  CTest-conformant unit and integration suites
 ├── third_party/            Vendored dependencies (git submodules)
 ├── wit/                    WIT interface definitions for WASM plugins
-├── lua/                    lprowse, lprowsext, and lprowseir Lua modules
+├── lua/                    Lua module mirrors and shared helpers (native lpdql lives in LuaRuntime)
 ├── plugins/                Native and WASM plugins
 ├── drivers/                Lua driver scripts
 ├── examples/               Example C++ and Lua applications
+├── tools/                  Crawling, DOM watching, IR consumers and terminal tools
+├── manual/                 Markdown manual with an index and 30 chapters
 ├── resources/              Runtime resources and manifests
 │   └── web/                Static web interface (index.html, app.js, style.css)
 └── scripts/                Developer and scaffolding scripts
@@ -2358,9 +2429,11 @@ and extensions.
 `$XDG_CONFIG_HOME/prowse/ProwseTUI.toml`, falling back to
 `$HOME/.config/prowse/ProwseTUI.toml`, and supports keybindings, Lua extension
 paths, and native plugin paths. Changes are staged and saved atomically with
-`:config save`; keybindings apply immediately, while extensions load at the next
-launch. Unknown TOML fields, duplicate bindings, invalid paths, and oversized
-configuration files are rejected.
+`:config save`, updating the controller's settings model; extensions load at the
+next launch. The current terminal input loop uses hardcoded navigation keys and
+does not yet consult configured primary bindings or F1/F2; use `:help` and
+`:config` to open those views. Unknown TOML fields, duplicate bindings, invalid
+paths, and oversized configuration files are rejected.
 
 ### Proxy transport
 

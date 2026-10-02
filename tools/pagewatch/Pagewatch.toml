@@ -1,0 +1,5 @@
+[pagewatch]
+directory = "/var/run/pagewatch"
+emit_initial = false
+action_timeout_ms = 5000
+# action_script = "examples/on_change.lua"

@@ -1,6 +1,6 @@
 # Lua Modules
 
-ProwseTk exposes two Lua modules from `LuaRuntime`:
+ProwseTk exposes four principal Lua modules from `LuaRuntime`:
 
 - `lprowse` drives managed `Browser`, `Session`, `Document`, and `Element`
   userdata.
@@ -11,7 +11,13 @@ ProwseTk exposes two Lua modules from `LuaRuntime`:
   It provides XPath-driven walkers/listeners. Named IRs resolve
   through the plugin-extensible `IrEmitterRegistry` (`emit`, `emitters`);
   `dom.walk` and `xas:AddListener` fail fast on invalid XPath and propagate
-  callback errors.
+   callback errors.
+- `lpdql` queries managed documents/sessions through bounded PDQL, returning
+  default-redacted serialized projections or native Lua result tables.
+
+See the [manual's Lua API chapter](../manual/09-lua-control-api.md),
+[extension chapter](../manual/11-lua-extensions.md), and
+[PDQL chapter](../manual/08-pdql.md) for usage and current support levels.
 
 The `init.lua` files are standalone surface mirrors and API documentation. In
 an embedded ProwseTk runtime, `require("lprowse")` and

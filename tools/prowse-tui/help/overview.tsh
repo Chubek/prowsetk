@@ -6,8 +6,9 @@ Programmable, headless browsing from a keyboard driven terminal interface.
 @key k / Up       move up
 @key Space / b    page down / page up
 @key g / G        jump to top / bottom
-@key Enter / l    follow the selected link
-@key Esc / h      close the current view
+@key Enter / l    activate a help link or config row
+@key h / Left     back in browser/help; close config
+@key Esc          close help/config or a result panel
 
 ## Help
 - Commands help:commands
