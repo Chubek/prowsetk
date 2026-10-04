@@ -130,9 +130,16 @@ local function offer_login_assistant_browser(session, url, args, reason)
 
     io.stderr:write("booking-dotcom-admin: launching " .. tostring(command) ..
         " for " .. tostring(url) .. "\n")
-    os.execute(tostring(command) .. " " .. shell_quote(url))
-    io.stderr:write("booking-dotcom-admin: press Enter after browser interaction is complete. ")
-    io.read("*l")
+    -- Firefox can remain open for the whole crawl. Disconnect its terminal
+    -- streams and ignore hangup so os.execute waits only for the launcher.
+    os.execute("nohup " .. tostring(command) .. " " .. shell_quote(url) ..
+        " </dev/null >/dev/null 2>&1 &")
+    io.stderr:write("booking-dotcom-admin: press Enter after browser interaction is complete. " ..
+        "Leave the browser open and press Enter in this terminal. ")
+    io.stderr:flush()
+    if io.read("*l") == nil then
+        error("booking-dotcom-admin: browser interaction was not confirmed", 2)
+    end
     local cookie_command = os.getenv("PROWSETK_ASSISTANT_BROWSER_COOKIE_COMMAND") or
         args.assistant_browser_cookie_command or ""
     if cookie_command == "" then

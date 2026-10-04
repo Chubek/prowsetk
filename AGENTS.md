@@ -608,6 +608,9 @@ browser handoff, the XPath success beacon
 `xpath=//h1[contains(normalize-space(.), 'Joe Litty Rooms')]`, and `--no-xcors`
 for booking.com TLD-only endpoint output. Keep these launcher defaults
 overridable and forward explicit boolean values to the driver CLI.
+Launch the Booking assistant browser independently of the scraper's terminal;
+show the Enter prompt while the browser is still open. EOF cancels the handoff,
+and resuming still requires fresh session data and positive DOM confirmation.
 Discovery is heuristic and bounded, with explicit incomplete coverage metadata.
 After the crawl the driver applies restful-resolver and then schema-grabber
 enrichment (request/response schemas, typed URL parameters; GET response

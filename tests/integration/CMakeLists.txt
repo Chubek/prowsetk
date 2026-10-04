@@ -159,6 +159,17 @@ if(PROWSETK_BUILD_CLI)
         "${PROJECT_SOURCE_DIR}/src/cli/serialize_resources.cpp")
     target_include_directories(prowsetk_integration_cli PRIVATE
         "${PROJECT_SOURCE_DIR}/src/cli")
+    if(UNIX AND PROWSETK_HAVE_LUA AND PROWSETK_HAVE_TOMLPLUSPLUS)
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if(Python3_Interpreter_FOUND)
+            add_test(NAME prowsetk.integration.cli.booking_assistant_browser
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_booking_assistant_browser.py"
+                    "$<TARGET_FILE:prowsetk_cli>" "${PROJECT_SOURCE_DIR}")
+            set_tests_properties(prowsetk.integration.cli.booking_assistant_browser PROPERTIES
+                LABELS "integration;lua;document" TIMEOUT 60
+                WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+        endif()
+    endif()
 endif()
 if(TARGET ptkspiderd AND PROWSETK_HAVE_LUA AND PROWSETK_HAVE_QUICKJS)
     find_package(Python3 COMPONENTS Interpreter QUIET)

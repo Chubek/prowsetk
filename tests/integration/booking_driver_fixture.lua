@@ -191,13 +191,15 @@ f:close()
 
 -- Run the driver
 dofile(driver_file)
-local succeeded, message = pcall(main, {
+local arguments = {
     dotenv=dotenv_file,
     output=output_file,
     postman=postman_file,
     max_depth='1',  -- Crawl one level deep (dashboard -> reservations)
     max_pages='3'   -- Limit pages for test determinism
-})
+}
+for key, value in pairs(driver_arguments or {}) do arguments[key] = value end
+local succeeded, message = pcall(main, arguments)
 
 -- Verify results based on scenario
 if scenario == 'success' or scenario == 'js-built-form' or scenario == 'two-step' or scenario == 'oauth' or

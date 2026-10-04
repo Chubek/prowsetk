@@ -2091,6 +2091,11 @@ the handoff it automatically snapshots the newest Firefox `cookies.sqlite`
 under `~/.mozilla/firefox` (or `$FIREFOX_PROFILE_ROOT`) into the configured
 cookie JSON and retries the session. Set
 `PROWSETK_ASSISTANT_BROWSER_COOKIE_COMMAND` to override that grabber.
+The driver launches the assistant browser in the background with its terminal
+streams detached. Complete the browser interaction, leave the browser open,
+and press Enter in the scraper's terminal to import cookies and retry login
+confirmation. Closing terminal input cancels the handoff. Browser launch alone
+does not confirm login.
 
 Credential login follows the Booking.com account-portal redirect and,
 when an `op_token` is exposed, uses ezlogin's OAuth endpoints. If the page has
