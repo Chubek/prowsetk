@@ -598,10 +598,16 @@ Booking.com credentials; never log those values. Require positive login
 evidence before exporting a live page. Try imported session cookies before
 requiring credentials, follow bounded trusted HTTPS redirects for confirmation,
 and crawl from the confirmed admin URL. Confirmation requires a successful HTTP
-response and a DOM logout/account control, not words inside scripts. JavaScript
+response and a DOM logout/account control or an explicitly configured success
+beacon, not words inside scripts. JavaScript
 support is partial; human verification and MFA can still require browser
 interaction followed by importing fresh cookies. Never claim those challenges
 have been solved merely because a cookie exists.
+`scripts/run-scrape-booking.sh` defaults to a forced, user-approved assistant
+browser handoff, the XPath success beacon
+`xpath=//h1[contains(normalize-space(.), 'Joe Litty Rooms')]`, and `--no-xcors`
+for booking.com TLD-only endpoint output. Keep these launcher defaults
+overridable and forward explicit boolean values to the driver CLI.
 Discovery is heuristic and bounded, with explicit incomplete coverage metadata.
 After the crawl the driver applies restful-resolver and then schema-grabber
 enrichment (request/response schemas, typed URL parameters; GET response

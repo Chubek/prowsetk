@@ -10,6 +10,8 @@
 #      / OPENCODE_BASE_URL for the driver (never printed).
 #   3. `prowsetk run booking-dotcom-admin --opencode true ...` so scraped
 #      endpoints go through the lopencode bridge cleanup before export.
+#      Live runs force the assistant-browser handoff and use the Joe Litty
+#      Rooms XPath success beacon; exports keep booking.com endpoints only.
 #   4. Verify `x-prowsetk-opencode: used: true` in the YAML; fail loudly when
 #      the agent pass did not run (stale predictions are worse than none).
 #   5. Stop the server unless --keep-server.
@@ -38,6 +40,12 @@
 #   --postman PATH         Postman JSON output (default: driver default)
 #   --dotenv PATH          dotenv file with booking credentials
 #   --cookies-json PATH    imported session cookies
+#   --assistant_browser_force BOOL  force the assistant-browser handoff
+#                          (default: true)
+#   --success_beacon QUERY login confirmation beacon (default:
+#                          xpath=//h1[contains(normalize-space(.), 'Joe Litty Rooms')])
+#   --success_beacon_type TYPE  beacon syntax (default: xpath)
+#   --no-xcors [BOOL]      keep only booking.com TLD endpoints (default: true)
 #   --opencode-max-requests N  bridge request budget, polls included
 #                          (default: 90)
 #   --opencode-wait-ms MS  cap on waiting for an agent reply
@@ -67,6 +75,10 @@ OUTPUT=""
 POSTMAN=""
 DOTENV=""
 COOKIES_JSON=""
+ASSISTANT_BROWSER_FORCE="true"
+SUCCESS_BEACON="xpath=//h1[contains(normalize-space(.), 'Joe Litty Rooms')]"
+SUCCESS_BEACON_TYPE="xpath"
+NO_XCORS="true"
 OPENCODE_MAX_REQUESTS="90"
 OPENCODE_WAIT_MS="300000"
 OPENCODE_MODULE=""
@@ -99,6 +111,18 @@ while [[ $# -gt 0 ]]; do
         --postman) POSTMAN="${2:?--postman needs a value}"; shift 2 ;;
         --dotenv) DOTENV="${2:?--dotenv needs a value}"; shift 2 ;;
         --cookies-json) COOKIES_JSON="${2:?--cookies-json needs a value}"; shift 2 ;;
+        --assistant_browser_force|--assistant-browser-force)
+            ASSISTANT_BROWSER_FORCE="${2:?--assistant_browser_force needs a value}"; shift 2 ;;
+        --success_beacon|--success-beacon)
+            SUCCESS_BEACON="${2:?--success_beacon needs a value}"; shift 2 ;;
+        --success_beacon_type|--success-beacon-type)
+            SUCCESS_BEACON_TYPE="${2:?--success_beacon_type needs a value}"; shift 2 ;;
+        --no-xcors|--no_xcors)
+            NO_XCORS="true"
+            if [[ "${2:-}" == "true" || "${2:-}" == "false" ]]; then
+                NO_XCORS="$2"; shift
+            fi
+            shift ;;
         --opencode-max-requests) OPENCODE_MAX_REQUESTS="${2:?needs a value}"; shift 2 ;;
         --opencode-wait-ms) OPENCODE_WAIT_MS="${2:?needs a value}"; shift 2 ;;
         --opencode-module) OPENCODE_MODULE="${2:?needs a value}"; shift 2 ;;
@@ -195,6 +219,10 @@ fi
 DRIVER_ARGS=(run booking-dotcom-admin
     --config "$REPO_ROOT/examples/booking-dotcom-admin-scrape/Prowse.toml"
     --opencode true
+    --assistant_browser_force "$ASSISTANT_BROWSER_FORCE"
+    --success_beacon "$SUCCESS_BEACON"
+    --success_beacon_type "$SUCCESS_BEACON_TYPE"
+    --no-xcors "$NO_XCORS"
     --opencode_max_requests "$OPENCODE_MAX_REQUESTS"
     --opencode_wait_ms "$OPENCODE_WAIT_MS")
 if [[ -z "$OPENCODE_MODULE" ]]; then

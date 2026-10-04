@@ -2183,6 +2183,14 @@ scripts/run-scrape-booking.sh \
   --output build/booking-cleaned.yaml
 ```
 
+The launcher defaults to `--assistant_browser_force true`,
+`--success_beacon "xpath=//h1[contains(normalize-space(.), 'Joe Litty Rooms')]"`,
+`--success_beacon_type xpath`, and `--no-xcors` (exports only booking.com TLD
+endpoints). Live handoffs still require user approval. Pass the corresponding
+launcher options to override the beacon or browser-force setting;
+`--no-xcors false` disables that output filter. The launcher supplies explicit
+boolean values to the driver CLI.
+
 Omit `--html` for a live crawl (booking credentials still required as
 usual); `--no-server` reuses an already-running server instead of starting
 one. See `scripts/run-scrape-booking.sh --help` for ports, paths, budgets,
