@@ -1,5 +1,31 @@
 include_guard(GLOBAL)
 
+# FLTK is confined to the opt-in basic-gui frontend. The controller and the
+# core remain usable on machines without desktop development packages.
+if(PROWSETK_BUILD_BASIC_GUI)
+    find_package(FLTK CONFIG QUIET)
+    if(NOT TARGET fltk::fltk)
+        if(NOT EXISTS "${PROJECT_SOURCE_DIR}/third_party/fltk/CMakeLists.txt")
+            message(FATAL_ERROR "basic-gui requires FLTK; populate third_party/fltk")
+        endif()
+        foreach(component FLUID FLTK_OPTIONS EXAMPLES TEST SCREENSHOTS HTML_DOCS PDF_DOCS)
+            set(FLTK_BUILD_${component} OFF CACHE BOOL "" FORCE)
+        endforeach()
+        set(FLTK_BUILD_GL OFF CACHE BOOL "" FORCE)
+        set(FLTK_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+        # X11 is the small portable Linux backend; users can select Wayland.
+        set(FLTK_BACKEND_WAYLAND OFF CACHE BOOL "FLTK Wayland backend")
+        add_subdirectory("${PROJECT_SOURCE_DIR}/third_party/fltk"
+                         "${CMAKE_BINARY_DIR}/third_party/fltk" EXCLUDE_FROM_ALL)
+        set_target_properties(fltk PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    endif()
+    get_target_property(_prowsetk_fltk_target fltk::fltk ALIASED_TARGET)
+    if(NOT _prowsetk_fltk_target)
+        set(_prowsetk_fltk_target fltk::fltk)
+    endif()
+    add_library(ProwseTk::fltk ALIAS ${_prowsetk_fltk_target})
+endif()
+
 # ai-oracle uses OpenAIpp's wire/authentication helpers with NetworkClient,
 # rather than its socket-owning HttpClient. Its nested headers stay private to
 # the plugin; neither cpp-httplib nor the DSL is part of ProwseTk's public API.

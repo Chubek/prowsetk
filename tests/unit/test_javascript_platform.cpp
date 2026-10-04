@@ -65,6 +65,50 @@ Platform make_platform(const std::string& html =
 
 }  // namespace
 
+TEST(JavaScriptPlatform, DetailsAndDialogHaveSemanticLifecycle) {
+    if (make_javascript_runtime()->name() == "null") GTEST_SKIP();
+    auto platform = make_platform("<html><body><details><summary>More</summary><button id='inside'>Inside</button></details>"
+        "<dialog><form method='dialog'><button value='accepted'>Close</button></form></dialog></body></html>");
+    ASSERT_TRUE(platform.run("var toggles=0,closed=0; var details=document.querySelector('details');"
+        "details.ontoggle=()=>toggles++; var dialog=document.querySelector('dialog'); dialog.onclose=()=>closed++;").ok);
+    EXPECT_EQ(platform.value("document.querySelector('#inside').click()"), "false");
+    ASSERT_TRUE(platform.run("document.querySelector('summary').click()").ok);
+    EXPECT_EQ(platform.value("details.open + ':' + toggles"), "true:1");
+    ASSERT_TRUE(platform.run("dialog.showModal(); dialog.querySelector('button').click()").ok);
+    EXPECT_EQ(platform.value("dialog.open + ':' + dialog.returnValue + ':' + closed"), "false:accepted:1");
+    EXPECT_TRUE(platform.requests.empty());
+    ASSERT_TRUE(platform.run("dialog.show(); dialog.oncancel=e=>e.preventDefault(); dialog.requestClose('denied')").ok);
+    EXPECT_EQ(platform.value("dialog.open"), "true");
+    ASSERT_TRUE(platform.run("dialog.oncancel=null; dialog.requestClose('done'); __prowsetkFlush()").ok);
+    EXPECT_EQ(platform.value("dialog.returnValue + ':' + closed"), "done:2");
+    EXPECT_FALSE(platform.run("document.createElement('dialog').showModal()").ok);
+}
+
+TEST(JavaScriptPlatform, CheckboxRadioSelectAndDisabledFormFields) {
+    if (make_javascript_runtime()->name() == "null") GTEST_SKIP();
+    auto platform = make_platform("<html><body><form action='/save'><input id='check' name='check' type='checkbox'>"
+        "<input id='one' name='choice' type='radio' checked><input id='two' name='choice' type='radio'>"
+        "<input name='disabled' value='omitted' disabled><select id='select' name='select'>"
+        "<option value='a'>A</option><option value='b'>B</option></select></form></body></html>");
+    ASSERT_TRUE(platform.run("var changes=0; document.querySelector('#check').onchange=()=>changes++;"
+        "document.querySelector('#check').click(); document.querySelector('#two').click();"
+        "document.querySelector('#select').value='b'").ok);
+    EXPECT_EQ(platform.value("document.querySelector('#check').checked + ':' + changes"), "true:1");
+    EXPECT_EQ(platform.value("document.querySelector('#one').checked + ':' + document.querySelector('#two').checked"), "false:true");
+    EXPECT_EQ(platform.value("document.querySelector('#select').value"), "b");
+    ASSERT_TRUE(platform.run("document.querySelector('#select').value='missing'").ok);
+    EXPECT_EQ(platform.value("document.querySelector('#select').value"), "");
+    ASSERT_TRUE(platform.run("document.querySelector('#select').value='b'; var radioChanges=0;"
+        "document.querySelector('#two').onchange=()=>radioChanges++; document.querySelector('#two').click()").ok);
+    EXPECT_EQ(platform.value("radioChanges"), "0");
+    ASSERT_TRUE(platform.run("document.querySelector('form').submit()").ok);
+    prowsetk::PendingNavigation navigation;
+    ASSERT_TRUE(platform.host->consume_pending_navigation(navigation));
+    EXPECT_EQ(navigation.url, "https://app.test/save?check=on&choice=on&select=b");
+    ASSERT_TRUE(platform.run("document.querySelector('#check').onclick=e=>e.preventDefault(); document.querySelector('#check').click()").ok);
+    EXPECT_EQ(platform.value("document.querySelector('#check').checked"), "true");
+}
+
 TEST(JavaScriptPlatform, RuntimeAdvertisesGlobalsAndAliases) {
     if (make_javascript_runtime()->name() == "null") GTEST_SKIP();
     auto platform = make_platform();
@@ -259,14 +303,14 @@ TEST(JavaScriptPlatform, UrlHelpersAndBase64AndParserStubs) {
                          "globalThis.parsedText = parsed.querySelector('i').textContent;")
                     .ok);
     EXPECT_EQ(platform.value("parsedText"), "yes");
-    // Observer and media stubs are constructible and inert.
+    // DOM observers and logical media queries are callable page APIs.
     EXPECT_TRUE(platform
                     .run("new MutationObserver(function () {})"
                          "    .observe(document.body, {childList: true});"
                          "globalThis.mm = matchMedia('(min-width: 1px)').matches;"
                          "getComputedStyle(document.body).getPropertyValue('display');")
                         .ok);
-    EXPECT_EQ(platform.value("mm"), "false");
+    EXPECT_EQ(platform.value("mm"), "true");
 }
 
 TEST(JavaScriptPlatform, ScriptErrorsAreReportedNotFatal) {

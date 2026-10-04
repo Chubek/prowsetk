@@ -513,14 +513,14 @@ void Session::set_document_element_class_name(std::string_view value) {
     }
 }
 
-void Session::run_script_lifecycle() {
+void Session::run_script_lifecycle(const ScriptOptions& options) {
     if (javascript_ == nullptr || script_host_ == nullptr) {
         return;
     }
     // Drains DOMContentLoaded/load listeners, due timers, and async script
     // callbacks in bounded passes so a page never hangs document install.
     for (int pass = 0; pass < 16; ++pass) {
-        const ScriptResult flushed = execute_script("__prowsetkFlush();");
+        const ScriptResult flushed = execute_script("__prowsetkFlush();", options);
         if (closed_ || !flushed.ok || flushed.value == "0") {
             break;
         }
@@ -967,6 +967,36 @@ std::string Session::evaluate_js(std::string_view script,
         throw Error(ErrorCode::JavaScriptError, result.error);
     }
     return result.value;
+}
+
+ViewportInfo Session::viewport() const noexcept {
+    return script_host_->viewport_info();
+}
+
+void Session::set_viewport(ViewportInfo next, const ScriptOptions& options) {
+    if (closed_ || script_execution_depth_ != 0) {
+        throw Error(ErrorCode::InvalidArgument, "session is closed or executing script");
+    }
+    const auto previous = viewport();
+    script_host_->set_viewport(next);
+    if (previous.width == next.width && previous.height == next.height &&
+        previous.device_pixel_ratio == next.device_pixel_ratio) return;
+    if (javascript_ != nullptr && javascript_->name() != "null" && document_ != nullptr) {
+        const auto result = execute_script("__prowsetkViewportChanged();", options);
+        if (!result.ok && !closed_) {
+            throw Error(ErrorCode::JavaScriptError, "viewport notification failed");
+        }
+        if (!closed_) pump_events(options);
+    }
+}
+
+void Session::pump_events(const ScriptOptions& options) {
+    if (closed_ || script_execution_depth_ != 0) {
+        throw Error(ErrorCode::InvalidArgument, "session is closed or executing script");
+    }
+    if (document_ == nullptr || javascript_ == nullptr || javascript_->name() == "null") return;
+    run_script_lifecycle(options);
+    follow_script_navigations();
 }
 
 bool Session::click_element(std::shared_ptr<Element> element) {

@@ -219,6 +219,10 @@ write_file "${ROOT}/.gitmodules" <<'GITMODULES_EOF'
 	path = third_party/fmt
 	url = https://github.com/fmtlib/fmt.git
 
+[submodule "third_party/fltk"]
+	path = third_party/fltk
+	url = https://github.com/fltk/fltk.git
+
 [submodule "third_party/openaipp"]
 	path = third_party/openaipp
 	url = https://github.com/Chubek/OpenAIpp.git

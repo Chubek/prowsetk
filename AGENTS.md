@@ -45,8 +45,11 @@ in `tests/integration/test_drivers.cpp` and a `prowsetk run` CLI test in
 
 ## 2. Non-Negotiable Constraints
 
-- Headless only: no display server, windowing system, GPU, or desktop
-  environment may be required.
+- The core and default build are headless: no display server, windowing system,
+  GPU, or desktop environment may be required. `plugins/basic-gui` is an explicit,
+  opt-in FLTK desktop inspector (`PROWSETK_BUILD_BASIC_GUI=OFF` by default).
+  Keep its graphical dependency confined to its adapter; native plugin loading,
+  the model/controller, and ordinary tests remain display-free.
 - No dependency on a third-party browser engine.
 - The public C++ API is decomposed into `Browser`, `Session`, `Document`,
   `Element`, `NetworkClient`, `JavaScriptRuntime`, `LuaRuntime`, `WebPlatform`,
@@ -832,6 +835,24 @@ queued navigation before returning. Form-control `value` prototype descriptors
 are configurable so framework setter wrappers can observe the native setter
 path. Repeated clicks on an already-active element omit the focus event.
 A rejected HTML parse preserves the previously installed document and session URL.
+
+### Basic GUI and logical viewport
+
+`plugins/basic-gui` provides the FLTK `ptk-basic-gui` executable and C++ Viewer,
+plus a display-free controller/projection and network-free ABI-v2 facade.
+The preview consumes canonical ProwseEvent records, uses synthetic revision/node
+IDs for actions and never passes resource URLs to FLTK's file/image/URI loaders.
+Preserve sanitized source/form values, opt-in local console values, bounded
+snapshots/history/activity and stale/disconnected-node rejection. GUI calls are
+serialized on the desktop thread and all requests remain Session-mediated.
+
+`Session::set_viewport` supplies bounded logical metadata independently of
+layout; `pump_events` is a bounded, non-sleeping host checkpoint. Page bindings
+read host viewport dimensions, notify resize/visualViewport/media listeners and
+support semantic details/dialog state and form-control activation. Do not claim
+CSS geometry, top-layer/focus-trapping or full media-query conformance. Keep
+display-free unit/integration coverage and the optional window CTest under tests.
+See `plugins/basic-gui/README.md` for the supported preview and Web API slice.
 
 ### Python build isolation
 

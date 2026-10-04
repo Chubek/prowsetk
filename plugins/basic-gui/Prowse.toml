@@ -1,0 +1,12 @@
+[project]
+name = "basic-gui"
+version = "0.1.0"
+
+[[plugins]]
+name = "basic-gui"
+type = "native"
+path = "../../build/gui/plugins/basic-gui/libprowsetk_basic_gui.so"
+enabled = true
+autoload = true
+# Native loading registers metadata only. Use ptk-basic-gui or Viewer(session)
+# to explicitly open a window on the host's desktop/main thread.

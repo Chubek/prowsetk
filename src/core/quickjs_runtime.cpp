@@ -206,6 +206,17 @@ JSValue bp_navigator_info(JSContext* context, JSValueConst, int, JSValueConst*) 
     return object;
 }
 
+JSValue bp_viewport_info(JSContext* context, JSValueConst, int, JSValueConst*) {
+    auto* host = host_of(context);
+    const auto info = host == nullptr ? ViewportInfo{} : host->viewport_info();
+    JSValue object = JS_NewObject(context);
+    JS_SetPropertyStr(context, object, "width", JS_NewInt32(context, info.width));
+    JS_SetPropertyStr(context, object, "height", JS_NewInt32(context, info.height));
+    JS_SetPropertyStr(context, object, "devicePixelRatio",
+                      JS_NewFloat64(context, info.device_pixel_ratio));
+    return object;
+}
+
 JSValue bp_request(JSContext* context, JSValueConst, int argc,
                    JSValueConst* argv);
 
@@ -687,6 +698,7 @@ const JSCFunctionListEntry kBindingFunctions[] = {
     JS_CFUNC_DEF("pageInfo", 0, bp_page_info),
     JS_CFUNC_DEF("setTitle", 1, bp_set_title),
     JS_CFUNC_DEF("navigatorInfo", 0, bp_navigator_info),
+    JS_CFUNC_DEF("viewportInfo", 0, bp_viewport_info),
     JS_CFUNC_DEF("request", 4, bp_request),
     JS_CFUNC_DEF("navigate", 1, bp_navigate),
     JS_CFUNC_DEF("submitForm", 3, bp_submit_form),
@@ -940,7 +952,13 @@ public:
         capabilities.set("location", ImplementationClass::PartiallyImplemented,
                          "location reads resolve against the live document; assignment, link clicks, and form submit trigger a host navigation after the script pass; pushState, replaceState, and same-document hash changes update location without a navigation");
         capabilities.set("navigator", ImplementationClass::PartiallyImplemented,
-                         "static navigator fields from the session configuration");
+                          "static navigator fields from the session configuration");
+        capabilities.set("viewport", ImplementationClass::ImplementedWithRestrictions,
+                          "host-configured logical dimensions, resize and visualViewport events; no layout geometry");
+        capabilities.set("matchMedia", ImplementationClass::PartiallyImplemented,
+                          "screen/all, width/height px, orientation, resolution dppx, light color scheme and reduced-motion none; bounded live change listeners");
+        capabilities.set("disclosure-controls", ImplementationClass::PartiallyImplemented,
+                          "details/summary toggles and dialog show/showModal/close; synthetic events, no top-layer layout");
         return capabilities;
     }
 

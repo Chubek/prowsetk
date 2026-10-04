@@ -1,6 +1,33 @@
 prowsetk_gtest(prowsetk_integration_navigation "prowsetk.integration.network."
     "integration;network" test_navigation.cpp)
 
+prowsetk_gtest(prowsetk_integration_basic_gui "prowsetk.integration.basic-gui."
+    "integration;plugin;javascript;document" test_basic_gui.cpp)
+target_link_libraries(prowsetk_integration_basic_gui PRIVATE prowsetk_basic_gui_model)
+target_compile_definitions(prowsetk_integration_basic_gui PRIVATE
+    BASIC_GUI_PLUGIN_PATH="$<TARGET_FILE:prowsetk_basic_gui>")
+add_dependencies(prowsetk_integration_basic_gui prowsetk_basic_gui)
+if(PROWSETK_BUILD_BASIC_GUI)
+    prowsetk_add_executable(prowsetk_integration_basic_gui_window test_basic_gui_window.cpp)
+    target_link_libraries(prowsetk_integration_basic_gui_window PRIVATE
+        prowsetk_basic_gui ProwseTk::core ProwseTk::fltk GTest::gtest_main)
+    find_program(PROWSETK_XVFB_RUN xvfb-run)
+    if(PROWSETK_XVFB_RUN)
+        add_test(NAME prowsetk.integration.basic-gui.window
+            COMMAND "${PROWSETK_XVFB_RUN}" -a $<TARGET_FILE:prowsetk_integration_basic_gui_window>)
+    else()
+        add_test(NAME prowsetk.integration.basic-gui.window COMMAND prowsetk_integration_basic_gui_window)
+    endif()
+    set_tests_properties(prowsetk.integration.basic-gui.window PROPERTIES
+        LABELS "integration;plugin;document;gui" TIMEOUT 30)
+    add_test(NAME prowsetk.integration.basic-gui.cli.help COMMAND ptk_basic_gui --help)
+    set_tests_properties(prowsetk.integration.basic-gui.cli.help PROPERTIES
+        LABELS "integration;plugin;gui" TIMEOUT 10)
+    add_test(NAME prowsetk.integration.basic-gui.cli.invalid COMMAND ptk_basic_gui --unknown)
+    set_tests_properties(prowsetk.integration.basic-gui.cli.invalid PROPERTIES
+        LABELS "integration;plugin;gui" TIMEOUT 10 WILL_FAIL TRUE)
+endif()
+
 if(TARGET ProwseTk::ai_oracle)
     prowsetk_gtest(prowsetk_integration_ai_oracle "prowsetk.integration.ai-oracle."
         "integration;plugin;lua" test_ai_oracle.cpp)

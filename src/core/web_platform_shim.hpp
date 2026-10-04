@@ -809,6 +809,7 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
         if (tag === 'textarea') return this.textContent;
         if (tag === 'select') {
           var sel = H.queryScope(this.__h, 'option[selected]')[0];
+          if (!sel && this.__selectEmpty) return '';
           if (!sel) sel = H.queryScope(this.__h, 'option')[0];
           if (!sel) return '';
           return H.attr(sel, 'value') != null ? H.attr(sel, 'value') : H.text(sel);
@@ -819,6 +820,15 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
       set: function (v) {
         var tag = H.tagName(this.__h);
         if (tag === 'textarea') this.textContent = String(v);
+        else if (tag === 'select') {
+          var found = false;
+          this.querySelectorAll('option').forEach(function (option) {
+            var selected = !found && String(option.value) === String(v);
+            option.selected = selected;
+            if (selected) found = true;
+          });
+          this.__selectEmpty = !found;
+        }
         else {
           if (tag === 'option' && H.attr(this.__h, 'value') == null) H.setText(this.__h, String(v));
           setAttrString(this, 'value', v);
@@ -1122,6 +1132,11 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
       if (/\bdisplay\s*:\s*none\b/.test(style)) return false;
       if (/\bvisibility\s*:\s*hidden\b/.test(style)) return false;
       if (H.hasAttr(node.__h, 'hidden')) return false;
+      if (node.localName === 'dialog' && !node.open) return false;
+      if (node.localName === 'details' && !node.open && node !== element) {
+        var summary = node.querySelector('summary');
+        if (!summary || !summary.contains(element)) return false;
+      }
       if (H.hasAttr(node.__h, 'disabled')) return false;
       if (String(H.attr(node.__h, 'aria-disabled') || '').toLowerCase() === 'true') return false;
       var parent = H.parentNode(node.__h);
@@ -1280,19 +1295,24 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     var fields = [];
     H.queryScope(form.__h, 'input, textarea, select').map(function (h) { return wrap(h); }).forEach(function (el) {
       var name = el.getAttribute('name');
-      if (!name) return;
+      if (!name || el.disabled) return;
       var type = (el.getAttribute('type') || '').toLowerCase();
       if (type === 'submit' || type === 'button' || type === 'file' || type === 'reset') return;
       if ((type === 'checkbox' || type === 'radio') && !el.checked) return;
-      var value = el.value;
+      var value = (type === 'checkbox' || type === 'radio') && !el.hasAttribute('value') ? 'on' : el.value;
       fields.push([name, value == null ? '' : String(value)]);
     });
     return fields;
   }
 
-  function performFormSubmit(form) {
+  function performFormSubmit(form, submitter) {
     if (!form || H.tagName(form.__h) !== 'form') return;
     var method = (form.getAttribute('method') || 'GET').toUpperCase();
+    if (method === 'DIALOG') {
+      var owner = form.closest('dialog');
+      if (owner) owner.close(submitter ? submitter.value : '');
+      return;
+    }
     var action = form.action || H.pageInfo().url;
     var fields = formFields(form);
     var query = fields.map(function (kv) {
@@ -1309,12 +1329,35 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   function requestSubmitForm(form, submitter) {
     var event = new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: submitter || null });
     if (!dispatchDOMEvent(form, event)) return;
-    performFormSubmit(form);
+    performFormSubmit(form, submitter);
   }
   function runDefaultAction(target, event) {
     if (!target || !target.__h || !event || event.defaultPrevented) return;
     var tag = H.tagName(target.__h);
     if (event.type === 'click') {
+      var summary = target.closest('summary');
+      if (summary && summary.parentElement && summary.parentElement.localName === 'details' &&
+          summary.parentElement.querySelector('summary') === summary) {
+        summary.parentElement.open = !summary.parentElement.open;
+        return;
+      }
+      if (tag === 'input') {
+        var inputType = (target.getAttribute('type') || '').toLowerCase();
+        if (inputType === 'checkbox' || inputType === 'radio') {
+          if (inputType === 'radio' && target.checked) return;
+          if (inputType === 'radio') {
+            var ownerForm = target.form;
+            document.querySelectorAll('input').forEach(function (other) {
+              if (target.getAttribute('name') && other !== target &&
+                  String(other.getAttribute('type') || '').toLowerCase() === 'radio' &&
+                  other.getAttribute('name') === target.getAttribute('name') &&
+                  other.form === ownerForm) other.removeAttribute('checked');
+            });
+          }
+          target.checked = inputType === 'radio' || !target.checked;
+          return;
+        }
+      }
       if (tag === 'a' || tag === 'area') {
         var href = target.href;
         if (href && href.indexOf('javascript:') !== 0) navigateTo(href);
@@ -1335,10 +1378,56 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   ElementNode.prototype.submit = function () {
     performFormSubmit(this);
   };
+  // Disclosure controls carry semantic state only; there is no CSS top layer.
+  Object.defineProperty(ElementNode.prototype, 'open', {
+    configurable: true,
+    get: function () { return this.hasAttribute('open'); },
+    set: function (value) {
+      var before = this.open;
+      if (value) this.setAttribute('open', ''); else this.removeAttribute('open');
+      if (before !== this.open && this.localName === 'details' && !this.__toggleQueued) {
+        var self = this;
+        this.__toggleQueued = true;
+        setTimeoutJs(function () {
+          self.__toggleQueued = false;
+          dispatchDOMEvent(self, new Event('toggle'));
+        }, 0);
+      }
+    }
+  });
+  ElementNode.prototype.show = function () {
+    if (this.localName !== 'dialog') throw new TypeError('dialog required');
+    if (this.__modal && this.open) throw new Error('InvalidStateError');
+    this.open = true;
+    this.__modal = false;
+  };
+  ElementNode.prototype.showModal = function () {
+    if (this.localName !== 'dialog') throw new TypeError('dialog required');
+    if (!this.isConnected || (this.open && !this.__modal)) throw new Error('InvalidStateError');
+    this.open = true;
+    this.__modal = true;
+  };
+  ElementNode.prototype.close = function (value) {
+    if (this.localName !== 'dialog') throw new TypeError('dialog required');
+    if (!this.open) return;
+    if (value !== undefined) this.returnValue = String(value);
+    this.open = false;
+    this.__modal = false;
+    var self = this;
+    setTimeoutJs(function () { dispatchDOMEvent(self, new Event('close')); }, 0);
+  };
+  ElementNode.prototype.requestClose = function (value) {
+    if (this.localName !== 'dialog' || !this.open) return;
+    if (dispatchDOMEvent(this, new Event('cancel', { cancelable: true }))) this.close(value);
+  };
+  Object.defineProperty(ElementNode.prototype, 'returnValue', {
+    get: function () { return this.__returnValue || ''; },
+    set: function (value) { this.__returnValue = String(value); }
+  });
   var elementEventTypes = ['click', 'dblclick', 'mousedown', 'mouseup', 'mouseover', 'mouseout',
     'mousemove', 'pointerdown', 'pointerup', 'pointermove', 'input', 'change', 'submit', 'reset',
     'focus', 'blur', 'focusin', 'focusout', 'keydown', 'keyup', 'keypress', 'load', 'error',
-    'contextmenu'];
+    'contextmenu', 'toggle', 'close', 'cancel'];
   elementEventTypes.forEach(function (type) {
     Object.defineProperty(ElementNode.prototype, 'on' + type, {
       configurable: true,
@@ -1510,6 +1599,9 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
   Object.setPrototypeOf(DOMInterfaces.SVGElement.prototype, ElementNode.prototype);
   Object.setPrototypeOf(TextNode.prototype, DOMInterfaces.CharacterData.prototype);
   Object.setPrototypeOf(CommentNode.prototype, DOMInterfaces.CharacterData.prototype);
+  Object.defineProperty(ElementNode.prototype, 'isConnected', {
+    get: function () { return isConnectedHandle(this.__h); }
+  });
 
   // ---------- style / class / dataset views ----------
   function parseStyle(cssText) {
@@ -2558,17 +2650,36 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
       dispatchDOMEvent(G, new PopStateEvent('popstate', { state: entry.state }));
     }
   }, true);
-  install('screen', { width: 1920, height: 1080, availWidth: 1920, availHeight: 1040, colorDepth: 24, pixelDepth: 24, orientation: { type: 'landscape-primary', angle: 0, lock: function () {}, unlock: function () {} } }, true);
-  install('devicePixelRatio', 1, true);
-  install('innerWidth', 1280, true);
-  install('innerHeight', 800, true);
-  install('outerWidth', 1280, true);
-  install('outerHeight', 800, true);
+  var screen = { colorDepth: 24, pixelDepth: 24 };
+  ['width', 'availWidth', 'height', 'availHeight'].forEach(function (name) {
+    Object.defineProperty(screen, name, { get: function () {
+      return H.viewportInfo()[name.indexOf('Width') >= 0 || name === 'width' ? 'width' : 'height'];
+    } });
+  });
+  Object.defineProperty(screen, 'orientation', { get: function () {
+    var v = H.viewportInfo();
+    return { type: v.width >= v.height ? 'landscape-primary' : 'portrait-primary', angle: 0 };
+  } });
+  install('screen', screen, true);
+  ['innerWidth', 'outerWidth', 'innerHeight', 'outerHeight', 'devicePixelRatio'].forEach(function (name) {
+    Object.defineProperty(G, name, { configurable: true, get: function () {
+      return H.viewportInfo()[name === 'devicePixelRatio' ? name : /Width$/.test(name) ? 'width' : 'height'];
+    } });
+  });
   install('scrollX', 0, true);
   install('scrollY', 0, true);
   install('pageXOffset', 0, true);
   install('pageYOffset', 0, true);
-  install('visualViewport', { width: 1280, height: 800, offsetLeft: 0, offsetTop: 0, scale: 1 }, true);
+  var visualViewport = { offsetLeft: 0, offsetTop: 0, pageLeft: 0, pageTop: 0, scale: 1,
+    __listeners: new ListenerStore() };
+  ['width', 'height'].forEach(function (name) {
+    Object.defineProperty(visualViewport, name, { get: function () { return H.viewportInfo()[name]; } });
+  });
+  visualViewport.addEventListener = function (type, fn, opts) { this.__listeners.add(type, fn, opts); };
+  visualViewport.removeEventListener = function (type, fn, opts) { this.__listeners.remove(type, fn, opts); };
+  visualViewport.dispatchEvent = function (event) { return dispatchDOMEvent(this, event); };
+  installOnProperty(visualViewport, visualViewport.__listeners, 'resize');
+  install('visualViewport', visualViewport, true);
   install('performance', {
     now: function () { return Date.now(); },
     timeOrigin: Date.now(),
@@ -2588,15 +2699,71 @@ inline constexpr const char kWebPlatformShim[] = R"SHIM(
     };
     return map;
   };
+  // Bounded logical media queries; unsupported expressions never match.
+  var mediaLists = [];
+  function mediaMatches(query) {
+    var viewport = H.viewportInfo();
+    return query.toLowerCase().split(',').some(function (alternative) {
+      var text = alternative.trim(), negate = false;
+      if (/^not\s+/.test(text)) { negate = true; text = text.replace(/^not\s+/, ''); }
+      text = text.replace(/^only\s+/, '');
+      var parts = text.split(/\s+and\s+/), valid = true, matches = true;
+      parts.forEach(function (part) {
+        part = part.trim();
+        if (/^(all|screen|print)$/.test(part)) { matches = matches && part !== 'print'; return; }
+        var feature = /^\(\s*([a-z-]+)\s*:\s*([^()]+)\s*\)$/.exec(part);
+        if (!feature) { valid = false; return; }
+        var name = feature[1], value = feature[2].trim(), number;
+        if (/^(min-|max-)?(width|height|resolution)$/.test(name)) {
+          var resolution = /resolution$/.test(name);
+          number = /^(\d+(?:\.\d+)?)(px|dppx)$/.exec(value);
+          if (!number || number[2] !== (resolution ? 'dppx' : 'px')) { valid = false; return; }
+          var actual = resolution ? viewport.devicePixelRatio : /width$/.test(name) ? viewport.width : viewport.height;
+          var wanted = Number(number[1]);
+          matches = matches && (/^min-/.test(name) ? actual >= wanted : /^max-/.test(name) ? actual <= wanted : actual === wanted);
+        } else if (name === 'orientation' && /^(portrait|landscape)$/.test(value)) {
+          matches = matches && value === (viewport.width > viewport.height ? 'landscape' : 'portrait');
+        } else if (name === 'prefers-color-scheme' && /^(light|dark)$/.test(value)) {
+          matches = matches && value === 'light';
+        } else if (name === 'prefers-reduced-motion' && /^(reduce|no-preference)$/.test(value)) {
+          matches = matches && value === 'no-preference';
+        } else { valid = false; }
+      });
+      return valid && (negate ? !matches : matches);
+    });
+  }
   G.matchMedia = function (query) {
-    return {
-      matches: false, media: String(query),
-      addListener: function () {}, removeListener: function () {},
-      addEventListener: function () {}, removeEventListener: function () {},
-      dispatchEvent: function () { return false; },
-      onchange: null
-    };
+    query = String(query);
+    if (query.length > 4096) throw new RangeError('media query limit');
+    mediaLists = mediaLists.filter(function (ref) { return ref.deref() !== undefined; });
+    if (mediaLists.length >= 256) throw new RangeError('live media query limit');
+    var list = { media: query, __listeners: new ListenerStore(), __matched: mediaMatches(query) };
+    Object.defineProperty(list, 'matches', { get: function () { return mediaMatches(query); } });
+    list.addEventListener = visualViewport.addEventListener;
+    list.removeEventListener = visualViewport.removeEventListener;
+    list.dispatchEvent = visualViewport.dispatchEvent;
+    list.addListener = function (fn) { this.addEventListener('change', fn); };
+    list.removeListener = function (fn) { this.removeEventListener('change', fn); };
+    installOnProperty(list, list.__listeners, 'change');
+    mediaLists.push(new WeakRef(list));
+    return list;
   };
+  install('__prowsetkViewportChanged', function () {
+    // Snapshot before callbacks: listeners may create another MediaQueryList.
+    var snapshot = mediaLists.slice();
+    snapshot.forEach(function (ref) {
+      var list = ref.deref();
+      if (!list) return;
+      var matched = list.matches;
+      if (matched === list.__matched) return;
+      list.__matched = matched;
+      var event = new Event('change');
+      event.matches = matched; event.media = list.media;
+      dispatchDOMEvent(list, event);
+    });
+    dispatchDOMEvent(visualViewport, new Event('resize'));
+    dispatchDOMEvent(G, new Event('resize'));
+  }, true);
   G.alert = function (message) { if (H.print) H.print('alert', String(message == null ? '' : message)); };
   G.confirm = function () { return false; };
   G.prompt = function () { return null; };

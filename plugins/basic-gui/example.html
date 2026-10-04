@@ -1,0 +1,33 @@
+<!doctype html>
+<html><head><title>Flatworm inspection demo</title></head><body>
+<h1>Flatworm live page</h1>
+<p id="status">Ready</p>
+<button id="increment" type="button">Increment counter</button>
+<p id="count">0</p>
+<details><summary>Inspect form controls</summary>
+<form id="form"><label>Name <input id="name" name="name"></label>
+<label><input id="enabled" type="checkbox"> Enabled</label>
+<button type="submit">Submit locally</button></form></details>
+<button id="dialog-button" type="button">Open dialog</button>
+<dialog id="dialog"><p>Semantic HTML dialog</p>
+<form method="dialog"><button value="ok">Close</button></form></dialog>
+<p id="viewport"></p>
+<script>
+let counter = 0;
+document.querySelector('#increment').onclick = () => {
+  document.querySelector('#count').textContent = String(++counter);
+  console.log('counter changed');
+};
+document.querySelector('#form').onsubmit = (event) => {
+  event.preventDefault();
+  document.querySelector('#status').textContent = 'Form submitted';
+  console.info('local submit');
+};
+document.querySelector('#dialog-button').onclick = () => document.querySelector('#dialog').showModal();
+function updateViewport() {
+  document.querySelector('#viewport').textContent = 'Logical viewport: ' + innerWidth + ' x ' + innerHeight;
+}
+window.onresize = updateViewport;
+updateViewport();
+</script>
+</body></html>

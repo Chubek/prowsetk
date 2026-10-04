@@ -98,6 +98,7 @@ add_library(ProwseTk::core ALIAS prowsetk_core)
 prowsetk_install_library(prowsetk_core)
 
 add_subdirectory(session)
+add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/basic-gui" "${CMAKE_BINARY_DIR}/plugins/basic-gui")
 
 if(PROWSETK_BUILD_AI_ORACLE)
     add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/ai-oracle" "${CMAKE_BINARY_DIR}/plugins/ai-oracle")

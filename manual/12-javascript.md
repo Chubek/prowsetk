@@ -32,6 +32,9 @@ through BrowserConfig, a consumed project/tool engine setting, or the CLI's
 | Lifecycle | `DOMContentLoaded`, `load`, microtasks and bounded timer flushing |
 | Storage | `document.cookie`, `localStorage`, `sessionStorage` through host storage |
 | Utilities | `URL`, `URLSearchParams`, navigator fields, console, text-encoding polyfills |
+| Viewport | Host-defined logical dimensions, resize and visualViewport events; no element layout geometry |
+| Media queries | Bounded screen/all/print, width/height px, resolution dppx, orientation and fixed user preferences, with change events |
+| Disclosure controls | Details/summary open/toggle and dialog show/showModal/close/requestClose, without top-layer or focus trapping |
 | Observers/layout | Inert intersection/resize observers, dummy canvas, no layout or WebGL |
 
 There are no streaming response bodies, XHR progress/upload events, or browser
@@ -105,6 +108,35 @@ browser APIs can fail or leave only a partial DOM; query diagnostics and
 capabilities before treating absent content as an empty real-world result.
 
 Reference: `javascript_runtime.hpp`, `web_platform.cpp`, `web_platform_shim.hpp`.
+
+### Host event loops and logical viewport
+
+```cpp
+session->set_viewport({800, 600, 1.0});
+session->pump_events(); // due timers, animation frames, microtasks, queued navigation
+```
+
+Viewport width/height are 1..16384 logical CSS pixels and the finite device pixel
+ratio is `(0,8]`. Invalid updates preserve the old viewport. Dimensions persist
+across document loads, are usable with JavaScript disabled, and do not introduce
+a display dependency. Window/screen/visualViewport metadata reads the host state;
+updates dispatch resize and MediaQueryList change events. `matchMedia` supports
+comma alternatives, `not`/`only`, `and`, screen/all/print, width/height/min/max px,
+resolution/min/max dppx, orientation, light color scheme, and reduced-motion
+no-preference. Unsupported queries return false; query text is capped at 4096
+characters and the runtime at 256 live lists. No stylesheet layout is implied.
+
+`pump_events` never sleeps and runs at most 16 bounded lifecycle passes with the
+supplied ScriptOptions. Hosts serialize these calls with other session work;
+closed or reentrant calls report InvalidArgument. Network time remains
+host-mediated. The optional [basic GUI](../plugins/basic-gui/README.md) uses this
+checkpoint from its FLTK loop.
+
+Details summaries toggle `open`, coalescing `toggle` notifications. Dialogs
+support open state, returnValue, cancel/close events and `method="dialog"`
+without network traffic; they have no focus trapping or graphical top layer.
+Checkbox/radio clicks update state unless prevented; select-value assignment
+updates selected options. Disabled controls are omitted from form submission.
 
 ## Native Flatworm modules
 

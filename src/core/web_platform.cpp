@@ -60,7 +60,13 @@ WebPlatform default_web_platform() {
                      "form submit trigger a host navigation after the script pass; "
                      "pushState, replaceState, and same-document hash changes do not");
     platform.declare("navigator", ImplementationClass::PartiallyImplemented,
-                     "static fields from the session configuration");
+                      "static fields from the session configuration");
+    platform.declare("viewport", ImplementationClass::ImplementedWithRestrictions,
+                      "host-configured logical dimensions and resize/visualViewport events; no layout geometry");
+    platform.declare("matchMedia", ImplementationClass::PartiallyImplemented,
+                      "bounded width/height px, orientation, resolution dppx, screen/all and fixed user-preference queries with change events");
+    platform.declare("disclosure-controls", ImplementationClass::PartiallyImplemented,
+                      "details/summary toggles and dialog show/showModal/close, without top-layer rendering");
     platform.declare("console", ImplementationClass::FullyImplemented,
                      "console.* forwarded as console events");
     platform.declare("URL", ImplementationClass::PartiallyImplemented,

@@ -15,6 +15,10 @@
 	path = third_party/fmt
 	url = https://github.com/fmtlib/fmt.git
 
+[submodule "third_party/fltk"]
+	path = third_party/fltk
+	url = https://github.com/fltk/fltk.git
+
 [submodule "third_party/gumbo-parser"]
 	path = third_party/gumbo-parser
 	url = https://github.com/google/gumbo-parser.git

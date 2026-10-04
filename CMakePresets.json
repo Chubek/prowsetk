@@ -60,6 +60,12 @@
       }
     },
     {
+      "name": "gui",
+      "displayName": "Default + FLTK desktop inspector",
+      "inherits": "default",
+      "cacheVariables": { "PROWSETK_BUILD_BASIC_GUI": "ON" }
+    },
+    {
       "name": "wasm",
       "displayName": "Default + WebAssembly runtime (tests)",
       "inherits": "default",
@@ -76,6 +82,7 @@
     { "name": "release",  "configurePreset": "release" },
     { "name": "asan",     "configurePreset": "asan" },
     { "name": "coverage", "configurePreset": "coverage" },
+    { "name": "gui",      "configurePreset": "gui" },
     { "name": "wasm",     "configurePreset": "wasm" }
   ],
   "testPresets": [
@@ -110,6 +117,12 @@
     {
       "name": "coverage",
       "configurePreset": "coverage",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "gui",
+      "configurePreset": "gui",
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     },

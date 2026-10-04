@@ -32,6 +32,10 @@ public:
                          "no JavaScript engine linked into this build");
         capabilities.set("console", ImplementationClass::Unsupported);
         capabilities.set("fetch", ImplementationClass::Unsupported);
+        capabilities.set("viewport", ImplementationClass::Unsupported,
+                         "page viewport bindings require JavaScript; host metadata remains available");
+        capabilities.set("matchMedia", ImplementationClass::Unsupported);
+        capabilities.set("disclosure-controls", ImplementationClass::Unsupported);
         capabilities.set("javascript-modules", ImplementationClass::Unsupported,
                          "native page-runtime modules require QuickJS");
         return capabilities;
@@ -63,6 +67,8 @@ NavigatorInfo DocumentScriptHost::navigator_info() const {
     info.language = "en-US";
     return info;
 }
+
+ViewportInfo DocumentScriptHost::viewport_info() const { return {}; }
 
 HostResponse DocumentScriptHost::host_request(const HostRequest&) {
     HostResponse response;

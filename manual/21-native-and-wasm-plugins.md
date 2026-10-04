@@ -8,6 +8,15 @@ Flatworm's native page-JavaScript bindings use the independent
 
 ## Registry lifecycle
 
+The optional [basic-gui](../plugins/basic-gui/README.md) plugin supplies an FLTK
+desktop inspector. `cmake --preset gui` enables its graphical adapter;
+`ptk-basic-gui --file plugins/basic-gui/example.html` opens the offline demo.
+Native loading remains display/network-free and retains the version-2 C ABI.
+Opening a live viewer is an explicit C++ `basic_gui::Viewer(session)` operation.
+The core/default build and the plugin's controller/projection tests remain
+headless. Preview clicks and typing use Session synthetic interactions;
+networking, cookies, TLS and request hooks stay in the host engine.
+
 PluginRegistry owns loaded libraries and descriptors. Loading, initializing,
 configuring, executing hooks, and shutting down are distinct stages:
 

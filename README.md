@@ -11,6 +11,11 @@ ProwseTk does not depend on WebKit, Blink, or Gecko. It ships its own lightweigh
 engine, **Flatworm**, optimized for automation and programmability rather than
 complete browser compatibility or pixel-perfect rendering.
 
+An optional [FLTK desktop inspector](plugins/basic-gui/README.md) provides a
+basic browser GUI for viewing the live page, DOM, source and activity. Its
+graphical dependencies are confined to `plugins/basic-gui`; the core and
+default build remain headless.
+
 Read the [ProwseTk Manual](manual/README.md) for 30 chapters covering installation,
 the core APIs, Lua drivers/extensions, plugins, tools, and client interfaces.
 It includes practical examples, configuration references, resource bounds, and
@@ -515,6 +520,18 @@ Lua extensions expose both synchronous and asynchronous behavior. They may use
 the engine's event loop, timers, request hooks, and session lifecycle events.
 
 ## Plugin System
+
+The repository includes `plugins/basic-gui`, an optional FLTK browser inspector.
+`ptk-basic-gui` supplies URL navigation/history, a basic HTML page preview,
+DOM/attribute inspection, sanitized source, console/network activity, synthetic
+clicks/typing and explicit page-JavaScript evaluation. It uses the owning
+Flatworm Session; every network request retains host policies, cookies and
+hooks. Preview links carry revision/node action IDs, and FLTK never loads page
+resource files or external URIs. Loading the ABI-v2 facade is display/network-free;
+the C++ `Viewer` explicitly opens a window. The `Controller` and snapshot model
+work without a display. Enable the desktop adapter with `PROWSETK_BUILD_BASIC_GUI=ON`
+or the `gui` preset. See [the plugin guide](plugins/basic-gui/README.md) for
+embedding, supported preview markup, redaction and bounds.
 
 The repository includes `plugins/ai-oracle`, an optional OpenAI Responses API
 oracle built with `third_party/openaipp`. C++ helpers, an opaque C service API,
@@ -1402,6 +1419,17 @@ navigating. DOM events dispatch through capture, target, and bubble; a submit
 control fires a cancelable `submit` event before the host POST or GET.
 Restrictions are reported honestly via capabilities: no layout,
 no progress events, no streaming response bodies, no CORS enforcement.
+
+Hosts can set a bounded logical viewport with `Session::set_viewport` and pump
+due timers/microtasks with `Session::pump_events`. Page scripts read those
+dimensions through window/screen/visualViewport metadata; updates notify resize
+and a restricted `matchMedia` implementation (width/height px, resolution dppx,
+orientation, screen/all/print and fixed light/no-reduced-motion preferences).
+Details/summary and dialogs have semantic open/toggle/close state and events;
+`method="dialog"` closes without network traffic. Checkbox/radio activation and
+select-value assignment update controls. These bindings are independently
+usable by headless hosts and have no layout geometry or graphical top-layer
+semantics. See [Manual Chapter 12](manual/12-javascript.md).
 
 Lua does not replace JavaScript as the page scripting language:
 
@@ -2383,6 +2411,7 @@ optional components depending on the build configuration.
 |---|---|
 | `c-ares` | Asynchronous DNS resolution |
 | `fmt` | Type-safe formatting (`{fmt}`) |
+| `fltk` | Optional desktop widgets/basic HTML preview for `plugins/basic-gui`; core and default builds are display-free |
 | `gumbo-parser` | Lenient HTML parsing fallback |
 | `googletest` | CTest-registered unit and integration suites (test-only) |
 | `inja` | Template processing for generated output |

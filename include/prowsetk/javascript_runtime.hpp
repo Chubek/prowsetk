@@ -79,6 +79,14 @@ struct NavigatorInfo {
     bool on_line = true;
 };
 
+// Logical viewport metadata, independent of layout or a display server.
+// Hosts may set it to match an inspection window. No pixel geometry is implied.
+struct ViewportInfo {
+    int width = 1280;
+    int height = 800;
+    double device_pixel_ratio = 1.0;
+};
+
 // Script-initiated navigation recorded by the host: a GET navigation (link
 // click, location.assign) or a form POST with an encoded body. The engine
 // performs it after the current script pass completes. Declared before
@@ -111,6 +119,7 @@ public:
     virtual PageInfo page_info() const;
     virtual void set_document_title(std::string_view title);
     virtual NavigatorInfo navigator_info() const;
+    virtual ViewportInfo viewport_info() const;
 
     // Host-mediated outbound request used by XMLHttpRequest and fetch.
     virtual HostResponse host_request(const HostRequest& request);

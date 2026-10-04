@@ -114,6 +114,7 @@ record.
 | 6. Native module ABI | Independent version-1 page-runtime ABI: definition validation, host registry, library ownership, per-runtime lifecycle, frozen exports, typed transfers, and an installed-only `flatworm:` module loader | `include/Flatwork-Module.h`, `include/prowsetk/flatworm_module.hpp`, `src/flatworm/module*.cpp` | 12, 21 |
 | 7. First shipped module | `flatworm:rpc`: JSON-RPC 2.0 request/notification builders, success and error envelopes, strict wire validation, ID correlation for batches, bounded JSON, an offline embedder example, and unit/integration suites | `flatworm-modules/rpc/` | 12 |
 | 8. Engine corrections from module work | Session event cancellation now reaches the navigation and request paths, and JSON-conversion getter/`toJSON` failures become value-free native errors instead of leaking thrown values | `src/core/browser.cpp`, `src/flatworm/module_bindings.cpp` | 12, 13 |
+| 9. Desktop inspection | Opt-in FLTK inspector over the same Session: page preview, DOM/source/activity views, synthetic interaction, bounded `pump_events`, and host-configured logical viewport metadata with resize and restricted media-query notifications | `plugins/basic-gui`, `include/prowsetk/browser.hpp`, `src/core/web_platform_shim.hpp` | 12, 21 |
 
 Three rules held across every stage, and they are worth preserving when adding
 the next one:
@@ -148,6 +149,7 @@ the next one:
 | Browser handoff | 16, 18, 24, 27 | assistant-browser settings, `plugins/beacon`, Booking.com examples |
 | Service and client interfaces | 28 | `web_interface.hpp`, `interface/web`, `interface/pyprowsetk` |
 | Terminal and instrumentation | 29–30 | `tools/prowse-tui`, `plugins/ebpf-interface` |
+| Desktop inspection GUI | 12, 21 | `plugins/basic-gui`, `tests/unit/test_basic_gui.cpp`, `tests/integration/test_basic_gui*` |
 
 The historical plugins under `plugins/.deprecated/` are covered as migration
 context in Chapter 16. They are outside the current plugin workflow.

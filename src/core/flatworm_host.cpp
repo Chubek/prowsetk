@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <utility>
 
 #include "flatworm/css_selector.hpp"
@@ -39,6 +40,16 @@ int node_type_code(fw::NodeType type) {
 
 FlatwormScriptHost::FlatwormScriptHost() = default;
 FlatwormScriptHost::~FlatwormScriptHost() = default;
+
+void FlatwormScriptHost::set_viewport(ViewportInfo viewport) {
+    if (viewport.width < 1 || viewport.width > 16384 ||
+        viewport.height < 1 || viewport.height > 16384 ||
+        !std::isfinite(viewport.device_pixel_ratio) ||
+        viewport.device_pixel_ratio <= 0 || viewport.device_pixel_ratio > 8) {
+        throw Error(ErrorCode::InvalidArgument, "invalid logical viewport");
+    }
+    viewport_ = viewport;
+}
 
 void FlatwormScriptHost::install(std::shared_ptr<Document> document,
                                  std::string base_url) {

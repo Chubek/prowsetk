@@ -170,6 +170,20 @@ public:
     std::string evaluate_js(std::string_view script,
                             const ScriptOptions& options = {});
 
+    // Logical CSS-pixel viewport (no layout/hit-testing). Updates notify page
+    // resize/visualViewport/media-query listeners, drain bounded lifecycle work
+    // and queued navigation. Valid before loading a page and without JavaScript.
+    // Dimensions 1..16384, finite pixel ratio (0,8]; invalid/closed/reentrant
+    // calls throw Error(InvalidArgument).
+    ViewportInfo viewport() const noexcept;
+    void set_viewport(ViewportInfo viewport, const ScriptOptions& options = {});
+
+    // Host event-loop checkpoint: due timers, animation frames, microtasks and
+    // queued navigation. Never sleeps; at most 16 bounded lifecycle passes.
+    // Hosts serialize this with other session operations. Closed/reentrant
+    // calls throw Error(InvalidArgument); disabled JavaScript is a no-op.
+    void pump_events(const ScriptOptions& options = {});
+
     // Requests issued by the current document's scripts since it was
     // installed. Cleared when the next document is installed, except that
     // script-initiated navigations preserve pre-navigation observations
@@ -230,7 +244,7 @@ private:
 
     // Runs the page lifecycle (DOMContentLoaded/load, timers, async script
     // callbacks) to a bounded quiescence after the document's scripts.
-    void run_script_lifecycle();
+    void run_script_lifecycle(const ScriptOptions& options = {});
     ScriptResult execute_script(std::string_view script,
                                 const ScriptOptions& options = {},
                                 bool module = false);

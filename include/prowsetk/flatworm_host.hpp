@@ -52,6 +52,10 @@ public:
     void set_storage_hook(StorageHook hook) { storage_hook_ = std::move(hook); }
     void set_navigator_hook(NavigatorHook hook) { navigator_hook_ = std::move(hook); }
     void set_referrer(std::string referrer) { referrer_ = std::move(referrer); }
+    // Dimensions 1..16384, finite pixel ratio (0,8]. Invalid updates throw
+    // Error(InvalidArgument) and preserve the previous viewport.
+    void set_viewport(ViewportInfo viewport);
+    ViewportInfo viewport_info() const override { return viewport_; }
 
     const std::shared_ptr<Document>& document() const noexcept {
         return document_;
@@ -149,6 +153,7 @@ private:
     std::string base_url_;
     std::string referrer_;
     PendingNavigation pending_;
+    ViewportInfo viewport_;
 
     RequestHook request_hook_;
     CookieHook cookie_hook_;
