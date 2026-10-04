@@ -2089,8 +2089,12 @@ and rerun with `--cookies-json FILE`.
 The Booking.com example also supports `--assistant_browser_force true`; after
 the handoff it automatically snapshots the newest Firefox `cookies.sqlite`
 under `~/.mozilla/firefox` (or `$FIREFOX_PROFILE_ROOT`) into the configured
-cookie JSON and retries the session. Set
-`PROWSETK_ASSISTANT_BROWSER_COOKIE_COMMAND` to override that grabber.
+cookie JSON and retries the session. Profile selection considers both the
+database and its live WAL; `FIREFOX_PROFILE_DIR` selects an exact active profile.
+Capture uses an online SQLite backup, preserves boolean cookie flags, excludes
+expired/foreign cookies, and atomically replaces an owner-only export. Capture
+or import failures stop preparation instead of silently reusing stale cookies.
+Set `PROWSETK_ASSISTANT_BROWSER_COOKIE_COMMAND` to override that grabber.
 The driver launches the assistant browser in the background with its terminal
 streams detached. Complete the browser interaction, leave the browser open,
 and press Enter in the scraper's terminal to import cookies and retry login
@@ -2201,7 +2205,8 @@ scripts/run-scrape-booking.sh \
 `--html` uses an in-memory page transport and disables GET probes; it needs no
 Booking credentials and makes no page-network requests, but still contacts
 OpenCode. Live runs use bounded same-origin GET probes for observed response
-schemas; POST and other non-GET methods are never probed. Unobserved body
+schemas, skipping logout/sign-out-like paths to preserve the session; POST and
+other non-GET methods are never probed. Unobserved body
 schemas remain inferred. Schemas retain provenance, confidence, redaction and
 `coverage-complete: false`; an agent stop does not establish full API coverage.
 Use `--decisions FILE` to match controls in your current extranet page. The
@@ -2222,6 +2227,26 @@ launcher options to override the beacon or browser-force setting;
 boolean values to the controller's login preparation. The default cookie file
 is `_scraped/booking-dotcom-admin/cookies.json` under the repository; the
 Firefox handoff refreshes it, and `--cookies-json PATH` overrides it.
+
+Use `--verbose`/`-v` (`--verbse` is also accepted) for stage, request/proxy,
+cookie-import, timing and page-JavaScript diagnostics. Failed login confirmation
+reports HTTP status, redirect count, final host, origin match, account-control
+and beacon checks, password-field presence and challenge classification. Logs
+omit URL queries, page content, cookie values, proxy credentials and raw model/
+JavaScript errors. The controller reports the failing stage and error code even
+without verbosity. A forced handoff is performed once per preparation; it is
+not automatically relaunched after credential fallback. Private server logs are
+retained on failure or a verbose run.
+
+`HTTPS_PROXY`/`https_proxy` applies to HTTPS page requests and
+`HTTP_PROXY`/`http_proxy` to HTTP requests, including redirects, page scripts
+and schema probes. The launcher adds loopback to `NO_PROXY`/`no_proxy` for its
+local OpenCode connection and readiness checks while preserving other exclusions:
+
+```sh
+HTTPS_PROXY=http://127.0.0.1:8080 HTTP_PROXY=http://127.0.0.1:8080 \
+  scripts/run-scrape-booking.sh --verbose
+```
 
 Omit `--html` for live exploration (imported cookies or Booking credentials
 must confirm login); `--no-server` reuses an already-running server instead of starting
@@ -2686,6 +2711,16 @@ request-level `HttpRequest::proxy` overrides the browser-level
 then `ALL_PROXY`/`all_proxy`. Proxy URLs use `http://host:port`,
 `https://host:port`, or `socks5://[user:pass@]host:port`. Proxy credentials are
 never included in redacted diagnostics.
+
+`NO_PROXY`/`no_proxy` excludes comma-separated hosts, domain suffixes (with
+optional leading `.` or `*.`), optional ports, IPv4/IPv6 literals, or `*` for
+all hosts from environment-selected proxies. Explicit request/browser proxies
+still take precedence. Uppercase nonempty variables take precedence over their
+lowercase aliases. CIDR exclusions are not implemented. HTTP forwarding sends
+an absolute URL with its query exactly once; HTTPS uses a bounded, status-checked
+CONNECT tunnel. Basic proxy authentication is encoded and confined to the proxy
+hop. HTTPS proxies verify their own certificate as well as the tunneled origin's
+certificate through OpenSSL.
 
 The `prowsetk` CLI accepts `--proxy URL` for navigation, endpoint extraction,
 and serialization. `Prowse.toml` accepts `[network].proxy`, and Lua driver

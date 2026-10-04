@@ -23,6 +23,14 @@ bool same_origin(std::string_view value, std::string_view origin) {
     } catch (...) { return false; }
 }
 std::string key(const DiscoveredEndpoint& endpoint) { return endpoint.method + " " + endpoint.url; }
+bool logout_path(std::string path) {
+    std::transform(path.begin(), path.end(), path.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    for (const auto marker : {"logout", "log-out", "log_out", "signout", "sign-out", "sign_out", "logoff", "signoff"}) {
+        if (path.find(marker) != std::string::npos) return true;
+    }
+    return false;
+}
 void omit_examples(std::vector<schema::JsonField>& fields) {
     for (auto& field : fields) {
         field.example.clear();
@@ -30,7 +38,7 @@ void omit_examples(std::vector<schema::JsonField>& fields) {
         omit_examples(field.items_properties);
     }
 }
-Result execute(Session& session, bridge::OpenCodeClient& client, const Decisions& decisions) {
+Result execute(Session& session, bridge::OpenCodeClient& client, const Decisions& decisions, std::string_view& phase) {
     if (!session.document() || decisions.goal.empty() || decisions.goal.size() > 4096 ||
         decisions.actions.size() > 128 || !decisions.max_steps || decisions.max_steps > 64 ||
         !decisions.max_page_requests || decisions.max_page_requests > 1024 || decisions.max_get_probes > 128) {
@@ -108,6 +116,7 @@ Result execute(Session& session, bridge::OpenCodeClient& client, const Decisions
     std::map<std::string, schema::EndpointSchema> accumulated;
     std::set<std::string> probed;
     auto collect = [&] {
+        phase = "endpoint collection and schema enrichment";
         const auto document = session.document();
         if (!document) throw Error(ErrorCode::NotFound, "page document missing");
         auto scraped = scrape_endpoints::scrape_from_session(session, scrape_options);
@@ -123,7 +132,9 @@ Result execute(Session& session, bridge::OpenCodeClient& client, const Decisions
         for (const auto& entry : unique) {
             const auto& endpoint = entry.second;
             endpoints.push_back(endpoint);
-            if (endpoint.method != "get" || probed.contains(key(endpoint)) ||
+            // Logout controls are positive login evidence, not read-only
+            // schema probes. Keep their discovery without ending the session.
+            if (endpoint.method != "get" || logout_path(endpoint.path) || probed.contains(key(endpoint)) ||
                 result.extraction.probe_count >= decisions.max_get_probes) continue;
             probed.insert(key(endpoint));
             ++result.extraction.probe_count;
@@ -165,6 +176,7 @@ Result execute(Session& session, bridge::OpenCodeClient& client, const Decisions
     };
     collect();
     if (denied) throw Error(ErrorCode::SecurityViolation, "page request policy denied");
+    phase = "OpenCode session creation";
     const auto agent_session = client.create_session(true);
     std::map<std::string, unsigned> uses;
     for (unsigned step = 0; step < decisions.max_steps; ++step) {
@@ -192,9 +204,11 @@ Result execute(Session& session, bridge::OpenCodeClient& client, const Decisions
         prompt += "Observed endpoint count: " + std::to_string(accumulated.size()) +
             "\nActions completed: " + std::to_string(result.steps) +
             "\nRemaining action budget: " + std::to_string(decisions.max_steps - step);
+        phase = "OpenCode decision";
         auto choice = parse_choice(client.config().api_prefix == "/api"
             ? client.prompt(agent_session, prompt) : client.prompt_message(agent_session, prompt), decisions);
         if (choice == "stop") { result.stopped = true; result.reason = "agent-stop"; break; }
+        phase = "page action";
         const auto action = std::find_if(decisions.actions.begin(), decisions.actions.end(),
             [&](const Action& item) { return item.id == choice; });
         if (uses[choice] >= action->max_uses) throw Error(ErrorCode::SecurityViolation, "action exhausted");
@@ -212,6 +226,7 @@ Result execute(Session& session, bridge::OpenCodeClient& client, const Decisions
         if (denied) throw Error(ErrorCode::SecurityViolation, "page request policy denied");
     }
     if (!result.stopped) result.reason = "step-limit";
+    phase = "schema serialization";
     for (auto& item : accumulated) {
         auto& endpoint = item.second.endpoint;
         endpoint.url = redactor.redact_url(endpoint.url);
@@ -239,8 +254,9 @@ Result execute(Session& session, bridge::OpenCodeClient& client, const Decisions
 }
 }
 Result run(Session& session, bridge::OpenCodeClient& client, const Decisions& decisions) {
-    try { return execute(session, client, decisions); }
-    catch (const Error& error) { throw Error(error.code(), "opencode-marionette: operation failed"); }
-    catch (...) { throw Error(ErrorCode::PluginError, "opencode-marionette: operation failed"); }
+    std::string_view phase = "policy validation";
+    try { return execute(session, client, decisions, phase); }
+    catch (const Error& error) { throw Error(error.code(), "opencode-marionette: " + std::string(phase) + " failed"); }
+    catch (...) { throw Error(ErrorCode::PluginError, "opencode-marionette: " + std::string(phase) + " failed"); }
 }
 }

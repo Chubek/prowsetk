@@ -83,6 +83,22 @@ local function trim(value)
     return tostring(value or ""):match("^%s*(.-)%s*$")
 end
 
+local verbose = false
+local function verbose_requested(args)
+    return args.verbose == true or tostring(args.verbose or ""):lower() == "true"
+end
+local function debug_log(message)
+    if verbose then io.stderr:write("booking-dotcom-admin: " .. message .. "\n") end
+end
+-- Diagnostics expose hosts and evidence flags, never URL queries, page text,
+-- cookie values, credentials or raw transport/JavaScript errors.
+local function diagnostic_host(url)
+    local authority = tostring(url or ""):match("^https?://([^/?#]+)") or ""
+    local host = authority:gsub("^.*@", "")
+    if #host > 255 or not host:match("^[%w.:%[%]%-]+$") then return "unavailable" end
+    return host
+end
+
 local function dirname(path)
     local normalized = tostring(path):gsub("\\", "/")
     local index = normalized:match(".*/()")
@@ -128,8 +144,7 @@ local function offer_login_assistant_browser(session, url, args, reason)
             cookie_hint .. "\n")
     end
 
-    io.stderr:write("booking-dotcom-admin: launching " .. tostring(command) ..
-        " for " .. tostring(url) .. "\n")
+    io.stderr:write("booking-dotcom-admin: launching assistant browser for " .. diagnostic_host(url) .. "\n")
     -- Firefox can remain open for the whole crawl. Disconnect its terminal
     -- streams and ignore hangup so os.execute waits only for the launcher.
     os.execute("nohup " .. tostring(command) .. " " .. shell_quote(url) ..
@@ -140,14 +155,23 @@ local function offer_login_assistant_browser(session, url, args, reason)
     if io.read("*l") == nil then
         error("booking-dotcom-admin: browser interaction was not confirmed", 2)
     end
+    io.stderr:write("\n")
     local cookie_command = os.getenv("PROWSETK_ASSISTANT_BROWSER_COOKIE_COMMAND") or
         args.assistant_browser_cookie_command or ""
+    local default_grabber = cookie_command == ""
     if cookie_command == "" then
-        cookie_command = repo_root .. "/scripts/grab-firefox-cookies.sh"
+        cookie_command = shell_quote(repo_root .. "/scripts/grab-firefox-cookies.sh")
     end
     if cookie_command ~= "" and cookie_path and cookie_path ~= "" then
         io.stderr:write("booking-dotcom-admin: grabbing Firefox cookies\n")
-        os.execute(tostring(cookie_command) .. " " .. shell_quote(cookie_path))
+        local ok, _, status = os.execute(tostring(cookie_command) .. " " .. shell_quote(cookie_path) ..
+            (default_grabber and verbose and " --verbose" or "") ..
+            " >/dev/null" .. (default_grabber and "" or " 2>/dev/null"))
+        if ok ~= true and ok ~= 0 then
+            error("booking-dotcom-admin: Firefox cookie capture failed (exit " ..
+                tostring(tonumber(status) or 1) ..
+                "); check FIREFOX_PROFILE_DIR or the configured cookie command", 2)
+        end
     end
     local imported = 0
     if cookie_path and cookie_path ~= "" and session and
@@ -155,7 +179,16 @@ local function offer_login_assistant_browser(session, url, args, reason)
         local ok, count = pcall(function()
             return session:import_cookies_json(cookie_path)
         end)
-        if ok then imported = tonumber(count) or 0 end
+        if not ok then
+            error("booking-dotcom-admin: Firefox cookie import failed; check the cookie JSON file", 2)
+        end
+        imported = tonumber(count) or 0
+        io.stderr:write("booking-dotcom-admin: imported " .. tostring(imported) .. " cookies (values omitted)\n")
+        if imported == 0 then
+            error("booking-dotcom-admin: Firefox cookie import returned no cookies; check the active Firefox profile", 2)
+        end
+    else
+        error("booking-dotcom-admin: Firefox cookie import requires a cookie file and managed session", 2)
     end
     return true, imported
 end
@@ -446,6 +479,8 @@ local function fetch_page(session, url, options)
     local max_redirects = tonumber(options.max_redirects) or 0
     for _ = 0, max_redirects do
         local response = session:request(method, current_url, {body = options.body, headers = options.headers})
+        debug_log("login request: " .. method .. " host=" .. diagnostic_host(current_url) ..
+            " HTTP=" .. tostring(response.status) .. " bytes=" .. tostring(#(response.body or "")))
         response.final_url = current_url
         response.redirect_chain = redirects
         response.captcha = captcha_handler.inspect_response(method, current_url, response)
@@ -454,6 +489,7 @@ local function fetch_page(session, url, options)
             return response.body or "", response
         end
         local next_url = resolve_url(current_url, location)
+        debug_log("login redirect: next-host=" .. diagnostic_host(next_url))
         if not next_url then
             return response.body or "", response
         end
@@ -504,15 +540,15 @@ local function beacon_authenticated(document, beacon, beacon_type)
     end
     if beacon_type == "xpath" and type(document.xpath) == "function" then
         local ok, nodes = pcall(function() return document:xpath(value) end)
-        return ok and type(nodes) == "table" and #nodes > 0
+        return ok and type(nodes) == "table" and #nodes > 0, not ok
     elseif beacon_type == "css" and type(document.query_selector) == "function" then
         local ok, node = pcall(function() return document:query_selector(value) end)
-        return ok and node ~= nil
+        return ok and node ~= nil, not ok
     elseif beacon_type == "text" and type(document.text) == "function" then
         local ok, text = pcall(function() return document:text() end)
-        return ok and tostring(text or ""):lower():find(value:lower(), 1, true) ~= nil
+        return ok and tostring(text or ""):lower():find(value:lower(), 1, true) ~= nil, not ok
     end
-    return false
+    return false, true
 end
 
 local function detect_blocked_login(html)
@@ -716,12 +752,24 @@ local function probe_authenticated_page(session, url, success_selector, success_
     local body, response = fetch_page(session, url, {
         follow_redirects = true, max_redirects = 8, trusted_start = url
     })
-    if confirmed_challenge(response) then return false, body, response end
-    local doc = load_page(session, response.final_url, body)
-    local valid = response.status >= 200 and response.status < 300 and
-        same_origin(url, response.final_url) and
-        (authenticated(doc, body, success_selector) or
-         beacon_authenticated(doc, success_beacon, success_beacon_type))
+    local challenge = confirmed_challenge(response)
+    local doc = not challenge and load_page(session, response.final_url, body) or nil
+    local marker = authenticated(doc, body, success_selector)
+    local beacon, beacon_error = beacon_authenticated(doc, success_beacon, success_beacon_type)
+    local origin_ok = same_origin(url, response.final_url)
+    local valid = not challenge and response.status >= 200 and response.status < 300 and
+        origin_ok and (marker or beacon)
+    if verbose or not valid then
+        io.stderr:write("booking-dotcom-admin: login confirmation: HTTP=" .. tostring(response.status) ..
+            " redirects=" .. tostring(#response.redirect_chain) ..
+            " final-host=" .. diagnostic_host(response.final_url) ..
+            " same-origin=" .. tostring(origin_ok) .. " auth-marker=" .. tostring(marker) ..
+            " beacon-configured=" .. tostring(type(success_beacon) == "string" and success_beacon ~= "") ..
+            " beacon-match=" .. tostring(beacon) .. " beacon-error=" .. tostring(beacon_error == true) ..
+            " password-field=" .. tostring(doc ~= nil and doc:query_selector('input[type="password"]') ~= nil) ..
+            " challenge=" .. challenge_status(response) .. " bytes=" .. tostring(#body) ..
+            " confirmed=" .. tostring(valid) .. "\n")
+    end
     return valid, body, response
 end
 
@@ -2122,6 +2170,7 @@ end
 -- Shared login preparation for the Lua driver and the C++ marionette runner.
 -- The caller owns the session; preparation neither exports nor closes it.
 local function prepare_booking_session(session, args)
+    verbose = verbose_requested(args)
     local url = args.url or DEFAULT_URL
     no_xcors_only = no_xcors_requested(args)
     if type(args.html) == "string" and args.html ~= "" then
@@ -2131,9 +2180,10 @@ local function prepare_booking_session(session, args)
 
     local dotenv = load_dotenv(args.dotenv)
     local captcha_inputs = apply_captcha_inputs(session, args, dotenv)
+    local handed_off = false
     if args.assistant_browser_force == true or
        tostring(args.assistant_browser_force or ""):lower() == "true" then
-        offer_login_assistant_browser(session, url, args,
+        handed_off = offer_login_assistant_browser(session, url, args,
             "assistant browser launch forced by --assistant_browser_force")
     end
 
@@ -2147,6 +2197,7 @@ local function prepare_booking_session(session, args)
         error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs, initial_response), 2)
     end
     if not loaded then
+        debug_log("imported session did not confirm login; trying credential login")
         local username = env("BOOKING_DOTCOM_USER", dotenv)
         local password = env("BOOKING_DOTCOM_PASS", dotenv)
         if not username or username == "" or not password or password == "" then
@@ -2178,18 +2229,14 @@ local function prepare_booking_session(session, args)
             authenticated_url = load_authenticated_page(session, url, args.success_selector,
                 args.success_beacon, args.success_beacon_type)
         end)
-        if not loaded then
-            local handed_off, imported_cookies = offer_login_assistant_browser(
-                session, url, args, tostring(load_err):gsub("^[^:]+:%s*", ""))
-            if handed_off then
+        if not loaded and not handed_off then
+            local retry_handoff = offer_login_assistant_browser(
+                session, url, args, "login was not confirmed; interactive verification may be required")
+            if retry_handoff then
                 loaded, load_err = pcall(function()
                     authenticated_url = load_authenticated_page(session, url, args.success_selector,
                         args.success_beacon, args.success_beacon_type)
                 end)
-                if not loaded and imported_cookies == 0 then
-                    load_err = tostring(load_err) ..
-                        "; Firefox is a separate session; export fresh cookies and rerun with --cookies-json FILE"
-                end
             end
         end
         if not loaded then
@@ -2205,6 +2252,7 @@ local function prepare_booking_session(session, args)
             error(load_err, 0)
         end
     end
+    debug_log("authenticated session ready for discovery")
     return authenticated_url
 end
 

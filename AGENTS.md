@@ -607,7 +607,7 @@ have been solved merely because a cookie exists.
 browser handoff, the XPath success beacon
 `xpath=//h1[contains(normalize-space(.), 'Joe Litty Rooms')]`, and `--no-xcors`
 for booking.com TLD-only endpoint output. Keep these launcher defaults
-overridable and forward explicit boolean values to the driver CLI.
+overridable and forward explicit boolean values to the controller's driver preparation.
 The launcher invokes `ptk-opencode-marionette`, which prepares login through
 the driver's `prepare_session(args)` on a host-bound managed session and then
 controls that same session. Keep the trusted Booking action policy in
@@ -618,6 +618,20 @@ launcher owns the OpenCode server lifecycle and never prints its password.
 Launch the Booking assistant browser independently of the scraper's terminal;
 show the Enter prompt while the browser is still open. EOF cancels the handoff,
 and resuming still requires fresh session data and positive DOM confirmation.
+Check cookie capture/import results and avoid repeating a forced handoff in the
+same preparation. The Firefox helper selects by database/WAL freshness or
+`FIREFOX_PROFILE_DIR`, snapshots online, emits JSON booleans and installs an
+owner-only export atomically; failed/empty captures preserve the previous file.
+Launcher/controller `--verbose`/`-v` (`--verbse` alias) diagnostics expose stages,
+error codes, request/proxy routing and login evidence flags, never page values,
+URL queries, credentials or raw Lua/JavaScript/model errors. Preserve private
+server logs on failures and verbose runs. Scheme-specific proxy environment
+variables and `NO_PROXY`/`no_proxy` apply at the host socket boundary; the launcher
+adds loopback exclusions for OpenCode. Proxy Basic authentication stays on the
+proxy hop, HTTPS uses a strict bounded CONNECT response, and HTTPS proxy/origin
+certificates are verified independently.
+Automatic marionette GET schema probes skip logout/sign-out-like paths while
+retaining their discovery, so login-evidence links do not invalidate the session.
 Discovery is heuristic and bounded, with explicit incomplete coverage metadata.
 After the crawl the driver applies restful-resolver and then schema-grabber
 enrichment (request/response schemas, typed URL parameters; GET response

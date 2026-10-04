@@ -148,6 +148,7 @@ TEST_F(Fixture, UnknownChoiceFailsWithValueFreeErrorAndCleansHooks) {
     catch (const prowsetk::Error& error) {
         EXPECT_EQ(error.code(), prowsetk::ErrorCode::SecurityViolation);
         EXPECT_EQ(std::string(error.what()).find("private"), std::string::npos);
+        EXPECT_NE(std::string(error.what()).find("OpenCode decision failed"), std::string::npos);
     }
     EXPECT_EQ(browser.events().handler_count(prowsetk::EventType::AfterResponse), 0u);
 }
@@ -219,6 +220,28 @@ TEST_F(Fixture, ProbeUsesOriginalQueryWhileAllReturnedUrlsAreRedacted) {
     EXPECT_EQ(result.extraction.openapi_yaml.find("probe-private"), std::string::npos);
     EXPECT_EQ(result.extraction.postman_json.find("probe-private"), std::string::npos);
     for (const auto& endpoint : result.extraction.endpoints) EXPECT_EQ(endpoint.url.find("probe-private"), std::string::npos);
+}
+
+TEST_F(Fixture, LogoutDiscoveryDoesNotInvalidateTheAuthenticatedSession) {
+    bool logged_in = true;
+    page->set_handler([&](const auto& request) {
+        if (request.url == "https://page.test/logout") logged_in = false;
+        return response(logged_in ? R"({"count":3})" : "{}", "application/json", logged_in ? 200 : 401);
+    });
+    session->load_html("<a href='/logout'>Log out</a><a id='view' href='/next'>Next</a>", "https://page.test/");
+    unsigned turn = 0;
+    agent.set_handler([&](const auto& request) {
+        if (request.url.ends_with("/session")) return response(R"({"id":"agent-session"})");
+        return response(answer(turn++ ? "stop" : "view"));
+    });
+    b::OpenCodeClient client(agent, config());
+    const auto result = m::run(*session, client,
+        m::parse_decisions(R"({"version":1,"goal":"view","actions":[{"id":"view","kind":"click","selector":"#view"}]})"));
+    EXPECT_TRUE(logged_in);
+    EXPECT_EQ(result.steps, 1u);
+    EXPECT_EQ(session->current_url(), "https://page.test/next");
+    for (const auto& request : page->requests()) EXPECT_NE(request.url, "https://page.test/logout");
+    EXPECT_NE(result.extraction.openapi_yaml.find("/logout"), std::string::npos);
 }
 
 TEST_F(Fixture, V2PollingControlsClicksAndAccumulatesSchemas) {

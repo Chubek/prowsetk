@@ -88,6 +88,17 @@ if(TARGET page2pdf)
 endif()
 
 find_package(Threads REQUIRED)
+if(UNIX)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    find_program(PROWSETK_SQLITE3_EXECUTABLE sqlite3)
+    if(Python3_Interpreter_FOUND AND PROWSETK_SQLITE3_EXECUTABLE)
+        add_test(NAME prowsetk.integration.storage.firefox_cookie_capture
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_firefox_cookies.py" "${PROJECT_SOURCE_DIR}")
+        set_tests_properties(prowsetk.integration.storage.firefox_cookie_capture PROPERTIES
+            LABELS "integration;storage;lua" TIMEOUT 30
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+endif()
 prowsetk_gtest(prowsetk_integration_web_interface
     "prowsetk.integration.web-interface."
     "integration;web-interface" test_web_interface.cpp)

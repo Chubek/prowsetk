@@ -21,6 +21,9 @@ struct ProxyConfig {
     bool enabled() const noexcept { return scheme != ProxyScheme::None && !host.empty() && !port.empty(); }
 };
 ProxyConfig parse_proxy_url(std::string_view value);
+// Scheme-specific HTTPS_PROXY/HTTP_PROXY (uppercase, then lowercase), falling
+// back to ALL_PROXY. NO_PROXY/no_proxy host/suffix/port exclusions apply only
+// to environment-selected proxies; explicit request/client proxies override it.
 ProxyConfig proxy_from_environment(std::string_view target_url);
 std::string proxy_to_string(const ProxyConfig& proxy, bool redact = true);
 
@@ -82,6 +85,8 @@ private:
 
 // POSIX socket client. With OpenSSL 3 available at build time, HTTPS verifies
 // the certificate chain and hostname using OpenSSL's default trust paths.
+// HTTP(S) proxies use absolute-form HTTP or CONNECT for HTTPS. Proxy Basic
+// credentials never reach a tunneled origin; HTTPS proxies also verify TLS.
 // Builds without OpenSSL report HTTPS as unsupported; HTTP remains available.
 std::unique_ptr<NetworkClient> make_socket_network_client();
 

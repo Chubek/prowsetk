@@ -60,6 +60,8 @@
 #                          (default: 512)
 #   --opencode-wait-ms MS  cap on waiting for an agent reply
 #                          (default: 300000)
+#   -v, --verbose          stage, request, proxy, cookie and login diagnostics
+#                          (--verbse is accepted as an alias)
 #   -h, --help             show this help and exit
 #
 # Environment:
@@ -69,6 +71,10 @@
 #   PROWSETK_MARIONETTE_BIN    controller executable (default:
 #                             build/default/plugins/opencode-marionette/
 #                             ptk-opencode-marionette under the repo)
+#   HTTPS_PROXY / HTTP_PROXY  proxies for HTTPS / HTTP page requests
+#   NO_PROXY / no_proxy       comma-separated proxy exclusions; loopback is
+#                             always added for the local OpenCode server
+#   FIREFOX_PROFILE_DIR       exact Firefox profile for cookie capture
 #
 # Only caller-permitted actions run; model output is never executable code.
 # Schemas retain provenance and redaction. Coverage is explicitly incomplete.
@@ -82,6 +88,7 @@ SERVER_BIN="opencode"
 WORK_DIR=""
 KEEP_SERVER=0
 NO_SERVER=0
+VERBOSE=0
 HTML=""
 URL="https://admin.booking.com/"
 OUTPUT=""
@@ -106,6 +113,10 @@ usage() {
 
 log() {
     echo "run-scrape-booking: $*" >&2
+}
+
+debug_log() {
+    if [[ "$VERBOSE" -eq 1 ]]; then log "$*"; fi
 }
 
 die() {
@@ -146,6 +157,7 @@ while [[ $# -gt 0 ]]; do
             shift ;;
         --opencode-max-requests) OPENCODE_MAX_REQUESTS="${2:?needs a value}"; shift 2 ;;
         --opencode-wait-ms) OPENCODE_WAIT_MS="${2:?needs a value}"; shift 2 ;;
+        -v|--verbose|--verbse) VERBOSE=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown argument: $1 (see --help)" ;;
     esac
@@ -171,20 +183,35 @@ for value in "$ASSISTANT_BROWSER_FORCE" "$NO_XCORS"; do
 done
 command -v curl >/dev/null 2>&1 || die "curl is required for server readiness probes"
 
+# Keep local agent authentication on loopback even when page traffic uses a
+# proxy. Preserve caller exclusions and provide both spellings for curl/core.
+export NO_PROXY="${NO_PROXY:-${no_proxy:-}}"
+if [[ -n "$NO_PROXY" && "$NO_PROXY" != *, ]]; then NO_PROXY+=","; fi
+export NO_PROXY="${NO_PROXY}localhost,127.0.0.1,::1"
+export no_proxy="$NO_PROXY"
+debug_log "verbose diagnostics enabled (page/cookie/credential values are omitted)"
+debug_log "proxy environment: HTTPS_PROXY=$([[ -n "${HTTPS_PROXY:-${https_proxy:-}}" ]] && echo set || echo unset), HTTP_PROXY=$([[ -n "${HTTP_PROXY:-${http_proxy:-}}" ]] && echo set || echo unset); local OpenCode bypasses proxies"
+
 BASE_URL="http://${HOST}:${PORT}"
 SERVER_PID=""
 SERVER_LOG=""
 CREATED_WORK_DIR=""
 
 cleanup() {
+    local status=$?
     if [[ "$KEEP_SERVER" -eq 0 && -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
         log "stopping opencode server (pid $SERVER_PID)"
         kill "$SERVER_PID" 2>/dev/null || true
         wait "$SERVER_PID" 2>/dev/null || true
     fi
     if [[ -n "$CREATED_WORK_DIR" && "$KEEP_SERVER" -eq 0 ]]; then
-        rm -rf "$CREATED_WORK_DIR"
+        if [[ "$status" -eq 0 && "$VERBOSE" -eq 0 ]]; then
+            rm -rf "$CREATED_WORK_DIR"
+        else
+            log "private server log retained at $SERVER_LOG"
+        fi
     fi
+    return "$status"
 }
 trap cleanup EXIT
 
@@ -263,9 +290,16 @@ RUNNER_ARGS=("$DECISIONS" "$URL" "$OUTPUT" "$POSTMAN"
 [[ -n "$MAX_STEPS" ]] && RUNNER_ARGS+=(--max-steps "$MAX_STEPS")
 [[ -n "$MAX_PAGE_REQUESTS" ]] && RUNNER_ARGS+=(--max-page-requests "$MAX_PAGE_REQUESTS")
 [[ -n "$MAX_GET_PROBES" ]] && RUNNER_ARGS+=(--max-get-probes "$MAX_GET_PROBES")
+[[ "$VERBOSE" -eq 1 ]] && RUNNER_ARGS+=(--verbose)
 
 log "running opencode-marionette with scrape-endpoints discovery and schema-grabber enrichment"
-"$MARIONETTE_BIN" "${RUNNER_ARGS[@]}"
+if "$MARIONETTE_BIN" "${RUNNER_ARGS[@]}"; then
+    debug_log "controller completed successfully; checking both exports"
+else
+    status=$?
+    log "controller failed (exit $status); see the stage and login diagnostics above"
+    exit "$status"
+fi
 
 [[ -s "$OUTPUT" ]] || die "expected output YAML not found: $OUTPUT"
 [[ -s "$POSTMAN" ]] || die "expected Postman JSON not found: $POSTMAN"

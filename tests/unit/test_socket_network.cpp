@@ -192,6 +192,42 @@ TEST(SocketNetwork, SendsMethodAndBody) {
               std::string::npos);
 }
 
+TEST(SocketNetwork, HttpProxySendsAbsoluteTargetOnceAndEncodesBasicAuthentication) {
+    LoopbackServer proxy([](const std::string&) {
+        return "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
+    });
+    auto client = prowsetk::make_socket_network_client();
+    auto request = get_request("http://url-private@origin.invalid/api/items?limit=2&token=query-private#fragment-private");
+    request.proxy = prowsetk::parse_proxy_url(proxy.url());
+    request.proxy.username = "alice";
+    request.proxy.password = "secret";
+    request.headers.emplace_back("Proxy-Authorization", "caller-private");
+    ASSERT_EQ(client->send(request).body, "OK");
+    const auto& wire = proxy.last_request();
+    EXPECT_TRUE(wire.starts_with("GET http://origin.invalid/api/items?limit=2&token=query-private HTTP/1.1\r\n"));
+    EXPECT_NE(wire.find("\r\nHost: origin.invalid\r\n"), std::string::npos);
+    EXPECT_NE(wire.find("Proxy-Authorization: Basic YWxpY2U6c2VjcmV0\r\n"), std::string::npos);
+    for (const auto* value : {"url-private", "fragment-private", "caller-private", "alice:secret"})
+        EXPECT_EQ(wire.find(value), std::string::npos);
+}
+
+TEST(SocketNetwork, RequestProxyOverridesClientProxyAndCallerProxyHeaderNeverReachesOrigin) {
+    LoopbackServer proxy([](const std::string&) {
+        return "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+    });
+    auto client = prowsetk::make_socket_network_client();
+    client->set_proxy(prowsetk::parse_proxy_url("http://unreachable.invalid:8080"));
+    auto request = get_request("http://origin.invalid/");
+    request.proxy = prowsetk::parse_proxy_url(proxy.url());
+    EXPECT_EQ(client->send(request).status, 200);
+    // A direct request must strip a supplied proxy credential too.
+    client = prowsetk::make_socket_network_client();
+    request = get_request(proxy.url());
+    request.headers.emplace_back("Proxy-Authorization", "caller-private");
+    EXPECT_EQ(client->send(request).status, 200);
+    EXPECT_EQ(proxy.last_request().find("caller-private"), std::string::npos);
+}
+
 TEST(SocketNetwork, EnforcesBodySizeLimit) {
     LoopbackServer server([](const std::string&) {
         std::string body(4096, 'x');

@@ -88,6 +88,40 @@ incomplete heuristic coverage. Its bounded script and API-link scans can expose
 references outside the set observed during page execution. Beacon and assistant
 options are documented by the example's source and project declaration.
 
+For agent-selected interactions, use the Booking launcher:
+
+```sh
+scripts/run-scrape-booking.sh \
+  --output _scraped/booking-dotcom-admin/api.yaml \
+  --postman _scraped/booking-dotcom-admin/api.postman_collection.json \
+  --max-steps 24 --max-get-probes 64
+```
+
+It starts an OpenCode V2 server and invokes `ptk-opencode-marionette`. The
+driver's `prepare_session(args)` prepares login on the host-bound managed
+session, retaining its cookies and page context for C++ control. A trusted
+`marionette-decisions.json` policy defines links, tabs, details and pagination;
+`--decisions FILE` customizes selectors. Discovery and schemas accumulate
+before and after actions through scrape-endpoints and schema-grabber. Live
+GET probes are bounded, other methods are never probed, and both exports
+retain redaction, provenance and explicitly incomplete coverage.
+Automatic probes skip logout/sign-out-like paths to preserve the login session.
+The launcher defaults to the Firefox handoff and Joe Litty Rooms XPath beacon;
+`--assistant-browser-force false` reuses a confirmed imported session without
+forcing that handoff. `--html HTML` uses an in-memory page transport and zero
+GET probes while still contacting the separate OpenCode server.
+
+`--verbose`/`-v` (`--verbse` alias) reports the failing stage/error code,
+request/proxy route, response status/size/timing, imported-cookie counts and
+login evidence checks. It omits page values, URL queries, credentials and raw
+JavaScript/model errors. The launcher retains its private server log on failure
+or a verbose run. `HTTPS_PROXY`/`HTTP_PROXY` and their lowercase aliases route
+page requests; loopback bypasses proxies for the local OpenCode server.
+`FIREFOX_PROFILE_DIR` selects the exact profile used for cookie capture. The
+helper includes live WAL data, preserves JSON boolean flags and atomically
+replaces an owner-only export. Failed/empty capture or import stops the run;
+a forced handoff is not automatically repeated during the same preparation.
+
 The separate standalone Booking crawler configuration is documented in
 Chapter 24. Its transport quotas and TOML options belong to that host.
 

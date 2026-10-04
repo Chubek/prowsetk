@@ -62,6 +62,32 @@ TEST(MarionetteDiscovery, AllPathsCandidateOptionPreservesDefaultAndDropsAssets)
     EXPECT_EQ(result.endpoints[0].url, "https://page.test/custom-endpoint");
 }
 
+TEST(MarionetteDiscovery, AutomaticGetProbesSkipLogoutPathsWithoutLosingDiscovery) {
+    prowsetk::Browser browser;
+    auto page = std::make_unique<prowsetk::MemoryNetworkClient>();
+    auto* transport = page.get();
+    page->set_handler([](const auto&) { return prowsetk::HttpResponse{200, {{"Content-Type", "application/json"}}, "{}", {}, {}}; });
+    browser.set_network_client(std::move(page));
+    auto session = browser.create_session();
+    session->load_html(R"html(<a href='/api/first'>data</a><a href='/logout'>Log out</a>
+        <a href='/auth/sign-out'>Sign out</a><a href='/api/signout'>Sign out</a>
+        <a href='/api/LOGOUT'>Log out</a><a href='/api/log-out'>Log out</a>
+        <a href='/api/log_out'>Log out</a><a href='/api/sign_out'>Sign out</a>
+        <a href='/api/logoff'>Log off</a><a href='/api/signoff'>Sign off</a>)html", "https://page.test/");
+    prowsetk::MemoryNetworkClient agent;
+    agent.set_handler([](const auto& request) {
+        return prowsetk::HttpResponse{200, {}, request.url.ends_with("/session") ? R"({"id":"agent"})" :
+            R"({"info":{"role":"assistant"},"parts":[{"type":"text","text":"{\"action\":\"stop\"}"}]})", {}, {}};
+    });
+    b::OpenCodeClient client(agent, b::BridgeConfig{});
+    const auto result = m::run(*session, client, m::parse_decisions(R"({"version":1,"goal":"discover","actions":[]})"));
+    ASSERT_EQ(transport->requests().size(), 1u);
+    EXPECT_EQ(transport->requests()[0].url, "https://page.test/api/first");
+    EXPECT_EQ(result.extraction.probe_count, 1u);
+    EXPECT_EQ(result.extraction.schemas.size(), 10u);
+    EXPECT_NE(result.extraction.openapi_yaml.find("/logout"), std::string::npos);
+}
+
 TEST(MarionetteDecisions, LiteralControlBytesFailStrictJson) {
     EXPECT_THROW(m::parse_decisions("{\"version\":1,\"goal\":\"a\nb\",\"actions\":[]}"), prowsetk::Error);
 }

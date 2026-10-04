@@ -42,6 +42,14 @@ fully hermetic C++ runs/tests supply in-memory transports for both clients.
 budgets within the same hard bounds. `--opencode-max-requests` (default 512,
 polls included) and `--opencode-wait-ms` (default 300000 per reply) bound V2 IPC.
 The output parent directories are created after successful exploration.
+`--verbose`/`-v` (`--verbse` alias) adds value-free stage, network, proxy,
+cookie-import, timing and page-runtime diagnostics. Failures always identify
+the stage and `ErrorCode`; controller failures distinguish policy validation,
+schema collection, OpenCode session/decision calls, page actions and serialization.
+Network traces show only hosts, routing, cookie presence and numeric metadata;
+page bodies, URL queries, cookies, proxy credentials and raw agent/script errors
+are omitted. Environment-selected proxies honor the target scheme's
+`HTTPS_PROXY`/`HTTP_PROXY` (and lowercase aliases) plus `NO_PROXY`/`no_proxy`.
 
 ### Booking launcher
 
@@ -72,6 +80,13 @@ are forwarded to the runner; `--no-xcors false` disables only the output host
 filter, while the controller's same-origin transport rule remains in force.
 `PROWSETK_MARIONETTE_BIN`/`--marionette-bin` selects the executable, and
 `--no-server` reuses `OPENCODE_BASE_URL`. `--help` lists the supported options.
+The launcher adds loopback proxy exclusions for the local agent and retains
+its owner-only server log on failure or verbose runs. Firefox cookie capture
+considers main-database and WAL freshness; set `FIREFOX_PROFILE_DIR` to the
+browser's exact profile to override selection. Capture/import failures are
+reported before network confirmation, and a forced browser handoff occurs only
+once per preparation. Login diagnostics report origin, account-control, beacon,
+password-field and challenge evidence without the page's values.
 
 ## JSON decisions
 
@@ -108,9 +123,11 @@ session thread; concurrent/reentrant calls on the same session are unsupported.
 
 Discovery runs before and after every action, accumulates across navigation,
 filters static assets with scrape-endpoints, and enriches same-origin results
-through schema-grabber. GET response probes are deduplicated and bounded; POST,
-PUT and other methods are never probed. Their schemas remain inferred unless
-available from document hints; the current Session event interface does not
+through schema-grabber. GET response probes are deduplicated and bounded;
+logout/sign-out-like paths stay discovered but are skipped by automatic probes
+to preserve the authenticated session. POST, PUT and other methods are never
+probed. Their schemas remain inferred unless available from document hints;
+the current Session event interface does not
 expose request/response bodies. Schema examples are omitted from OpenAPI and
 secret-bearing fields receive existing schema-grabber redaction. Exported data
 contains provenance/confidence and an explicit incomplete coverage warning.

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cstdlib>
 #include <map>
 #include <mutex>
@@ -40,8 +41,100 @@ std::string to_lower(std::string value) {
 }
 
 
+namespace {
+std::string trim(std::string value) {
+    const auto not_space = [](unsigned char c) { return std::isspace(c) == 0; };
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), not_space));
+    value.erase(std::find_if(value.rbegin(), value.rend(), not_space).base(), value.end());
+    return value;
+}
+
+const char* environment_value(const char* upper, const char* lower) {
+    const char* value = std::getenv(upper);
+    return value && *value ? value : std::getenv(lower);
+}
+
+std::string unbracket_host(std::string host) {
+    if (host.size() > 2 && host.front() == '[' && host.back() == ']') return host.substr(1, host.size() - 2);
+    return host;
+}
+
+bool proxy_excluded(const Url& target) {
+    const char* excluded = environment_value("NO_PROXY", "no_proxy");
+    if (!excluded || !*excluded) return false;
+    auto host = unbracket_host(to_lower(target.host));
+    if (host.ends_with('.')) host.pop_back();
+    const auto port = target.port.empty() ? (target.scheme == "https" ? "443" : "80") : target.port;
+    std::istringstream entries(excluded);
+    std::string entry;
+    while (std::getline(entries, entry, ',')) {
+        entry = to_lower(trim(std::move(entry)));
+        if (entry == "*") return true;
+        std::string required_port;
+        if (entry.starts_with('[')) {
+            const auto close = entry.find(']');
+            if (close == std::string::npos) continue;
+            if (close + 1 < entry.size()) {
+                if (entry[close + 1] != ':') continue;
+                required_port = entry.substr(close + 2);
+            }
+            entry = entry.substr(1, close - 1);
+        } else if (const auto colon = entry.find(':'); colon != std::string::npos && entry.find(':', colon + 1) == std::string::npos) {
+            required_port = entry.substr(colon + 1);
+            entry.resize(colon);
+        }
+        if (!required_port.empty() && required_port != port) continue;
+        if (entry.starts_with("*.")) entry.erase(0, 2);
+        else if (entry.starts_with('.')) entry.erase(0, 1);
+        if (entry.ends_with('.')) entry.pop_back();
+        if (entry.empty()) continue;
+        if (host == entry || host.ends_with("." + entry)) return true;
+    }
+    return false;
+}
+
+std::string decode_proxy_credential(std::string_view value) {
+    const auto hex = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    std::string result;
+    for (std::size_t i = 0; i < value.size(); ++i) {
+        char c = value[i];
+        if (c == '%') {
+            if (i + 2 >= value.size() || hex(value[i + 1]) < 0 || hex(value[i + 2]) < 0)
+                throw Error(ErrorCode::InvalidUrl, "invalid proxy credential encoding");
+            c = static_cast<char>((hex(value[i + 1]) << 4) | hex(value[i + 2]));
+            i += 2;
+        }
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7f)
+            throw Error(ErrorCode::InvalidUrl, "invalid proxy credentials");
+        result += c;
+    }
+    return result;
+}
+
+std::string encode_proxy_credential(std::string_view value) {
+    static constexpr char hex[] = "0123456789ABCDEF";
+    std::string encoded;
+    for (unsigned char c : value) {
+        if (std::isalnum(c) || c == '-' || c == '.' || c == '_' || c == '~') encoded += static_cast<char>(c);
+        else {
+            encoded += '%';
+            encoded += hex[c >> 4];
+            encoded += hex[c & 15];
+        }
+    }
+    return encoded;
+}
+}  // namespace
+
 ProxyConfig parse_proxy_url(std::string_view value) {
     if (value.empty()) return {};
+    if (value.size() > 8192 || std::any_of(value.begin(), value.end(), [](unsigned char c) { return c <= 0x20 || c == 0x7f; }))
+        throw Error(ErrorCode::InvalidUrl, "invalid proxy URL");
     const auto scheme_end = value.find("://");
     if (scheme_end == std::string_view::npos) throw Error(ErrorCode::InvalidUrl, "proxy URL requires a scheme");
     auto scheme = to_lower(std::string(value.substr(0, scheme_end)));
@@ -49,28 +142,43 @@ ProxyConfig parse_proxy_url(std::string_view value) {
     if (scheme == "http") proxy.scheme = ProxyScheme::Http;
     else if (scheme == "https") proxy.scheme = ProxyScheme::Https;
     else if (scheme == "socks5" || scheme == "socks5h") proxy.scheme = ProxyScheme::Socks5;
-    else throw Error(ErrorCode::Unsupported, "unsupported proxy scheme: " + scheme);
+    else throw Error(ErrorCode::Unsupported, "unsupported proxy scheme");
     auto authority = value.substr(scheme_end + 3);
-    const auto slash = authority.find('/'); if (slash != std::string_view::npos) authority = authority.substr(0, slash);
+    const auto slash = authority.find('/');
+    if (slash != std::string_view::npos) {
+        if (authority.substr(slash) != "/") throw Error(ErrorCode::InvalidUrl, "proxy URL must not contain a path");
+        authority = authority.substr(0, slash);
+    }
+    if (authority.find_first_of("?#") != std::string_view::npos) throw Error(ErrorCode::InvalidUrl, "invalid proxy URL");
     std::string userinfo;
     const auto at = authority.rfind('@');
     if (at != std::string_view::npos) { userinfo = std::string(authority.substr(0, at)); authority = authority.substr(at + 1); }
     const auto colon = authority.rfind(':');
     if (colon == std::string_view::npos || colon == 0 || colon + 1 >= authority.size()) throw Error(ErrorCode::InvalidUrl, "proxy URL requires host:port");
-    proxy.host = std::string(authority.substr(0, colon)); proxy.port = std::string(authority.substr(colon + 1));
-    if (!userinfo.empty()) { const auto sep = userinfo.find(':'); proxy.username = userinfo.substr(0, sep); if (sep != std::string::npos) proxy.password = userinfo.substr(sep + 1); }
-    if (proxy.host.size() > 255 || proxy.port.size() > 6) throw Error(ErrorCode::InvalidUrl, "proxy address is too long");
+    proxy.host = unbracket_host(to_lower(std::string(authority.substr(0, colon))));
+    proxy.port = std::string(authority.substr(colon + 1));
+    if (!userinfo.empty()) {
+        const auto sep = userinfo.find(':');
+        proxy.username = decode_proxy_credential(std::string_view(userinfo).substr(0, sep));
+        if (sep != std::string::npos) proxy.password = decode_proxy_credential(std::string_view(userinfo).substr(sep + 1));
+    }
+    unsigned port = 0;
+    const auto parsed = std::from_chars(proxy.port.data(), proxy.port.data() + proxy.port.size(), port);
+    if (parsed.ec != std::errc{} || parsed.ptr != proxy.port.data() + proxy.port.size() || !port || port > 65535)
+        throw Error(ErrorCode::InvalidUrl, "invalid proxy port");
+    if (proxy.host.empty() || proxy.host.size() > 255 || !std::all_of(proxy.host.begin(), proxy.host.end(), [](unsigned char c) {
+        return std::isalnum(c) || c == '.' || c == '-' || c == ':';
+    })) throw Error(ErrorCode::InvalidUrl, "invalid proxy host");
+    if (proxy.scheme == ProxyScheme::Socks5 && (proxy.username.size() > 255 || proxy.password.size() > 255))
+        throw Error(ErrorCode::InvalidUrl, "proxy credentials exceed SOCKS5 limits");
     return proxy;
 }
 ProxyConfig proxy_from_environment(std::string_view target_url) {
     const auto target = parse_url(target_url);
-    const char* value = nullptr;
-    if (target.scheme == "https") value = std::getenv("HTTPS_PROXY");
-    if (!value || !*value) value = std::getenv("https_proxy");
-    if (!value || !*value) value = std::getenv("HTTP_PROXY");
-    if (!value || !*value) value = std::getenv("http_proxy");
-    if (!value || !*value) value = std::getenv("ALL_PROXY");
-    if (!value || !*value) value = std::getenv("all_proxy");
+    if (proxy_excluded(target)) return {};
+    const char* value = target.scheme == "https" ? environment_value("HTTPS_PROXY", "https_proxy") :
+        environment_value("HTTP_PROXY", "http_proxy");
+    if (!value || !*value) value = environment_value("ALL_PROXY", "all_proxy");
     if (!value || !*value) return {};
     return parse_proxy_url(value);
 }
@@ -78,21 +186,11 @@ std::string proxy_to_string(const ProxyConfig& proxy, bool redact) {
     if (!proxy.enabled()) return {};
     const char* scheme = proxy.scheme == ProxyScheme::Socks5 ? "socks5" : proxy.scheme == ProxyScheme::Https ? "https" : "http";
     std::string result = std::string(scheme) + "://";
-    if (!proxy.username.empty()) result += proxy.username + ":" + (redact ? "[REDACTED]" : proxy.password) + "@";
-    return result + proxy.host + ":" + proxy.port;
+    if (!proxy.username.empty()) result += encode_proxy_credential(proxy.username) + ":" +
+        (redact ? "[REDACTED]" : encode_proxy_credential(proxy.password)) + "@";
+    const auto host = proxy.host.find(':') == std::string::npos ? proxy.host : "[" + proxy.host + "]";
+    return result + host + ":" + proxy.port;
 }
-
-namespace {
-std::string trim(std::string value) {
-    const auto not_space = [](unsigned char c) { return std::isspace(c) == 0; };
-    value.erase(value.begin(),
-                std::find_if(value.begin(), value.end(), not_space));
-    value.erase(std::find_if(value.rbegin(), value.rend(), not_space).base(),
-                value.end());
-    return value;
-}
-
-}  // namespace
 
 std::string HttpResponse::header(std::string_view name) const {
     const std::string wanted = to_lower(std::string(name));
@@ -160,6 +258,23 @@ const std::vector<HttpRequest>& MemoryNetworkClient::requests() const {
 #if defined(__unix__) || defined(__APPLE__)
 namespace {
 
+std::string proxy_authorization(const ProxyConfig& proxy) {
+    if (proxy.username.empty()) return {};
+    static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const auto plain = proxy.username + ":" + proxy.password;
+    std::string encoded;
+    for (std::size_t i = 0; i < plain.size(); i += 3) {
+        const auto a = static_cast<unsigned char>(plain[i]);
+        const auto b = i + 1 < plain.size() ? static_cast<unsigned char>(plain[i + 1]) : 0;
+        const auto c = i + 2 < plain.size() ? static_cast<unsigned char>(plain[i + 2]) : 0;
+        encoded += alphabet[a >> 2];
+        encoded += alphabet[((a & 3) << 4) | (b >> 4)];
+        encoded += i + 1 < plain.size() ? alphabet[((b & 15) << 2) | (c >> 6)] : '=';
+        encoded += i + 2 < plain.size() ? alphabet[c & 63] : '=';
+    }
+    return "\r\nProxy-Authorization: Basic " + encoded;
+}
+
 std::string read_status_line_error() {
     return "malformed HTTP response";
 }
@@ -175,24 +290,38 @@ public:
 
     void enable_tls(const std::string& host) {
 #ifdef PROWSETK_HAVE_OPENSSL
-        context_.reset(SSL_CTX_new(TLS_client_method()));
-        if (!context_ || SSL_CTX_set_min_proto_version(context_.get(), TLS1_2_VERSION) != 1 ||
-            SSL_CTX_set_default_verify_paths(context_.get()) != 1) {
+        std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> context(SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
+        if (!context || SSL_CTX_set_min_proto_version(context.get(), TLS1_2_VERSION) != 1 ||
+            SSL_CTX_set_default_verify_paths(context.get()) != 1) {
             throw Error(ErrorCode::NetworkError, "TLS trust store initialization failed");
         }
-        SSL_CTX_set_verify(context_.get(), SSL_VERIFY_PEER, nullptr);
-        ssl_.reset(SSL_new(context_.get()));
-        if (!ssl_ || SSL_set_fd(ssl_.get(), fd_) != 1 ||
-            SSL_set_tlsext_host_name(ssl_.get(), host.c_str()) != 1) {
+        SSL_CTX_set_verify(context.get(), SSL_VERIFY_PEER, nullptr);
+        std::unique_ptr<SSL, decltype(&SSL_free)> ssl(SSL_new(context.get()), SSL_free);
+        if (!ssl || SSL_set_tlsext_host_name(ssl.get(), host.c_str()) != 1) {
             throw Error(ErrorCode::NetworkError, "TLS initialization failed");
         }
-        SSL_set_hostflags(ssl_.get(), X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+        if (ssl_) {
+            // HTTPS through an HTTPS proxy is TLS-over-TLS. The inner SSL owns
+            // the filter BIO; the outer proxy SSL/context outlive that BIO.
+            std::unique_ptr<BIO, decltype(&BIO_free)> tunnel(BIO_new(BIO_f_ssl()), BIO_free);
+            if (!tunnel || BIO_set_ssl(tunnel.get(), ssl_.get(), BIO_NOCLOSE) != 1)
+                throw Error(ErrorCode::NetworkError, "TLS proxy tunnel initialization failed");
+            SSL_set_bio(ssl.get(), tunnel.get(), tunnel.get());
+            tunnel.release();
+            proxy_context_ = std::move(context_);
+            proxy_ssl_ = std::move(ssl_);
+        } else if (SSL_set_fd(ssl.get(), fd_) != 1) {
+            throw Error(ErrorCode::NetworkError, "TLS initialization failed");
+        }
+        SSL_set_hostflags(ssl.get(), X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
         // X509_VERIFY_PARAM handles literal IP SANs too, including OpenSSL 3.0.
-        auto* parameters = SSL_get0_param(ssl_.get());
+        auto* parameters = SSL_get0_param(ssl.get());
         if (X509_VERIFY_PARAM_set1_ip_asc(parameters, host.c_str()) != 1 &&
-            SSL_set1_host(ssl_.get(), host.c_str()) != 1) {
+            SSL_set1_host(ssl.get(), host.c_str()) != 1) {
             throw Error(ErrorCode::NetworkError, "TLS hostname configuration failed");
         }
+        context_ = std::move(context);
+        ssl_ = std::move(ssl);
         ERR_clear_error();
         const int result = SSL_connect(ssl_.get());
         if (result != 1) tls_error(result, "TLS handshake failed");
@@ -237,6 +366,8 @@ public:
 private:
     int fd_;
 #ifdef PROWSETK_HAVE_OPENSSL
+    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> proxy_context_{nullptr, SSL_CTX_free};
+    std::unique_ptr<SSL, decltype(&SSL_free)> proxy_ssl_{nullptr, SSL_free};
     std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> context_{nullptr, SSL_CTX_free};
     std::unique_ptr<SSL, decltype(&SSL_free)> ssl_{nullptr, SSL_free};
     [[noreturn]] void tls_error(int result, const char* message) {
@@ -270,29 +401,34 @@ public:
         const std::string port = url.port.empty()
             ? (url.scheme == "https" ? "443" : "80") : url.port;
 
-        const std::string connect_host = selected.enabled() ? selected.host : url.host;
+        const std::string connect_host = selected.enabled() ? selected.host : unbracket_host(url.host);
         const std::string connect_port = selected.enabled() ? selected.port : port;
         SocketConnection connection(open_connection(connect_host, connect_port, request.timeout_ms));
+        if (selected.scheme == ProxyScheme::Https) connection.enable_tls(selected.host);
         if (selected.scheme == ProxyScheme::Socks5) socks5_handshake(connection, selected, url.host, port);
-        else if (selected.enabled() && (url.scheme == "https" || selected.scheme == ProxyScheme::Https)) {
+        else if (selected.enabled() && url.scheme == "https") {
             std::string connect = "CONNECT " + url.host + ":" + port + " HTTP/1.1\r\nHost: " + url.host + ":" + port;
-            if (!selected.username.empty()) connect += "\r\nProxy-Authorization: Basic " + selected.username + ":" + selected.password;
+            connect += proxy_authorization(selected);
             connect += "\r\n\r\n";
             write_all(connection, connect);
             read_proxy_connect(connection);
         }
-        if (url.scheme == "https") connection.enable_tls(url.host);
+        if (url.scheme == "https") connection.enable_tls(unbracket_host(url.host));
 
         std::string path = url.path.empty() ? "/" : url.path;
-        if (selected.enabled() && selected.scheme != ProxyScheme::Socks5 && url.scheme != "https") path = request.url;
-        if (!url.query.empty()) {
+        if (url.has_query) {
             path += "?" + url.query;
         }
+        const bool forward_proxy = selected.enabled() && selected.scheme != ProxyScheme::Socks5 && url.scheme == "http";
+        if (forward_proxy) path = url.origin() + path;
         std::string payload =
             request.method + " " + path + " HTTP/1.1\r\nHost: " + url.host;
         if (!url.port.empty()) payload += ":" + url.port;
         bool has_user_agent = false;
         for (const auto& [name, value] : request.headers) {
+            // Proxy credentials belong only to the proxy hop, never the
+            // tunneled origin (even if a caller supplied this header).
+            if (to_lower(name) == "proxy-authorization") continue;
             payload += "\r\n" + name + ": " + value;
             if (to_lower(name) == "user-agent") {
                 has_user_agent = true;
@@ -301,8 +437,7 @@ public:
         if (!has_user_agent) {
             payload += "\r\nUser-Agent: ProwseTk/0.1";
         }
-        if (selected.enabled() && selected.scheme != ProxyScheme::Socks5 && !selected.username.empty())
-            payload += "\r\nProxy-Authorization: Basic " + selected.username + ":" + selected.password;
+        if (forward_proxy) payload += proxy_authorization(selected);
         payload += "\r\nConnection: close\r\n";
         if (!request.body.empty()) {
             payload += "Content-Length: " +
@@ -338,8 +473,26 @@ private:
         std::size_t sent = 0; while (sent < payload.size()) { const auto n = connection.write(payload.data()+sent, payload.size()-sent); if (n <= 0) throw Error(ErrorCode::NetworkError, "proxy write failed"); sent += static_cast<std::size_t>(n); }
     }
     static void read_proxy_connect(SocketConnection& connection) {
-        std::string raw; char buf[1024]; for (;;) { auto n=connection.read(buf,sizeof(buf)); if(n<=0) throw Error(ErrorCode::NetworkError,"proxy CONNECT failed"); raw.append(buf,n); if(raw.find("\r\n\r\n")!=std::string::npos) break; if(raw.size()>65536) throw Error(ErrorCode::NetworkError,"proxy response too large"); }
-        if (raw.rfind("HTTP/",0)==std::string::npos || raw.find(" 2") == std::string::npos) throw Error(ErrorCode::NetworkError,"proxy CONNECT rejected");
+        std::string raw;
+        while (!raw.ends_with("\r\n\r\n")) {
+            if (raw.size() >= 65536) throw Error(ErrorCode::ResourceLimit, "proxy response too large");
+            char byte;
+            const auto n = connection.read(&byte, 1);
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+                throw Error(ErrorCode::Timeout, "proxy CONNECT timed out");
+            if (n <= 0) throw Error(ErrorCode::NetworkError, "proxy CONNECT failed");
+            raw += byte;
+        }
+        const auto end = raw.find("\r\n");
+        const auto line = std::string_view(raw).substr(0, end);
+        int status = 0;
+        if (line.size() < 12 || (!line.starts_with("HTTP/1.1 ") && !line.starts_with("HTTP/1.0 ")) ||
+            (line.size() > 12 && line[12] != ' ')) throw Error(ErrorCode::NetworkError, "malformed proxy CONNECT response");
+        const auto parsed = std::from_chars(line.data() + 9, line.data() + 12, status);
+        if (parsed.ec != std::errc{} || parsed.ptr != line.data() + 12)
+            throw Error(ErrorCode::NetworkError, "malformed proxy CONNECT response");
+        if (status < 200 || status >= 300)
+            throw Error(ErrorCode::NetworkError, "proxy CONNECT rejected (HTTP " + std::to_string(status) + ")");
     }
     static void socks5_handshake(SocketConnection& connection, const ProxyConfig& proxy, const std::string& host, const std::string& port) {
         std::string hello; hello.push_back(5); hello.push_back(proxy.username.empty()?1:2); hello.push_back(0); if(!proxy.username.empty()) hello.push_back(2); write_all(connection,hello); char reply[2]; if(connection.read(reply,2)!=2 || reply[0]!=5 || static_cast<unsigned char>(reply[1])==255) throw Error(ErrorCode::NetworkError,"SOCKS5 authentication rejected");

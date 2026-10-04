@@ -66,6 +66,16 @@ transport checks the scheme's proxy environment variables and then
 `ALL_PROXY`/`all_proxy`. Proxy diagnostics redact credentials. CLI navigation,
 endpoint extraction, serialization, and driver hosts accept `--proxy URL`.
 
+HTTPS checks `HTTPS_PROXY`/`https_proxy`; HTTP checks `HTTP_PROXY`/`http_proxy`.
+Nonempty uppercase settings win over lowercase aliases. `NO_PROXY`/`no_proxy`
+excludes comma-separated hosts/domain suffixes, optional ports, IPv4/IPv6
+literals or `*` from environment routing; CIDR exclusions are unsupported.
+An explicit request/browser proxy overrides these environment exclusions.
+HTTP proxies receive an absolute request target with the query exactly once;
+HTTPS origins use a bounded, status-checked CONNECT tunnel. Basic credentials
+are encoded and sent only to the proxy. HTTPS proxy connections also verify
+the proxy certificate, with separate verified origin TLS inside a tunnel.
+
 ## Hermetic transports
 
 ```cpp

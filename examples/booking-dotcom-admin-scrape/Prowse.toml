@@ -151,6 +151,7 @@ arguments = [
     { name = "success_selector", type = "string", required = false, default = "" },
     { name = "success_beacon", type = "string", required = false, default = "" },
     { name = "success_beacon_type", type = "string", required = false, default = "auto" },
+    { name = "verbose", type = "boolean", required = false, default = false },
     { name = "clearance_cookie", type = "string", required = false, default = "", secret = true },
     { name = "captcha_token", type = "string", required = false, default = "", secret = true },
     { name = "assistant_browser_force", type = "boolean", required = false, default = false },
