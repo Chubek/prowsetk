@@ -599,6 +599,20 @@ Inference is heuristic and never authoritative; secrets stay redacted. See
 WASM component lives in `wit/schema-grabber.wit`; the Lua spec layer is
 `plugins/schema-grabber/lua/schema_grabber.lua` (`enrich(session, spec)`).
 
+The repository also includes `plugins/opencode-bridge`, a native plugin that
+bridges Flatworm sessions and an OpenCode local HTTP/SSE agent server
+(default `http://127.0.0.1:4096`). It sends sanitized DOM snapshots with
+extraction goals to agent sessions, validates JSON-object answers, and exposes
+the `lopencode` Lua module (`client.new`, `prompt`, `prompt_async`,
+`stream_events`, `scrape_with_prompt`, `build_cleanup_prompt`). It also builds
+subtractive endpoint-cleanup prompts over redacted endpoint lists; callers
+intersect the answer with the scraped set so invented URLs can never enter the
+specs. All traffic is host-mediated through `NetworkClient` with Basic
+credentials from `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD`;
+plain HTTP is loopback-only unless opted in, redirects are rejected, payloads
+are bounded, and agent output stays advisory. See
+`plugins/opencode-bridge/README.md` for configuration.
+
 ProwseTk provides a native plugin interface through `ProwseTk-Plugin.h`. The
 interface allows native components to extend the browser without modifying the
 Flatworm core.
@@ -2132,6 +2146,47 @@ driver registers a `network_info` Flash, prints its ID, and waits for the
 user-consented addon flow (List Flashes, Connect to Flash, Send Network
 Info) before polling the bounded queue. Offline `--html` runs never flash,
 and `--beacon_json FILE-CONTENTS` stays the hermetic alternative.
+
+For an OpenCode cleanup pass over the scraped endpoints, either inject a
+pre-baked agent answer (hermetic, works offline):
+
+```sh
+build/default/src/cli/prowsetk run booking-dotcom-admin \
+  --config examples/booking-dotcom-admin-scrape/Prowse.toml \
+  --html '<a href="/reservations">Reservations</a>' \
+  --opencode_json '[{"url":"https://admin.booking.com/api/hotels","method":"get"}]' \
+  --output build/booking-cleaned.yaml
+```
+
+or enable a live call with `--opencode true` (reachable OpenCode server at
+`OPENCODE_BASE_URL`, default `http://127.0.0.1:4096`, credentials from
+`OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` only). Cleanup runs
+after api-only filtering and before schema enrichment, so probes and schemas
+cover only kept endpoints. It is strictly subtractive: the driver intersects
+the answer with the scraped `(method, url)` set, keeps original records
+verbatim, rejects empty keep-lists, and ignores invented URLs; any failure
+keeps the seeds. The outcome lands in the `x-prowsetk-opencode` metadata
+block (`used`, `kept`, `dropped`, `invented-ignored`, `note`), and
+`--opencode_output PATH` stores the raw agent answer for audit. Cleanup stays
+heuristic and never authoritative.
+
+`scripts/run-scrape-booking.sh` wraps the whole live flow: it starts a local
+`opencode serve` on 127.0.0.1:4096, captures the server password, probes
+authenticated readiness, exports the `OPENCODE_*` variables (never printed),
+runs the driver with `--opencode true`, verifies `x-prowsetk-opencode:
+used: true` in the YAML (failing loudly otherwise), and stops the server
+unless `--keep-server` is given:
+
+```sh
+scripts/run-scrape-booking.sh \
+  --html '<script>fetch("/api/orders")</script>' \
+  --output build/booking-cleaned.yaml
+```
+
+Omit `--html` for a live crawl (booking credentials still required as
+usual); `--no-server` reuses an already-running server instead of starting
+one. See `scripts/run-scrape-booking.sh --help` for ports, paths, budgets,
+and cookie/dotenv passthrough.
 
 ## Automation Tools
 

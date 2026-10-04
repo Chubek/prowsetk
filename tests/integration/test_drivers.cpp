@@ -320,6 +320,99 @@ TEST(Drivers, BookingDotcomFlashOnUnderscoreSpellingMergesInjectedBeacon) {
     EXPECT_NE(yaml.find("beacon-network"), std::string::npos);
 }
 
+TEST(Drivers, BookingDotcomOfflineOpencodeJsonCleansEndpoints) {
+    if (!LuaRuntime::available()) GTEST_SKIP();
+    LuaRuntime lua;
+    ASSERT_TRUE(lua.run_file(std::string(PROWSETK_SOURCE_DIR) +
+        "/examples/booking-dotcom-admin-scrape/scrape-booking-dotcom-admin.lua").ok) << lua.last_error();
+    const std::string output = std::string(TEST_BINARY_DIR) + "/booking-offline-opencode.yaml";
+    const std::string postman_output = output + ".postman.json";
+    const std::string answer =
+        "[{\"url\":\"https://admin.booking.com/api/orders\",\"method\":\"get\"},"
+        "{\"url\":\"https://evil.test/api/invented\",\"method\":\"get\"}]";
+    const auto result = lua.call_function("main", {
+        {"html", "string",
+         "<script>fetch('/api/orders');"
+         "navigator.sendBeacon('/collect/telemetry', 't=1');</script>"},
+        {"opencode_json", "string", answer},
+        {"output", "path", output},
+        {"postman", "path", postman_output}});
+    ASSERT_TRUE(result.ok) << result.error;
+    const auto yaml = read_file(output);
+    // The agent-kept endpoint stays; telemetry junk is dropped.
+    EXPECT_NE(yaml.find("/api/orders"), std::string::npos);
+    EXPECT_EQ(yaml.find("/collect/telemetry"), std::string::npos);
+    // Invented URLs can never enter the specs.
+    EXPECT_EQ(yaml.find("evil.test"), std::string::npos);
+    EXPECT_EQ(yaml.find("api/invented"), std::string::npos);
+    EXPECT_NE(yaml.find("x-prowsetk-opencode:"), std::string::npos);
+    EXPECT_NE(yaml.find("used: true"), std::string::npos);
+    EXPECT_NE(yaml.find("invented-ignored: 1"), std::string::npos);
+    const auto postman = read_file(postman_output);
+    EXPECT_NE(postman.find("/api/orders"), std::string::npos);
+    EXPECT_EQ(postman.find("evil.test"), std::string::npos);
+}
+
+TEST(Drivers, BookingDotcomOfflineOpencodeDisabledByDefault) {
+    if (!LuaRuntime::available()) GTEST_SKIP();
+    LuaRuntime lua;
+    ASSERT_TRUE(lua.run_file(std::string(PROWSETK_SOURCE_DIR) +
+        "/examples/booking-dotcom-admin-scrape/scrape-booking-dotcom-admin.lua").ok) << lua.last_error();
+    const std::string output = std::string(TEST_BINARY_DIR) + "/booking-offline-opencode-off.yaml";
+    const std::string postman_output = output + ".postman.json";
+    const auto result = lua.call_function("main", {
+        {"html", "string",
+         "<script>fetch('/api/orders');"
+         "navigator.sendBeacon('/collect/telemetry', 't=1');</script>"},
+        {"output", "path", output},
+        {"postman", "path", postman_output}});
+    ASSERT_TRUE(result.ok) << result.error;
+    const auto yaml = read_file(output);
+    EXPECT_NE(yaml.find("/api/orders"), std::string::npos);
+    EXPECT_NE(yaml.find("x-prowsetk-opencode:"), std::string::npos);
+    EXPECT_NE(yaml.find("used: false"), std::string::npos);
+}
+
+TEST(Drivers, BookingDotcomOfflineOpencodeMalformedKeepsSeeds) {
+    if (!LuaRuntime::available()) GTEST_SKIP();
+    LuaRuntime lua;
+    ASSERT_TRUE(lua.run_file(std::string(PROWSETK_SOURCE_DIR) +
+        "/examples/booking-dotcom-admin-scrape/scrape-booking-dotcom-admin.lua").ok) << lua.last_error();
+    const std::string output = std::string(TEST_BINARY_DIR) + "/booking-offline-opencode-bad.yaml";
+    const std::string postman_output = output + ".postman.json";
+    const auto result = lua.call_function("main", {
+        {"html", "string", "<script>fetch('/api/orders')</script>"},
+        {"opencode_json", "string", "not json{{{"},
+        {"output", "path", output},
+        {"postman", "path", postman_output}});
+    ASSERT_TRUE(result.ok) << result.error;
+    const auto yaml = read_file(output);
+    EXPECT_NE(yaml.find("/api/orders"), std::string::npos);
+    EXPECT_NE(yaml.find("used: false"), std::string::npos);
+}
+
+TEST(Drivers, BookingDotcomOfflineOpencodeLiveFailsSafeWithoutServer) {
+    if (!LuaRuntime::available()) GTEST_SKIP();
+    LuaRuntime lua;
+    ASSERT_TRUE(lua.run_file(std::string(PROWSETK_SOURCE_DIR) +
+        "/examples/booking-dotcom-admin-scrape/scrape-booking-dotcom-admin.lua").ok) << lua.last_error();
+    const std::string output = std::string(TEST_BINARY_DIR) + "/booking-offline-opencode-live.yaml";
+    const std::string postman_output = output + ".postman.json";
+    // Explicit --opencode with an offline html run attempts the live bridge;
+    // with no server/module reachable the seeds are kept fail-safe and the
+    // bridge is reported unused.
+    const auto result = lua.call_function("main", {
+        {"html", "string", "<script>fetch('/api/orders')</script>"},
+        {"opencode", "boolean", "true"},
+        {"output", "path", output},
+        {"postman", "path", postman_output}});
+    ASSERT_TRUE(result.ok) << result.error;
+    const auto yaml = read_file(output);
+    EXPECT_NE(yaml.find("/api/orders"), std::string::npos);
+    EXPECT_NE(yaml.find("used: false"), std::string::npos);
+    EXPECT_NE(yaml.find("seeds kept"), std::string::npos);
+}
+
 TEST(Drivers, BookingDotcomLoginAndFailureBoundaries) {
     if (!LuaRuntime::available()) GTEST_SKIP();
     for (const std::string scenario : {

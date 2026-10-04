@@ -19,6 +19,13 @@
 -- beaconctl, waits for the user-consented addon flow (List Flashes, Connect
 -- to Flash, Send Network Info), then polls the bounded queue; any failure
 -- keeps the seed endpoints with a status note.
+--
+-- OpenCode endpoint cleanup (opt-in): pass args.opencode_json with a pre-baked
+-- agent answer (hermetic, works offline and in tests) or enable a live call
+-- with args.opencode (or args.opencode_enabled) through the lopencode native
+-- module. The agent may only remove endpoints; invented URLs are ignored and
+-- original tables are kept verbatim. Results are recorded in the
+-- x-prowsetk-opencode metadata block.
 
 local source = debug.getinfo(1, "S").source
 if source:sub(1, 1) == "@" then source = source:sub(2) end
@@ -1025,6 +1032,453 @@ local function apply_beacon_network(endpoints, args, page_url,
     return result
 end
 
+-- OpenCode endpoint cleanup (optional, opt-in).
+--
+-- After filtering, the redacted endpoint list can be sent to a local OpenCode
+-- agent for a subtractive cleanup pass: drop static leftovers, beacon/
+-- telemetry pings, and duplicates the heuristics kept. The agent may only
+-- REMOVE entries. The driver intersects the answer with the scraped
+-- (method, url) set and keeps original endpoint tables verbatim, so invented
+-- URLs can never enter the specs. Two ways to enable:
+--   * `opencode_json` — a pre-baked agent answer (JSON array). Hermetic:
+--     no network, no native module, works offline and in tests.
+--   * `opencode`/`opencode_enabled` true — live call through the `lopencode`
+--     native module against OPENCODE_BASE_URL (default
+--     http://127.0.0.1:4096). Credentials come from OPENCODE_SERVER_USERNAME /
+--     OPENCODE_SERVER_PASSWORD process environment only, never driver args.
+-- Disabled by default; offline `html` runs never touch the network unless
+-- `opencode_json` is given. Never throws: any failure keeps the seeds.
+local function opencode_enabled_requested(args)
+    args = args or {}
+    local candidates = {
+        args.opencode, args.opencode_enabled,
+        args["opencode-enabled"], args["opencode_enabled"]
+    }
+    for _, raw in ipairs(candidates) do
+        if raw == true then return true end
+        if type(raw) == "number" and raw ~= 0 then return true end
+        if type(raw) == "string" then
+            local lower = raw:lower()
+            if lower == "true" or lower == "1" or lower == "yes" or lower == "on" then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function opencode_json_quote(value)
+    return '"' .. tostring(value):gsub('[%z\1-\31\\"]', function(ch)
+        if ch == '"' then return '\\"' end
+        if ch == '\\' then return '\\\\' end
+        return string.format('\\u%04x', ch:byte())
+    end) .. '"'
+end
+
+-- Serializes endpoints to a compact JSON array for the agent. Only redacted
+-- discovery fields are included. Caps count and bytes; excess is reported via
+-- the truncated flag so the status note stays honest.
+local function opencode_encode_endpoints(endpoints, max_count, max_bytes)
+    max_count = tonumber(max_count) or 200
+    if max_count < 1 then max_count = 1 end
+    if max_count > 2000 then max_count = 2000 end
+    max_bytes = tonumber(max_bytes) or 131072
+    if max_bytes < 1024 then max_bytes = 1024 end
+    if max_bytes > 1048576 then max_bytes = 1048576 end
+    local parts, count, truncated, size = {}, 0, false, 2
+    for _, ep in ipairs(endpoints or {}) do
+        if type(ep) == "table" and type(ep.url) == "string" and ep.url ~= "" then
+            local item = '{"url":' .. opencode_json_quote(ep.url) ..
+                ',"method":' .. opencode_json_quote(tostring(ep.method or "get"):lower()) ..
+                ',"path":' .. opencode_json_quote(ep.path or "") ..
+                ',"discovery_method":' .. opencode_json_quote(ep.discovery_method or "") ..
+                ',"confidence":' .. tostring(tonumber(ep.confidence) or 0) .. '}'
+            if count >= max_count or size + #item + 1 > max_bytes then
+                truncated = true
+                break
+            end
+            parts[#parts + 1] = item
+            size = size + #item + 1
+            count = count + 1
+        end
+    end
+    return "[" .. table.concat(parts, ",") .. "]", count, truncated
+end
+
+-- Minimal bounded JSON decoder for agent answers: objects, arrays, strings
+-- (with escapes), numbers, true/false/null. Depth-capped, length-capped.
+-- Returns value + kind ("object", "array", "string", "number", "boolean",
+-- "null") or nil plus a short reason. Never throws.
+local function opencode_json_decode(text)
+    if type(text) ~= "string" or text == "" then return nil, "empty" end
+    if #text > 524288 then return nil, "too large" end
+    local pos, depth = 1, 0
+    local parse_value
+    local function skip_ws()
+        while pos <= #text and text:sub(pos, pos):match("%s") do pos = pos + 1 end
+    end
+    local function parse_string()
+        -- pos is on the opening quote.
+        pos = pos + 1
+        local out, escaped = {}, false
+        while pos <= #text do
+            local ch = text:sub(pos, pos)
+            if escaped then
+                if ch == "u" then
+                    local hex = text:sub(pos + 1, pos + 4)
+                    local code = tonumber(hex, 16)
+                    if not hex:match("^%x%x%x%x$") or not code then return nil end
+                    if code < 128 then out[#out + 1] = string.char(code) end
+                    pos = pos + 4
+                elseif ch == '"' then out[#out + 1] = '"'
+                elseif ch == '\\' then out[#out + 1] = '\\'
+                elseif ch == '/' then out[#out + 1] = '/'
+                elseif ch == 'b' then out[#out + 1] = '\b'
+                elseif ch == 'f' then out[#out + 1] = '\f'
+                elseif ch == 'n' then out[#out + 1] = '\n'
+                elseif ch == 'r' then out[#out + 1] = '\r'
+                elseif ch == 't' then out[#out + 1] = '\t'
+                else return nil end
+                escaped = false
+            elseif ch == "\\" then
+                escaped = true
+            elseif ch == '"' then
+                pos = pos + 1
+                return table.concat(out), "string"
+            else
+                out[#out + 1] = ch
+            end
+            pos = pos + 1
+        end
+        return nil
+    end
+    local function parse_object()
+        depth = depth + 1
+        if depth > 6 then return nil end
+        pos = pos + 1
+        local obj = {}
+        skip_ws()
+        if text:sub(pos, pos) == "}" then pos = pos + 1; depth = depth - 1; return obj, "object" end
+        while true do
+            skip_ws()
+            if text:sub(pos, pos) ~= '"' then return nil end
+            local key = parse_string()
+            if type(key) ~= "string" then return nil end
+            skip_ws()
+            if text:sub(pos, pos) ~= ":" then return nil end
+            pos = pos + 1
+            local value = parse_value()
+            if value == nil then
+                -- Only JSON null decodes to nil here; verify the literal so
+                -- truncated input fails closed instead of storing nil.
+                skip_ws()
+                local sep = text:sub(pos, pos)
+                if sep ~= "," and sep ~= "}" then return nil end
+            end
+            obj[key] = value
+            skip_ws()
+            local sep = text:sub(pos, pos)
+            if sep == "," then pos = pos + 1
+            elseif sep == "}" then pos = pos + 1; depth = depth - 1; return obj, "object"
+            else return nil end
+        end
+    end
+    local function parse_array()
+        depth = depth + 1
+        if depth > 6 then return nil end
+        pos = pos + 1
+        local arr = {}
+        skip_ws()
+        if text:sub(pos, pos) == "]" then pos = pos + 1; depth = depth - 1; return arr, "array" end
+        while true do
+            local value = parse_value()
+            if value == nil then
+                skip_ws()
+                local sep = text:sub(pos, pos)
+                if sep ~= "," and sep ~= "]" then return nil end
+            end
+            arr[#arr + 1] = value
+            skip_ws()
+            local sep = text:sub(pos, pos)
+            if sep == "," then pos = pos + 1
+            elseif sep == "]" then pos = pos + 1; depth = depth - 1; return arr, "array"
+            else return nil end
+        end
+    end
+    local function parse_literal()
+        for _, word in ipairs({"true", "false", "null"}) do
+            if text:sub(pos, pos + #word - 1) == word then
+                pos = pos + #word
+                if word == "null" then return nil, "null" end
+                return word == "true", "boolean"
+            end
+        end
+        local num = text:match("^-?%d+%.?%d*[eE]?[+-]?%d*", pos)
+        if num ~= nil and num ~= "" and num ~= "-" then
+            pos = pos + #num
+            return tonumber(num) or 0, "number"
+        end
+        return nil
+    end
+    parse_value = function()
+        skip_ws()
+        local ch = text:sub(pos, pos)
+        if ch == "{" then return parse_object()
+        elseif ch == "[" then return parse_array()
+        elseif ch == '"' then return parse_string()
+        elseif ch == "" then return nil
+        else return parse_literal() end
+    end
+    local value, kind = parse_value()
+    if value == nil and kind ~= "null" then return nil, "invalid" end
+    skip_ws()
+    if pos <= #text then return nil, "trailing data" end
+    return value, kind or "null"
+end
+
+-- Validates an agent cleanup answer and intersects it with the scraped set.
+-- Accepts a bare JSON array or an object wrapping it under "endpoints"/"keep".
+-- Returns the cleaned list (original tables, verbatim) plus kept/dropped/
+-- invented counts, or nil plus a reason. Empty keep-lists are rejected: an
+-- agent that keeps nothing is treated as a failed cleanup, never as proof
+-- that every endpoint is junk. Never throws.
+local function opencode_apply_answer(endpoints, answer_text)
+    local known = {}
+    for _, ep in ipairs(endpoints or {}) do
+        if type(ep) == "table" and type(ep.url) == "string" and ep.url ~= "" then
+            known[tostring(ep.method or "get"):lower() .. "\0" .. ep.url] = ep
+        end
+    end
+    local decoded, kind = opencode_json_decode(answer_text)
+    if decoded == nil then return nil, "agent answer is not valid JSON" end
+    local items = nil
+    if kind == "array" then
+        items = decoded
+    elseif kind == "object" then
+        for _, key in ipairs({"endpoints", "keep"}) do
+            if type(decoded[key]) == "table" then
+                items = decoded[key]
+                break
+            end
+        end
+    end
+    if type(items) ~= "table" then return nil, "agent answer is not a JSON array" end
+    local is_array = true
+    do
+        local count = 0
+        for k in pairs(items) do
+            if type(k) ~= "number" then is_array = false; break end
+            count = count + 1
+        end
+        if not is_array or count ~= #items then
+            return nil, "agent answer is not a JSON array"
+        end
+    end
+    if #items == 0 then return nil, "agent answer keeps no endpoints" end
+    if #items > 5000 then return nil, "agent answer exceeds item budget" end
+    local cleaned, seen, invented = {}, {}, 0
+    for _, item in ipairs(items) do
+        if type(item) ~= "table" or type(item.url) ~= "string" or item.url == "" then
+            return nil, "agent answer holds a non-endpoint item"
+        end
+        local key = tostring(item.method or "get"):lower() .. "\0" .. item.url
+        local original = known[key]
+        if original == nil then
+            invented = invented + 1
+        elseif not seen[key] then
+            seen[key] = true
+            cleaned[#cleaned + 1] = original
+        end
+    end
+    local original_count = 0
+    for _ in pairs(known) do original_count = original_count + 1 end
+    return cleaned, { kept = #cleaned, dropped = original_count - #cleaned, invented = invented }
+end
+
+-- Fallback cleanup prompt when the loaded lopencode module predates
+-- build_cleanup_prompt. Same subtractive contract as the native builder.
+local function opencode_fallback_prompt(endpoints_json, instructions)
+    local prompt =
+        "You are cleaning a heuristically scraped web-API endpoint list. " ..
+        "Return a JSON array containing ONLY a subset of the input objects, " ..
+        "copied verbatim (same url and method values). NEVER invent, " ..
+        "normalize, or rewrite urls or methods. DROP static assets, " ..
+        "analytics/beacon pings, challenge/telemetry URLs, plain pages, and " ..
+        "duplicates. When in doubt, KEEP the entry. " ..
+        "Return the JSON array only, no prose.\n"
+    if type(instructions) == "string" and instructions ~= "" then
+        prompt = prompt .. "Additional instructions: " .. instructions .. "\n"
+    end
+    return prompt .. "endpoints:\n" .. endpoints_json
+end
+
+-- Loads the lopencode native module: explicit `opencode_module` loadlib path
+-- first (deterministic), then a plain require (works when the host preloads
+-- the native module), then the in-repo dev build beside the driver. Returns
+-- nil when unavailable; never throws.
+local function opencode_load_module(args)
+    local path = args.opencode_module or args["opencode-module"]
+    if type(path) == "string" and path ~= "" then
+        local ok_load, loader = pcall(function()
+            return assert(package.loadlib(path, "luaopen_lopencode"))
+        end)
+        if ok_load and type(loader) == "function" then
+            local ok_call, module = pcall(loader)
+            if ok_call and type(module) == "table" then return module end
+        end
+        return nil
+    end
+    local ok, module = pcall(require, "lopencode")
+    if ok and type(module) == "table" and type(module.client) == "table" and
+       type(module.client.new) == "function" then
+        return module
+    end
+    local candidate = repo_root .. "/build/default/plugins/opencode-bridge/lopencode.so"
+    local probe = io.open(candidate, "rb")
+    if probe ~= nil then
+        probe:close()
+        local ok_load, loader = pcall(function()
+            return assert(package.loadlib(candidate, "luaopen_lopencode"))
+        end)
+        if ok_load and type(loader) == "function" then
+            local ok_call, fallback = pcall(loader)
+            if ok_call and type(fallback) == "table" and
+               type(fallback.client) == "table" and
+               type(fallback.client.new) == "function" then
+                return fallback
+            end
+        end
+    end
+    return nil
+end
+
+-- Live cleanup through an OpenCode server. Returns the agent answer string or
+-- nil plus a reason. Credentials come from process environment only; the prompt
+-- carries redacted endpoints alone. Never throws, never logs secrets.
+local function opencode_live_answer(module, endpoints_json, args)
+    local base_url = args.opencode_base_url or args["opencode-base-url"]
+    if type(base_url) ~= "string" or base_url == "" then
+        base_url = os.getenv("OPENCODE_BASE_URL") or "http://127.0.0.1:4096"
+    end
+    local instructions = args.opencode_instructions or args["opencode-instructions"] or ""
+    local prompt = nil
+    if type(module.build_cleanup_prompt) == "function" then
+        local ok, text = pcall(function()
+            return module.build_cleanup_prompt(endpoints_json, tostring(instructions or ""))
+        end)
+        if ok and type(text) == "string" and text ~= "" then prompt = text end
+    end
+    if prompt == nil then
+        prompt = opencode_fallback_prompt(endpoints_json, instructions)
+    end
+    local new_client = (module.client and module.client.new) or module.new
+    if type(new_client) ~= "function" then return nil, "lopencode module has no client constructor" end
+    local api_prefix = args.opencode_api_prefix or args["opencode-api-prefix"]
+    if type(api_prefix) ~= "string" or api_prefix == "" then api_prefix = "/api" end
+    local ok, answer = pcall(function()
+        local client = assert(new_client({
+            base_url = base_url,
+            username = os.getenv("OPENCODE_SERVER_USERNAME"),
+            password = os.getenv("OPENCODE_SERVER_PASSWORD"),
+            timeout_ms = tonumber(args.opencode_timeout_ms) or
+                tonumber(args["opencode-timeout-ms"]) or 30000,
+            max_requests = tonumber(args.opencode_max_requests) or
+                tonumber(args["opencode-max-requests"]) or 32,
+            prompt_wait_ms = tonumber(args.opencode_wait_ms) or
+                tonumber(args["opencode-wait-ms"]) or 120000,
+            api_prefix = api_prefix,
+            allow_remote_http = args.opencode_allow_remote_http == true or
+                tostring(args.opencode_allow_remote_http or ""):lower() == "true",
+        }))
+        local session_id = assert(client:create_session())
+        local result = assert(client:prompt(session_id, prompt))
+        pcall(function() client:close() end)
+        return result
+    end)
+    if not ok then return nil, "live cleanup request failed" end
+    if type(answer) ~= "string" or answer == "" then
+        return nil, "live cleanup returned no answer"
+    end
+    return answer
+end
+
+-- Applies the OpenCode cleanup stage. Returns the endpoint list to export
+-- (original tables) plus a status table for the x-prowsetk-opencode block.
+-- Hermetic `opencode_json` works offline and in tests; live calls need
+-- `opencode`/`opencode_enabled` and the native module. Never throws.
+local function apply_opencode_cleanup(endpoints, args, offline)
+    local status = { used = false, kept = 0, dropped = 0, invented = 0, note = "disabled" }
+    local ok, cleaned, updated = pcall(function()
+        if type(endpoints) ~= "table" or #endpoints == 0 then
+            status.note = "no endpoints to clean"
+            return endpoints or {}, status
+        end
+        local injected = args.opencode_json or args["opencode-json"]
+        local flag_enabled = opencode_enabled_requested(args)
+        local enabled = flag_enabled or
+            (type(injected) == "string" and injected ~= "")
+        if not enabled then return endpoints, status end
+        local answer, origin = nil, "live"
+        if type(injected) == "string" and injected ~= "" then
+            answer, origin = injected, "injected"
+            status.note = ""
+        elseif offline and not flag_enabled then
+            status.note = "live cleanup disabled for offline runs; pass opencode_json for hermetic cleanup"
+            return endpoints, status
+        else
+            local module = opencode_load_module(args or {})
+            if module == nil then
+                status.note = "lopencode module unavailable; seeds kept"
+                return endpoints, status
+            end
+            local encoded, count, truncated = opencode_encode_endpoints(
+                endpoints, args.opencode_max_endpoints or args["opencode-max-endpoints"])
+            if count == 0 then
+                status.note = "no endpoints to clean"
+                return endpoints, status
+            end
+            if truncated then
+                status.note = "input truncated to " .. tostring(count) .. " endpoints; "
+            else
+                status.note = ""
+            end
+            local failure = nil
+            answer, failure = opencode_live_answer(module, encoded, args or {})
+            if answer == nil then
+                status.note = tostring(failure or "live cleanup failed") .. "; seeds kept"
+                return endpoints, status
+            end
+        end
+        local cleaned, stats = opencode_apply_answer(endpoints, answer)
+        if cleaned == nil then
+            status.note = tostring(stats) .. "; seeds kept"
+            return endpoints, status
+        end
+        status.used = true
+        status.kept = stats.kept
+        status.dropped = stats.dropped
+        status.invented = stats.invented
+        local audit = args.opencode_output or args["opencode-output"]
+        if type(audit) == "string" and audit ~= "" then
+            pcall(function()
+                local file = assert(io.open(audit, "wb"))
+                file:write(answer or "")
+                file:close()
+            end)
+        end
+        status.note = (status.note or "") .. origin .. ": kept " ..
+            tostring(stats.kept) .. ", dropped " .. tostring(stats.dropped) ..
+            ", invented-ignored " .. tostring(stats.invented)
+        return cleaned, status
+    end)
+    if not ok then
+        status.used = false
+        status.note = "opencode cleanup failed; seeds kept"
+        return endpoints, status
+    end
+    return cleaned, updated
+end
+
 local function scan_urls(text, base_url)
     local found, seen = {}, {}
     local function add(candidate)
@@ -1540,9 +1994,10 @@ local function output_paths(args)
     return output, postman
 end
 
-local function append_metadata(yaml, authenticated_flag, restful, beacon_status)
+local function append_metadata(yaml, authenticated_flag, restful, beacon_status, opencode_status)
     restful = restful or {}
     beacon_status = beacon_status or {}
+    opencode_status = opencode_status or {}
     return yaml ..
         "x-prowsetk-booking-admin:\n" ..
         "  authenticated: " .. tostring(authenticated_flag == true) .. "\n" ..
@@ -1552,6 +2007,13 @@ local function append_metadata(yaml, authenticated_flag, restful, beacon_status)
         "  used: " .. tostring(beacon_status.used == true) .. "\n" ..
         "  network-entries: " .. tostring(tonumber(beacon_status.entries) or 0) .. "\n" ..
         "  note: 'Firefox network Flash results are heuristic observations after user consent; not authoritative.'\n" ..
+        "x-prowsetk-opencode:\n" ..
+        "  used: " .. tostring(opencode_status.used == true) .. "\n" ..
+        "  kept: " .. tostring(tonumber(opencode_status.kept) or 0) .. "\n" ..
+        "  dropped: " .. tostring(tonumber(opencode_status.dropped) or 0) .. "\n" ..
+        "  invented-ignored: " .. tostring(tonumber(opencode_status.invented) or 0) .. "\n" ..
+        "  note: 'OpenCode agent cleanup is subtractive and heuristic; " ..
+        tostring(opencode_status.note or "disabled") .. ". Kept endpoints are verbatim heuristic discoveries.'\n" ..
         "x-prowsetk-restful:\n" ..
         "  has-post: " .. tostring(restful.has_post == true) .. "\n" ..
         "  is-complete: " .. tostring(restful.is_complete == true) .. "\n" ..
@@ -1825,12 +2287,19 @@ function main(args)
                 endpoints = filtered
             end
         end
+        -- OpenCode cleanup (opt-in): subtractive agent pass over the redacted
+        -- endpoint list before schema enrichment, so probes and schemas are
+        -- computed only for kept endpoints. Hermetic via opencode_json, live
+        -- via the lopencode module. Disabled by default; failures keep seeds.
+        local opencode_status = { used = false, kept = 0, dropped = 0,
+            invented = 0, note = "disabled" }
+        endpoints, opencode_status = apply_opencode_cleanup(endpoints or {}, args, offline)
         local enriched = enrich_with_schemas(session, restful_page, endpoints,
             args, offline)
         local yaml, postman_json
         if enriched ~= nil then
             yaml = append_metadata(enriched.openapi_yaml, authenticated_flag,
-                restful_status, beacon_status)
+                restful_status, beacon_status, opencode_status)
             postman_json = enriched.postman_json
         else
             local safe_endpoints = redacted_endpoints(endpoints or {})
@@ -1841,7 +2310,7 @@ function main(args)
                 infer_schemas = true
             })
             yaml = append_metadata(yaml, authenticated_flag, restful_status,
-                beacon_status)
+                beacon_status, opencode_status)
             postman_json = scrape_endpoints.render_postman_json(safe_endpoints, {
                 collection_name = "Discovered API (Booking.com Admin)",
                 redact_secrets = true,
