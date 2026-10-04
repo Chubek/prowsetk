@@ -51,21 +51,29 @@ os.write(events, (json.dumps({'pid': os.getpid(), 'url': sys.argv[3]}) + '\\n').
 os.read(release, 1)
 os.write(events, b'stopped\\n')
 """)
+    cookie_grabber = root / "cookies.py"
+    cookie_grabber.write_text("""import json
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_text(json.dumps([{'domain': 'admin.booking.com', 'path': '/',
+    'name': 'session', 'value': 'handoff-fixture-cookie', 'secure': True, 'httpOnly': True}]))
+""")
 
     for confirm in (True, False):
         case = root / ("confirmed" if confirm else "eof")
         case.mkdir()
         output = case / "booking.yaml"
+        cookies = case / "cookies.json"
+        dotenv = case / "fixture.env"
+        dotenv.write_text("")
         entrypoint = case / "driver.lua"
         entrypoint.write_text(f"""function main(args)
-    scenario = 'cookie-session'
-    test_directory = [==[{case}]==]
     output_file = [==[{output}]==]
     postman_file = [==[{output}.postman.json]==]
-    dotenv_file = [==[{case / 'fixture.env'}]==]
+    dotenv_file = [==[{dotenv}]==]
+    cookies_file = [==[{cookies}]==]
     driver_file = [==[{SOURCE / 'examples/booking-dotcom-admin-scrape/scrape-booking-dotcom-admin.lua'}]==]
-    driver_arguments = {{assistant_browser_force=true}}
-    dofile([==[{SOURCE / 'tests/integration/booking_driver_fixture.lua'}]==])
+    dofile([==[{SOURCE / 'tests/integration/booking_assistant_browser_fixture.lua'}]==])
     return 0
 end
 """)
@@ -78,7 +86,8 @@ end
         try:
             browser_command = shlex.join([sys.executable, str(fake_browser),
                                           str(event_write), str(release_read)])
-            env = dict(os.environ, PROWSETK_ASSISTANT_BROWSER=browser_command)
+            env = dict(os.environ, PROWSETK_ASSISTANT_BROWSER=browser_command,
+                       PROWSETK_ASSISTANT_BROWSER_COOKIE_COMMAND=shlex.join([sys.executable, str(cookie_grabber)]))
             process = subprocess.Popen([CLI, "run", "handoff", "--config", str(config)],
                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                        env=env, pass_fds=(event_write, release_read), start_new_session=True)
@@ -86,12 +95,19 @@ end
             browser_pid = started["pid"]
             assert started["url"] == "https://admin.booking.com/"
             os.kill(browser_pid, 0)
-            stdout, remainder = process.communicate(input=b"\n" if confirm else b"", timeout=15)
+            try:
+                stdout, remainder = process.communicate(input=b"\n" if confirm else b"", timeout=15)
+            except subprocess.TimeoutExpired as error:
+                raise AssertionError(("driver did not resume after handoff", stderr, error.stderr)) from error
             stderr += remainder
             assert (process.returncode == 0) == confirm, (stdout, stderr)
             assert output.exists() == confirm, (stdout, stderr)
+            assert cookies.exists() == confirm, (stdout, stderr)
             if confirm:
-                assert "authenticated: true" in output.read_text()
+                yaml = output.read_text()
+                assert "authenticated: true" in yaml
+                assert "/api/rooms" in yaml
+                assert "handoff-fixture-cookie" not in yaml
             else:
                 assert b"browser interaction was not confirmed" in stderr, stderr
             assert b"browser stdout fixture" not in stdout, stdout

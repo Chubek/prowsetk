@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "goal": "Discover the API behind the search and next-page controls",
+  "max_steps": 8,
+  "max_page_requests": 128,
+  "max_get_probes": 16,
+  "actions": [
+    {"id": "search-input", "kind": "type", "selector": "#search", "value": "rooms"},
+    {"id": "search-submit", "kind": "click", "selector": "#search-submit"},
+    {"id": "next-page", "kind": "click", "selector": "#next", "max_uses": 4}
+  ]
+}

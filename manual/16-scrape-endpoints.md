@@ -101,6 +101,12 @@ New work uses this unified module. Compatibility C++ aliases remain in its
 header; replace old Lua module paths and configure both outputs on the same
 result when migrating.
 
+The C++ `ScrapeEndpointsOptions::scrape_all_paths` flag defaults to false.
+When enabled it forwards the core extractor all-paths candidate mode; the
+existing API-pattern and static-asset filters still apply independently.
+OpenCode marionette enables this flag and disables automatic SPA probing so
+its JSON policy controls interactions.
+
 Reference: `plugins/scrape-endpoints/`,
 `plugins/scrape-endpoints/include/prowsetk/plugins/scrape_endpoints.hpp`.
 

@@ -143,4 +143,15 @@ automation interfaces and checks actual CAPTCHA/login/crawl outcomes. See the
 [plugin reference](../plugins/ai-oracle/README.md) for complete configuration,
 ownership, transport requirements, examples, and limits.
 
+## OpenCode marionette
+
+`plugins/opencode-marionette` exposes explicit C++ session control and the
+`ptk-opencode-marionette` executable. Its bounded version-1 JSON policy names
+permitted click/type/navigation actions; OpenCode chooses an ID, and Flatworm
+executes it with same-origin request and finite action/probe budgets. Discovery
+accumulates through scrape-endpoints and schema-grabber, exporting heuristic
+OpenAPI/Postman schemas with incomplete coverage metadata. The ABI-v2 facade
+loads without network traffic and does not automatically drive pages. See the
+[plugin guide](../plugins/opencode-marionette/README.md) for configuration and limits.
+
 **Next:** [Intermediate representations](22-intermediate-representations.md).

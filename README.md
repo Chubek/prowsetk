@@ -2668,3 +2668,16 @@ arguments include the resolved `proxy` string. Prowse-TUI stores the proxy in
 `third_party/libmnl` is exposed as the optional `ProwseTk::mnl` host networking
 diagnostics target. It is not used to implement proxy transport; proxy
 protocols remain in the portable, host-mediated socket client.
+
+### OpenCode marionette
+
+`plugins/opencode-marionette` provides explicit C++ session control and the
+`ptk-opencode-marionette` runner. A bounded JSON decisions file defines allowed
+click/type/navigation actions; an OpenCode API server chooses action IDs from
+structural page state. It composes `scrape-endpoints` discovery with
+`schema-grabber` request/response/URL schemas and exports OpenAPI/Postman across
+visited pages. Same-origin requests, finite action/request/probe budgets, isolated
+OpenCode authentication and default redaction apply. Discovery remains incomplete
+and heuristic. Loading the ABI-v2 facade alone is network-free; it exposes no
+Lua module. See [the plugin guide](plugins/opencode-marionette/README.md).
+It reuses existing core/bridge/schema dependencies and adds no production dependency.

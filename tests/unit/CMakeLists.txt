@@ -173,3 +173,7 @@ if(TARGET prowsetk_spider_static)
         SPIDER_PLUGIN_PATH="$<TARGET_FILE:prowsetk_spider>")
     add_dependencies(prowsetk_unit_spider prowsetk_spider)
 endif()
+
+prowsetk_gtest(prowsetk_unit_opencode_marionette "prowsetk.unit.opencode-marionette."
+    "unit;plugin;endpoint-extraction" test_opencode_marionette.cpp)
+target_link_libraries(prowsetk_unit_opencode_marionette PRIVATE prowsetk_opencode_marionette_static)

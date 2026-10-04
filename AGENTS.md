@@ -1237,3 +1237,18 @@ int cmd_pdql(int argc, char** argv) {
 ```
 
 ---
+
+## OpenCode marionette
+
+`plugins/opencode-marionette` composes the OpenCode bridge, scrape-endpoints and
+schema-grabber through explicit synchronous C++ session control and a CLI runner.
+Keep its versioned JSON decisions policy strict, bounded and authoritative for
+allowed action IDs/selectors/typing values/URLs. The agent chooses IDs only;
+never execute model output as code or let it invent action parameters. Use
+structural target context without page text, private values, scripts, cookies or
+headers; isolate OpenCode authentication from the page Session. Keep network-free
+ABI-v2 loading, same-origin page requests/redirects, bounded action/request/GET
+probe budgets and guaranteed hook cleanup. Accumulate discovery across document
+changes, preserve observed schemas, redact exports and label coverage incomplete.
+Do not probe non-GET endpoints or claim unobserved body schemas are authoritative.
+Keep hermetic tests under tests/unit and tests/integration with finite CTest timeouts.

@@ -141,6 +141,9 @@ public:
 
     // POST /session -> agent session id.
     std::string create_session();
+    // Documented opencode serve protocol: text parts in, assistant text parts
+    // out. Separate from the legacy text payload and /api polling protocol.
+    std::string prompt_message(const std::string& session_id, std::string_view text);
     // POST /session/{id}/message with {text, tools?} -> answer text.
     std::string prompt(const std::string& session_id, std::string_view text,
                        const std::vector<std::string>& tools = {});

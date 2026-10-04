@@ -128,6 +128,7 @@ std::string assistant_url(const Session& session) {
 EndpointExtractionOptions to_extraction_opts(const ScrapeEndpointsOptions& o) {
     EndpointExtractionOptions e;
     e.follow_links = o.follow_links;
+    e.scrape_all_paths = o.scrape_all_paths;
     e.inspect_scripts = o.inspect_scripts;
     e.observe_network = o.observe_network;
     e.infer_schemas = o.infer_schemas;

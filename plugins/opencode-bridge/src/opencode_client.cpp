@@ -700,6 +700,40 @@ std::string OpenCodeClient::prompt(const std::string& session_id, std::string_vi
     throw Error(ErrorCode::ParseError, "opencode-bridge: answer missing in response");
 }
 
+std::string OpenCodeClient::prompt_message(const std::string& session_id, std::string_view text) {
+    check_session_id(session_id);
+    if (text.empty() || text.size() > config_.max_input_bytes) invalid("prompt text");
+    const auto response = send("POST", route("/session/" + percent_encode(session_id) + "/message"),
+        "{\"parts\":[{\"type\":\"text\",\"text\":" + json_escape(text) + "}],"
+        "\"tools\":{\"bash\":false,\"edit\":false,\"write\":false,\"read\":false,"
+        "\"glob\":false,\"grep\":false,\"webfetch\":false,\"task\":false}}");
+    JsonValue root;
+    if (!json_parse(response.body, root) || root.type != JsonValue::Type::Object) {
+        throw Error(ErrorCode::ParseError, "opencode-bridge: invalid message response");
+    }
+    const JsonValue* parts = nullptr;
+    for (const auto& field : root.fields) {
+        if (field.first == "info") {
+            for (const auto& item : field.second->fields) {
+                if (item.first == "error" && item.second->type != JsonValue::Type::Null) {
+                    throw Error(ErrorCode::PluginError, "opencode-bridge: assistant failed");
+                }
+            }
+        }
+        if (field.first == "parts") parts = field.second.get();
+    }
+    std::string answer;
+    if (parts && parts->type == JsonValue::Type::Array) {
+        for (const auto& part : parts->items) {
+            std::string type, content;
+            if (json_find_string_at_path(part, {"type"}, type) && type == "text" &&
+                json_find_string_at_path(part, {"text"}, content)) answer += content;
+        }
+    }
+    if (answer.empty()) throw Error(ErrorCode::ParseError, "opencode-bridge: assistant text missing");
+    return answer;
+}
+
 std::string OpenCodeClient::prompt_async(const std::string& session_id, std::string_view text) {
     check_session_id(session_id);
     if (text.empty() || text.size() > config_.max_input_bytes) invalid("prompt text");

@@ -149,7 +149,9 @@ end
             def worker_ended():
                 try:
                     return Path(f"/proc/{worker_pid}/stat").read_text().split(")", 1)[1].split()[0] == "Z"
-                except FileNotFoundError:
+                except (FileNotFoundError, ProcessLookupError):
+                    # procfs may report ESRCH if the worker exits after open
+                    # but before read, as well as ENOENT before open.
                     return True
 
             wait(worker_ended, timeout=5)

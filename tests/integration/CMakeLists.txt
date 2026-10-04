@@ -182,3 +182,15 @@ if(TARGET ptkspiderd AND PROWSETK_HAVE_LUA AND PROWSETK_HAVE_QUICKJS)
             WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
     endif()
 endif()
+
+prowsetk_gtest(prowsetk_integration_opencode_marionette "prowsetk.integration.opencode-marionette."
+    "integration;plugin;javascript;endpoint-extraction" test_opencode_marionette.cpp)
+target_link_libraries(prowsetk_integration_opencode_marionette PRIVATE prowsetk_opencode_marionette_static)
+target_compile_definitions(prowsetk_integration_opencode_marionette PRIVATE
+    MARIONETTE_PLUGIN_PATH="$<TARGET_FILE:prowsetk_opencode_marionette>")
+add_dependencies(prowsetk_integration_opencode_marionette prowsetk_opencode_marionette)
+if(TARGET ptk_opencode_marionette)
+    add_test(NAME prowsetk.integration.opencode-marionette.cli.usage COMMAND ptk_opencode_marionette)
+    set_tests_properties(prowsetk.integration.opencode-marionette.cli.usage PROPERTIES
+        LABELS "integration;plugin;endpoint-extraction" TIMEOUT 10 WILL_FAIL TRUE)
+endif()

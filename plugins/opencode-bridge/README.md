@@ -108,3 +108,10 @@ and excessive SVG are stripped; semantic tags (`nav`, `main`, `article`,
 `table`, `form`, `a`, `button`) and `data-*` attributes are kept. Documents
 over 100KB fall back to a title/text summary. Never treat agent output as
 authoritative; validate before acting on it.
+
+C++ `OpenCodeClient::prompt_message(id, text)` additionally supports the documented
+`opencode serve` synchronous text-parts protocol (`POST /session/:id/message`),
+returning concatenated assistant text parts and rejecting assistant errors.
+It disables common built-in tools in the request; server-side permissions remain
+caller-owned. It shares authentication, route prefix and finite transport budgets.
+Existing `prompt` and Lua callers retain their legacy and `/api` polling behavior.

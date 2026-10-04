@@ -125,6 +125,7 @@ add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/spider" "${CMAKE_BINARY_DIR}/plu
 if(EXISTS "${PROJECT_SOURCE_DIR}/plugins/opencode-bridge/CMakeLists.txt")
     add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/opencode-bridge" "${CMAKE_BINARY_DIR}/plugins/opencode-bridge")
 endif()
+add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/opencode-marionette" "${CMAKE_BINARY_DIR}/plugins/opencode-marionette")
 if(EXISTS "${PROJECT_SOURCE_DIR}/plugins/ebpf-interface/CMakeLists.txt")
     add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/ebpf-interface" "${CMAKE_BINARY_DIR}/plugins/ebpf-interface")
 endif()

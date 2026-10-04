@@ -28,6 +28,9 @@ struct ScrapeEndpointsOptions {
     std::string base_url;
 
     bool follow_links = true;
+    // Include ordinary link/resource paths as candidates, retaining the
+    // independent API/static-asset filters below. Default stays API-focused.
+    bool scrape_all_paths = false;
     bool inspect_scripts = true;
     bool observe_network = true;
     bool infer_schemas = true;

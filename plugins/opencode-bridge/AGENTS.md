@@ -110,3 +110,8 @@ plugins/opencode-bridge/
 │   ├── test_client.cpp     # Unit tests against mock OpenCode HTTP server
 │   └── test_lua_api.cpp    # Lua integration tests
 └── README.md               # Configuration and usage instructions
+
+`OpenCodeClient::prompt_message` is the additive documented text-parts protocol
+used by opencode-marionette. Keep it distinct from legacy `prompt`/`prompt_v2`,
+retain transport budgets/redirection/authentication policy, reject assistant
+errors, and ignore reasoning parts when extracting the assistant text.
