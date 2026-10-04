@@ -3,3 +3,8 @@ target_link_libraries(prowsetk_example_scrape PRIVATE ProwseTk::core)
 
 prowsetk_add_executable(prowsetk_example_lua lua_automation.cpp)
 target_link_libraries(prowsetk_example_lua PRIVATE ProwseTk::core)
+
+prowsetk_add_flatworm_module(flatworm_example_math flatworm-module/math.c)
+set_target_properties(flatworm_example_math PROPERTIES OUTPUT_NAME flatworm_math)
+prowsetk_add_executable(prowsetk_example_flatworm_modules flatworm-module/embed.cpp)
+target_link_libraries(prowsetk_example_flatworm_modules PRIVATE ProwseTk::core)

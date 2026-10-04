@@ -101,7 +101,7 @@
       "name": "asan",
       "configurePreset": "asan",
       "environment": {
-        "ASAN_OPTIONS": "detect_leaks=0",
+        "ASAN_OPTIONS": "detect_leaks=0:detect_odr_violation=1",
         "LSAN_OPTIONS": "detect_leaks=0"
       },
       "output": { "outputOnFailure": true },

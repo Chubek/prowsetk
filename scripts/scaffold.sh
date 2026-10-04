@@ -103,6 +103,7 @@ for d in \
     lua/lprowse \
     lua/lprowsext \
     plugins \
+    flatworm-modules \
     drivers \
     examples \
     resources \

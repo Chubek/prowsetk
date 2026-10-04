@@ -37,7 +37,7 @@ files define the callable interfaces.
 11. [Lua extensions](11-lua-extensions.md) — `lprowsext`, processors, extractors,
     module loading, and host-bound execution.
 12. [JavaScript](12-javascript.md) — page scripting, web-platform bindings,
-    synthetic interactions, and lifecycle work.
+    native Flatworm modules, synthetic interactions, and lifecycle work.
 13. [Events and diagnostics](13-events-and-diagnostics.md) — callbacks, errors,
     capabilities, redaction, limits, and troubleshooting.
 14. [Cookies and storage](14-cookies-and-storage.md) — cookie scope, import,
@@ -95,6 +95,41 @@ files define the callable interfaces.
   provenance and confidence; completeness metadata has the specific meaning
   described in its chapter.
 
+## Implementation progression
+
+The engine was built outward from one canonical page representation, and each
+later stage stayed downstream of the boundaries already in place. This table
+records that order so a reader can tell which chapter owns a behavior and why
+a surface exists at the layer it does. It is a build-up history, not a
+compatibility promise; the repository `README.md` remains the architecture of
+record.
+
+| Stage | What landed | Primary source | Chapters |
+|---|---|---|---|
+| 1. Canonical page IR | ProwseEvent start/attribute/text/end stream, with ProwseXAS/ProwseDOM compatibility projections, ProwseVTD binary frames and ProwseIML text with macros; XPath-driven listeners and walkers | `src/core/ir_model.cpp`, `ir_layout.cpp`, `ir_filter.cpp`, `ir_events.cpp`, `ir_vtd.cpp`, `ir_iml.cpp`, `ir_registry.cpp`, `lprowseir` | 12, 22 |
+| 2. Downstream IR consumers | `prowsetk serialize` emits NDJSON, VTD or IML; the C-only `page2pdf` and independent `page2latex` compile the same encodings without touching the engine or DOM | `src/cli/`, `tools/page2pdf`, `tools/page2latex` | 3, 22, 23 |
+| 3. Queryable DOM and PDQL | Bounded tag globs, XPath mixins, RE2 filters, marionette walkers, aggregates, and JSON/YAML/XML/S-expression serializers exposed to C/C++, Lua `lpdql` and CLI workflows | `include/prowsetk/pdql.h`, `src/pdql/`, `lua/` | 7, 8 |
+| 4. Page web platform | Host-mediated `fetch`/XHR, `Headers`/`Response`, timers, storage, cookies, DOM events and `MutationObserver` installed over handle-based primitives, with inert layout-dependent observers | `src/core/web_platform_shim.hpp`, `src/core/flatworm_host.cpp` | 12 |
+| 5. Synthetic interaction | Full pointer/click cascade with `submit`, the controlled-input keyboard cascade through native value descriptors, layout-free interactability heuristics, and a bounded flush after every action | `web_platform_shim.hpp`, `FlatwormScriptHost` | 12 |
+| 6. Native module ABI | Independent version-1 page-runtime ABI: definition validation, host registry, library ownership, per-runtime lifecycle, frozen exports, typed transfers, and an installed-only `flatworm:` module loader | `include/Flatwork-Module.h`, `include/prowsetk/flatworm_module.hpp`, `src/flatworm/module*.cpp` | 12, 21 |
+| 7. First shipped module | `flatworm:rpc`: JSON-RPC 2.0 request/notification builders, success and error envelopes, strict wire validation, ID correlation for batches, bounded JSON, an offline embedder example, and unit/integration suites | `flatworm-modules/rpc/` | 12 |
+| 8. Engine corrections from module work | Session event cancellation now reaches the navigation and request paths, and JSON-conversion getter/`toJSON` failures become value-free native errors instead of leaking thrown values | `src/core/browser.cpp`, `src/flatworm/module_bindings.cpp` | 12, 13 |
+
+Three rules held across every stage, and they are worth preserving when adding
+the next one:
+
+- **Layering.** Rendering, querying, scripting and transport stay separable. An
+  IR consumer never reaches a DOM object; a page script never receives an engine
+  pointer; a module callback never opens a socket. Each stage introduced a
+  narrower interface than the one below it.
+- **Explicit selection.** Nothing is active by default. Optional targets stay
+  optional, native modules are loaded by the C++ host rather than by page or
+  project configuration, and capabilities report the restricted support level
+  instead of implying full browser compatibility.
+- **Verified coverage.** Every stage landed with labeled, timeout-bounded CTest
+  cases, so `ctest --preset default` and `ctest --preset asan` remain the
+  acceptance check for the whole progression.
+
 ## Coverage and source map
 
 | Area | Chapters | Primary source locations |
@@ -105,6 +140,8 @@ files define the callable interfaces.
 | Managed Lua handle lifetime | 9, 11 | `src/core/lua_runtime.cpp` userdata finalizers, `Browser::live_session_count()` |
 | Authentication/discovery plugins | 16–20 | `plugins/scrape-endpoints`, `ezlogin`, `captcha-handler`, `restful-resolver`, `schema-grabber` |
 | Plugin ABI and WASM design | 21 | `ProwseTk-Plugin.h`, `plugin_registry.hpp`, `wasm_runtime.hpp`, `wit/` |
+| Native page-runtime modules | 12 | `include/Flatwork-Module.h`, `flatworm_module.hpp`, `src/flatworm/module*.cpp`, `examples/flatworm-module` |
+| Shipped native modules | 12 | `flatworm-modules/rpc/` (`flatworm:rpc`), `flatworm-modules/README.md` |
 | AI oracle service | 21 | `plugins/ai-oracle`, `tests/unit/test_ai_oracle*`, `tests/integration/test_ai_oracle.cpp` |
 | IR consumers | 22–23 | `src/core/ir_*.cpp`, `tools/page2pdf`, `tools/page2latex` |
 | Crawling and watching | 24–26 | `tools/crawler`, `tools/pagewatch`, `plugins/spider`, `tools/automation` |
@@ -114,6 +151,11 @@ files define the callable interfaces.
 
 The historical plugins under `plugins/.deprecated/` are covered as migration
 context in Chapter 16. They are outside the current plugin workflow.
+
+Shipped native page-runtime modules are indexed separately from plugins: they
+extend Flatworm's own JavaScript engine through a different ABI, are selected
+by the C++ host rather than by configuration, and are documented in Chapter 12
+with a per-module README under `flatworm-modules/`.
 
 ## Building the manual
 

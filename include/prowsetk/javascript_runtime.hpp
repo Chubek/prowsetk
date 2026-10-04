@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "prowsetk/capability.hpp"
+#include "prowsetk/flatworm_module.hpp"
 
 namespace prowsetk {
 
@@ -190,14 +191,24 @@ public:
     virtual bool detach_element(ElementHandle node);
 };
 
-// Executes page JavaScript. JavaScript is the page-scripting runtime only; it
-// is never an extension mechanism (README "JavaScript Execution").
+// Executes page JavaScript. Native Flatworm modules extend the page runtime;
+// page JavaScript itself does not implement browser/Lua/WASM extensions.
 class JavaScriptRuntime {
 public:
     virtual ~JavaScriptRuntime() = default;
 
     virtual ScriptResult evaluate(std::string_view script,
                                   const ScriptOptions& options = {}) = 0;
+    // Evaluates an ECMAScript module with only explicit, installed flatworm:
+    // native imports. No filesystem/network module discovery is performed.
+    // Promise jobs are drained with the same limits as classic scripts.
+    virtual ScriptResult evaluate_module(std::string_view script,
+                                         const ScriptOptions& options = {});
+    // Install while idle. The runtime owns one native instance and retains the
+    // library until destruction; duplicate names fail atomically. Throws Error
+    // (Unsupported for runtimes without native module support).
+    virtual void install_module(std::shared_ptr<const FlatwormModule> module);
+    virtual std::vector<FlatwormModuleInfo> modules() const;
     virtual ScriptResult run_microtasks(const ScriptOptions& options = {});
     virtual bool has_pending_microtasks() const;
     virtual void set_global(std::string_view name, std::string_view value) = 0;

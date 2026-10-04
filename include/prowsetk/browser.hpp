@@ -79,6 +79,9 @@ public:
     Storage& storage() noexcept { return *storage_; }
     EventDispatcher& events() noexcept { return events_; }
     PluginRegistry& plugins() noexcept { return *plugins_; }
+    // Native page-runtime extensions, inherited by future sessions/runtimes.
+    FlatwormModuleRegistry& modules() noexcept { return modules_; }
+    const FlatwormModuleRegistry& modules() const noexcept { return modules_; }
     WasmRuntime& wasm() noexcept { return *wasm_; }
 
     LuaRuntime* lua() noexcept { return lua_.get(); }
@@ -104,6 +107,7 @@ private:
     std::unique_ptr<NetworkClient> network_;
     std::unique_ptr<Storage> storage_;
     std::unique_ptr<PluginRegistry> plugins_;
+    FlatwormModuleRegistry modules_;
     std::unique_ptr<WasmRuntime> wasm_;
     std::unique_ptr<LuaRuntime> lua_;
     std::size_t session_counter_ = 0;
@@ -220,13 +224,16 @@ private:
 
     // Emits `event` through the browser dispatcher, stamped with this
     // session's id so Lua `session:on` subscriptions stay scoped.
-    void emit_event(Event event);
+    void emit_event(Event& event);
     std::string document_element_class_name() const;
     void set_document_element_class_name(std::string_view value);
 
     // Runs the page lifecycle (DOMContentLoaded/load, timers, async script
     // callbacks) to a bounded quiescence after the document's scripts.
     void run_script_lifecycle();
+    ScriptResult execute_script(std::string_view script,
+                                const ScriptOptions& options = {},
+                                bool module = false);
 
     // Performs script-initiated navigations (location, link clicks, form
     // submits) recorded by the document host after a navigation completes.
@@ -243,6 +250,7 @@ private:
     std::optional<AntiBotDetection> anti_bot_detection_;
     std::vector<PageScriptRequest> page_script_requests_;
     std::vector<PageScriptText> page_script_texts_;
+    std::size_t script_execution_depth_ = 0;
     bool closed_ = false;
 };
 

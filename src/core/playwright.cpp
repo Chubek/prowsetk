@@ -30,6 +30,13 @@ namespace {
 // interface's parser. Keeping this representation local prevents protocol
 // details from entering the public API.
 struct Value {
+    Value();
+    ~Value();
+    Value(const Value&);
+    Value(Value&&) noexcept;
+    Value& operator=(const Value&);
+    Value& operator=(Value&&) noexcept;
+
     enum class Kind { Null, Bool, Number, String, Array, Object };
     Kind kind = Kind::Null;
     bool boolean = false;
@@ -38,17 +45,28 @@ struct Value {
     std::vector<Value> array;
     std::vector<std::pair<std::string, Value>> object;
 
-    const Value* find(std::string_view key) const {
-        if (kind != Kind::Object) return nullptr;
-        for (const auto& [name, value] : object) {
-            if (name == key) return &value;
-        }
-        return nullptr;
-    }
+    const Value* find(std::string_view key) const;
     bool is_string() const { return kind == Kind::String; }
     bool is_number() const { return kind == Kind::Number; }
     bool is_object() const { return kind == Kind::Object; }
 };
+
+// Defer recursive pair/vector special-member instantiation until Value is
+// complete (required by Clang with newer libstdc++ constructor constraints).
+Value::Value() = default;
+Value::~Value() = default;
+Value::Value(const Value&) = default;
+Value::Value(Value&&) noexcept = default;
+Value& Value::operator=(const Value&) = default;
+Value& Value::operator=(Value&&) noexcept = default;
+
+const Value* Value::find(std::string_view key) const {
+    if (kind != Kind::Object) return nullptr;
+    for (const auto& [name, value] : object) {
+        if (name == key) return &value;
+    }
+    return nullptr;
+}
 
 Value object_value() {
     Value value;

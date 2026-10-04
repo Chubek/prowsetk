@@ -1,0 +1,5 @@
+prowsetk_add_flatworm_module(flatworm_test_module test_module.c)
+prowsetk_add_flatworm_module(flatworm_test_bad_module test_module.c)
+target_compile_definitions(flatworm_test_bad_module PRIVATE TEST_MODULE_BAD_ABI=1)
+prowsetk_add_flatworm_module(flatworm_test_no_entry test_no_entry.c)
+prowsetk_add_flatworm_module(flatworm_test_throwing_entry test_throwing_entry.cpp)

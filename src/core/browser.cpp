@@ -286,7 +286,9 @@ NetworkClient& Browser::network_client() { return *network_; }
 const NetworkClient& Browser::network_client() const { return *network_; }
 
 std::unique_ptr<JavaScriptRuntime> Browser::create_javascript_runtime() const {
-    return make_javascript_runtime();
+    auto runtime = make_javascript_runtime();
+    for (const auto& module : modules_.modules()) runtime->install_module(module);
+    return runtime;
 }
 
 CapabilitySet Browser::capabilities() const {
@@ -312,7 +314,8 @@ CapabilitySet Browser::capabilities() const {
     for (const auto& capability : wasm_->capabilities().all()) {
         capabilities.add(capability);
     }
-    auto javascript = create_javascript_runtime();
+    // Capability inspection must not create native module instances.
+    auto javascript = make_javascript_runtime();
     for (const auto& capability : javascript->capabilities().all()) {
         capabilities.add(capability);
     }
@@ -457,6 +460,7 @@ Session::Session(Browser* browser, SessionConfig config, std::string id)
 }
 
 Session::~Session() {
+    javascript_.reset();
     if (browser_ != nullptr) {
         // Release the live-session claim last: a concurrent owner deciding
         // whether it may free the browser must not observe a zero that still
@@ -466,7 +470,7 @@ Session::~Session() {
     }
 }
 
-void Session::emit_event(Event event) {
+void Session::emit_event(Event& event) {
     event.session_id = id_;
     browser_->events().emit(event);
 }
@@ -516,16 +520,15 @@ void Session::run_script_lifecycle() {
     // Drains DOMContentLoaded/load listeners, due timers, and async script
     // callbacks in bounded passes so a page never hangs document install.
     for (int pass = 0; pass < 16; ++pass) {
-        const ScriptResult flushed =
-            javascript_->evaluate("__prowsetkFlush();");
-        if (!flushed.ok || flushed.value == "0") {
+        const ScriptResult flushed = execute_script("__prowsetkFlush();");
+        if (closed_ || !flushed.ok || flushed.value == "0") {
             break;
         }
     }
 }
 
 void Session::follow_script_navigations() {
-    if (script_host_ == nullptr) {
+    if (closed_ || script_host_ == nullptr) {
         return;
     }
     PendingNavigation navigation;
@@ -883,8 +886,10 @@ void Session::install_document(std::string_view html, std::string url,
         begin.type = EventType::BeforeScript;
         begin.url = current_url_;
         emit_event(begin);
+        if (closed_) break;
 
-        const ScriptResult result = javascript_->evaluate(script_text);
+        const ScriptResult result = execute_script(script_text, ScriptOptions{},
+            lower(trim(script->attribute("type"))) == "module");
         Event end;
         end.type = EventType::AfterScript;
         end.url = current_url_;
@@ -893,6 +898,7 @@ void Session::install_document(std::string_view html, std::string url,
             end.message = result.error;
         }
         emit_event(end);
+        if (closed_) break;
     }
     run_script_lifecycle();
 }
@@ -928,13 +934,30 @@ std::vector<std::pair<std::string, std::string>> Session::headers() const {
     return headers_;
 }
 
+ScriptResult Session::execute_script(std::string_view script,
+                                     const ScriptOptions& options, bool module) {
+    if (closed_ || javascript_ == nullptr) return {false, {}, "session JavaScript is unavailable"};
+    // A console/network callback can close this session during evaluation.
+    // Retain the executing context (and native instances) until the outermost
+    // evaluation returns, including a rejected reentrant call or exception.
+    struct ScriptScope {
+        std::size_t& depth;
+        const bool& closed;
+        std::unique_ptr<JavaScriptRuntime>& runtime;
+        ~ScriptScope() { if (--depth == 0 && closed) runtime.reset(); }
+    } scope{script_execution_depth_, closed_, javascript_};
+    ++script_execution_depth_;
+    return module ? javascript_->evaluate_module(script, options) : javascript_->evaluate(script, options);
+}
+
 std::string Session::evaluate_js(std::string_view script,
-                                 const ScriptOptions& options) {
+                                  const ScriptOptions& options) {
+    if (closed_) throw Error(ErrorCode::InvalidArgument, "session is closed");
     if (javascript_ == nullptr) {
         throw Error(ErrorCode::Unsupported,
                     "JavaScript is disabled for this session");
     }
-    const ScriptResult result = javascript_->evaluate(script, options);
+    const ScriptResult result = execute_script(script, options);
     if (!result.ok) {
         Event event;
         event.type = EventType::ScriptException;
@@ -957,8 +980,8 @@ bool Session::click_element(std::shared_ptr<Element> element) {
     }
     const std::string script =
         "__prowsetkClick(" + std::to_string(handle) + ");";
-    const ScriptResult result = javascript_->evaluate(script, ScriptOptions{});
-    if (!result.ok || result.value != "true") return false;
+    const ScriptResult result = execute_script(script);
+    if (closed_ || !result.ok || result.value != "true") return false;
     run_script_lifecycle();
     follow_script_navigations();
     return true;
@@ -1000,8 +1023,8 @@ bool Session::type_element(std::shared_ptr<Element> element,
     }
     const std::string script =
         "__prowsetkType(" + std::to_string(handle) + ",\"" + escaped + "\");";
-    const ScriptResult result = javascript_->evaluate(script, ScriptOptions{});
-    if (!result.ok || result.value != "true") return false;
+    const ScriptResult result = execute_script(script);
+    if (closed_ || !result.ok || result.value != "true") return false;
     run_script_lifecycle();
     follow_script_navigations();
     return true;
@@ -1030,6 +1053,7 @@ void Session::close() {
         return;
     }
     closed_ = true;
+    if (script_execution_depth_ == 0) javascript_.reset();
     browser_->storage().release_session(id_);
     Event event;
     event.type = EventType::SessionDestroyed;

@@ -31,6 +31,7 @@ the current implementation's support levels.
 - [Endpoint Extraction](#endpoint-extraction)
 - [Web Interface](#web-interface)
 - [JavaScript Execution](#javascript-execution)
+- [Native Flatworm Modules](#native-flatworm-modules)
 - [Asynchronous Operation](#asynchronous-operation)
 - [Events and Hooks](#events-and-hooks)
 - [Unsupported Web APIs](#unsupported-web-apis)
@@ -60,6 +61,7 @@ the current implementation's support levels.
 10. Practical support for scraping and endpoint automation.
 11. Minimal graphical and system dependencies.
 12. Explicit documentation of browser compatibility.
+13. A separate native module ABI for extending Flatworm's page JavaScript runtime.
 
 ## Architecture
 
@@ -72,6 +74,8 @@ ProwseTk core
     |
     +-- Native C/C++ plugins through ProwseTk-Plugin.h
     |
+    +-- Flatworm page-runtime modules through Flatwork-Module.h
+    |
     +-- Lua drivers and extensions through lprowse / lprowsext / lprowseir
     |
     +-- WASM modules/components through a capability-limited host
@@ -79,7 +83,8 @@ ProwseTk core
 
 Four execution environments participate in a session:
 
-- **C++** hosts ProwseTk and implements the core engine.
+- **C++** hosts ProwseTk, implements the core engine, and supplies native
+  Flatworm page-runtime modules.
 - **Lua** drives browser sessions and provides lightweight scripting extensions.
 - **WASM** provides portable, sandboxed plugins for heavier or untrusted
   extensions.
@@ -330,6 +335,7 @@ Provides JavaScript execution through QuickJS.
 - Host-object bindings
 - Promise and timer integration
 - Page-context isolation
+- Native page-runtime module installation and bounded ECMAScript module evaluation
 
 ### `LuaRuntime`
 
@@ -603,7 +609,6 @@ Plugins may provide:
 - Custom resource loaders
 - DOM processors
 - Document extractors
-- JavaScript bindings
 - Lua modules
 - Lua extension functions
 - Storage backends
@@ -614,6 +619,10 @@ Plugins may provide:
 - Capability providers
 - Diagnostics and instrumentation
 - Custom automation commands
+
+Native page-runtime bindings have their own engine-owned interface,
+[`Flatwork-Module.h`](include/Flatwork-Module.h), described under
+[Native Flatworm Modules](#native-flatworm-modules).
 
 ### Native plugin ABI
 
@@ -1389,6 +1398,111 @@ Lua does not replace JavaScript as the page scripting language:
 This separation lets Lua automation interact with pages while preserving an
 isolated JavaScript environment for page scripts.
 
+### Native Flatworm Modules
+
+Flatworm provides a version-1 **native page-runtime module ABI** in
+`include/Flatwork-Module.h`. Host-selected C/C++ modules export synchronous
+JavaScript functions and constants with per-runtime initialization/shutdown.
+The implementation lives in `src/flatworm/module.cpp` (definition validation,
+library ownership and registry) and `module_bindings.cpp` (QuickJS bindings and
+native ES-module resolution). The browser plugin ABI remains independent at
+version 2. The module ABI exposes typed values and an opaque call context;
+QuickJS handles, DOM pointers, Lua state and browser request hooks stay inside
+their existing boundaries.
+
+```cpp
+#include <prowsetk/browser.hpp>
+
+prowsetk::Browser browser;
+browser.modules().load_native("./build/default/examples/libflatworm_math.so");
+auto session = browser.create_session();
+session->load_html(R"html(
+  <p id="answer"></p>
+  <script type="module">
+    import {add} from 'flatworm:math';
+    document.getElementById('answer').textContent = add(20, 22);
+  </script>
+)html", "https://example.test/");
+// session->document()->query_selector("#answer")->text() is "42".
+```
+
+Classic scripts use `Flatworm.module("math").add(20, 22)`. Module scripts use
+`flatworm:<name>` imports; dynamic `import()` also resolves installed native
+modules. `JavaScriptRuntime::evaluate_module` executes module source explicitly,
+and static `<script type="module">` elements use it during document loading.
+Root external scripts are still fetched through the owning Session. The import
+loader accepts only installed native modules: no automatic filesystem or
+network imports. Dynamic DOM-injected module scripts and general JavaScript
+module-graph loading are outside this supported surface.
+
+`FlatwormModule::load_native` loads the `flatworm_module_entry` symbol and copies
+validated metadata. `FlatwormModule::from_static` registers an embedded C
+definition. `Browser::modules()` selects bindings for future sessions;
+`JavaScriptRuntime::install_module` installs directly into an idle runtime.
+Loading and capability inspection do not initialize module instances. Registry
+removal affects future contexts, while existing contexts retain their native
+functions and library ownership. Session closure or runtime destruction shuts
+down each instance exactly once, in reverse installation order; failed
+initialization also cleans partial state. Contexts remain persistent across
+document loads, including module state.
+
+Arguments/results support undefined, null, booleans, numbers, UTF-8 strings
+(including embedded NULs), and serialized JSON. Export namespaces are frozen,
+null-prototype objects; JSON constant contents are page-owned and mutable.
+The engine copies result bytes before a callback returns. There are at most
+64 modules per runtime, 256 exports per module, 64 arguments per call, 32
+nested native calls, and 1 MiB of aggregate string/JSON argument bytes and
+separately result bytes. Constant bytes have a 1-MiB aggregate per-module
+bound. JavaScript evaluation, JSON conversion and microtasks retain
+ScriptOptions limits. Native code is trusted, synchronous host code; those
+limits do not preempt native callbacks or sandbox their allocations. Callbacks
+must not reenter the same runtime or open sockets on behalf of pages; page
+networking continues through Session/NetworkClient. Callback/loader failures
+use generic errors without argument, result or host-path values.
+
+The `javascript-modules` capability reports this restricted support, or
+Unsupported when QuickJS is absent. No modules are selected by default, and
+JavaScript-disabled sessions do not initialize native bindings. See
+[Manual Chapter 12](manual/12-javascript.md) and the buildable
+[`examples/flatworm-module`](examples/flatworm-module/README.md) for the C ABI,
+ownership and loading recipe. Modules require no link-time dependency on
+ProwseTk or QuickJS.
+
+#### JSON-RPC module
+
+[`flatworm-modules/rpc`](flatworm-modules/rpc/README.md) is the first shipped
+native module. It exports JSON-RPC 2.0 request/notification builders, success/error
+envelopes, strict response validation and ID-correlated batches as `flatworm:rpc`:
+
+```javascript
+import {request, parseResponse} from 'flatworm:rpc';
+const message = request('add', [20, 22]);
+const http = await fetch('/rpc', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(message)
+});
+if (!http.ok) throw new Error('RPC HTTP failure');
+const response = parseResponse(await http.text(), message.id);
+if (response.error) throw new Error('RPC remote failure');
+document.getElementById('answer').textContent = response.result;
+```
+
+The C++ host selects `build/default/flatworm-modules/rpc/libflatworm_rpc.so`
+through `browser.modules().load_native(...)` before creating sessions. Classic
+scripts use `Flatworm.module('rpc')`. Automatic request IDs are isolated per
+runtime and persist across document loads. Protocol helpers are synchronous;
+HTTP uses the owning Session's fetch/XHR path, including cookies, redirects,
+hooks and cancellation. Malformed input and resource failures use value-free
+errors. The bounded parser rejects duplicate keys, invalid UTF-8 and
+fractional/unsafe numeric IDs. Notifications expect no reply, and batch
+correlation rejects missing, unexpected or duplicate IDs.
+
+`PROWSETK_BUILD_FLATWORM_MODULES=ON` builds shipped modules by default;
+libraries install under `${CMAKE_INSTALL_LIBDIR}/prowsetk/flatworm-modules`.
+Module selection remains explicit. The offline `flatworm_rpc_example` and
+the module README document the full exports, 128-message batch bound,
+64-level/16,384-value JSON limits and host-mediated transport recipe.
+
 ## Asynchronous Operation
 
 The current public navigation, request, script, and Lua calls are synchronous.
@@ -2125,6 +2239,8 @@ WASM does not replace the other extension mechanisms. Use each for its strengths
 - **Native plugins**: low-level engine integration, custom allocators, native
   network transports, storage backends, performance-critical operations, and
   features requiring host OS APIs.
+- **Flatworm modules**: native functions and constants extending the isolated
+  page JavaScript runtime, with per-context state behind `Flatwork-Module.h`.
 - **Lua**: browser drivers, project-specific automation, configuration, rapid
   prototyping, small extraction rules, and user workflows.
 - **WASM**: portable third-party plugins, sandboxed transformations, CPU-heavy
@@ -2170,7 +2286,7 @@ optional components depending on the build configuration.
 | `openaipp` | Optional OpenAI wire/authentication helpers for `plugins/ai-oracle`; includes cpp-httplib, MetaTk/DSLtk, and nlohmann-json headers |
 | `openssl` | Optional verified HTTPS for the POSIX socket transport (3.0+) |
 | `pugixml` | XML handling and XPath |
-| `quickjs` | Page JavaScript runtime |
+| `quickjs` | Page JavaScript runtime and backend for native Flatworm module bindings, including `flatworm:rpc` |
 | `re2` | Safe regular-expression matching |
 | `simdjson` | High-performance JSON parsing |
 | `spdlog` | Structured and asynchronous logging |
@@ -2188,6 +2304,10 @@ optional components depending on the build configuration.
 Build options disable optional dependencies when their functionality is not
 required. Dependency versions, licensing, build options, and feature mappings are
 documented with the build system.
+
+The shipped JSON-RPC module uses the C++20 standard library and the standalone
+Flatworm ABI header, with no additional production dependency. Its library and
+native protocol tests build without QuickJS; page execution requires QuickJS.
 
 `PROWSETK_BUILD_AI_ORACLE` defaults to `ON`; the target is skipped when OpenAIpp
 or its JSON headers are absent. The plugin uses OpenAIpp's header-only helpers
@@ -2390,7 +2510,7 @@ prowsetk/
 ├── README.md               This document
 ├── AGENTS.md               Instructions for implementing agents
 ├── cmake/                  Build helper modules and dependency wiring
-├── include/prowsetk/       Public C++ headers and ProwseTk-Plugin.h
+├── include/                Flatwork-Module.h and prowsetk/ public C/C++ headers
 ├── src/                    Core engine, Flatworm, and plugin implementations
 │   └── cli/                The `prowsetk` command-line interface
 ├── tests/                  CTest-conformant unit and integration suites
@@ -2398,6 +2518,7 @@ prowsetk/
 ├── wit/                    WIT interface definitions for WASM plugins
 ├── lua/                    Lua module mirrors and shared helpers (native lpdql lives in LuaRuntime)
 ├── plugins/                Native and WASM plugins
+├── flatworm-modules/       Shipped native page-runtime modules (`rpc`)
 ├── drivers/                Lua driver scripts
 ├── examples/               Example C++ and Lua applications
 ├── tools/                  Crawling, DOM watching, IR consumers and terminal tools
@@ -2425,8 +2546,16 @@ Python binding builds keep their module, package wrapper, and generated stubs
 inside each preset's binary directory. CTest imports that package. Sanitizer
 runtime discovery lives in `cmake/PythonSanitizers.cmake`; runtime preloading
 and Python-only leak suppression apply to stub generation and pytest, while
-C++ sanitizer tests retain leak checking. This prevents default and ASan builds
-from overwriting each other's Python modules in the source tree.
+C++ sanitizer tests retain their configured leak checking. Clang compiler-rt
+discovery uses the compiler's target triple. The ASan test preset accepts
+equal-sized duplicate globals from the static core linked into native plugins
+while still checking size-mismatched ODR violations. Preset-local packages prevent
+default and ASan builds from overwriting each other's Python modules in the
+source tree.
+
+Sanitized Debug builds compile QuickJS with `-O1` to keep instrumentation-induced
+native-stack growth within its existing stack bound; sanitizers and debug
+information remain enabled.
 
 Encrypted-storage tests retain production-cost key derivation and use a bounded
 300-second timeout to accommodate sanitizer instrumentation; other unit tests

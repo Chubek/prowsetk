@@ -16,6 +16,7 @@
 #include "prowsetk/url.hpp"
 #include "prowsetk/error.hpp"
 #include "core/web_platform_shim.hpp"
+#include "flatworm/module_bindings.hpp"
 
 namespace prowsetk {
 namespace {
@@ -763,12 +764,20 @@ public:
                                           promise_rejection_tracker, nullptr);
         JS_SetContextOpaque(context_.get(), this);
         install_platform();
+        modules_ = std::make_unique<flatworm::ModuleBindings>(runtime_.get(), context_.get());
     }
 
     ~QuickJavaScriptRuntime() override {
+        active_ = true;
         if (context_ != nullptr) {
             JS_SetContextOpaque(context_.get(), nullptr);
         }
+        // Saved functions, ES module exports and queued jobs must disappear
+        // before native instances shut down or their libraries are unloaded.
+        if (modules_ != nullptr) modules_->release_values();
+        context_.reset();
+        runtime_.reset();
+        modules_.reset();
     }
 
     void forward_console(ConsoleMessage message) {
@@ -803,14 +812,34 @@ public:
 
     ScriptResult evaluate(std::string_view script,
                           const ScriptOptions& options) override {
+        return evaluate_source(script, options, false);
+    }
+
+    ScriptResult evaluate_module(std::string_view script,
+                                 const ScriptOptions& options) override {
+        return evaluate_source(script, options, true);
+    }
+
+    void install_module(std::shared_ptr<const FlatwormModule> module) override {
+        if (active_) throw Error(ErrorCode::JavaScriptError, "JavaScript runtime is already executing");
+        ExecutionScope scope(this, runtime_.get(), active_, ScriptOptions{});
+        modules_->install(std::move(module));
+    }
+
+    std::vector<FlatwormModuleInfo> modules() const override { return modules_->modules(); }
+
+    ScriptResult evaluate_source(std::string_view script,
+                                 const ScriptOptions& options, bool module) {
         if (active_) return {false, {}, "JavaScript runtime is already executing"};
         if (const auto error = validate_options(options); !error.empty()) {
             return {false, {}, error};
         }
         const std::string source(script);
+        const std::string filename = module
+            ? "<flatworm-module-" + std::to_string(++module_counter_) + ">" : "<prowsetk>";
         ExecutionScope scope(this, runtime_.get(), active_, options);
         JSValue value = JS_Eval(context_.get(), source.c_str(), source.size(),
-                                "<prowsetk>", JS_EVAL_TYPE_GLOBAL);
+                                filename.c_str(), module ? JS_EVAL_TYPE_MODULE : JS_EVAL_TYPE_GLOBAL);
         ScriptResult result;
         if (JS_IsException(value)) {
             result.error = take_exception(context_.get());
@@ -823,9 +852,15 @@ public:
                 result.ok = true;
             }
         }
+        const auto checkpoint = drain_microtasks(options, scope);
+        // QuickJS-NG evaluates a module to a promise. Surface a top-level
+        // rejection as an evaluation error once the bounded checkpoint drains.
+        if (module && result.ok && JS_PromiseState(context_.get(), value) == JS_PROMISE_REJECTED) {
+            JS_Throw(context_.get(), JS_PromiseResult(context_.get(), value));
+            result = {false, {}, take_exception(context_.get())};
+        }
         JS_FreeValue(context_.get(), value);
         if (scope.expired()) return {false, {}, "JavaScript execution deadline exceeded"};
-        const auto checkpoint = drain_microtasks(options, scope);
         if (!checkpoint.ok && result.ok) return checkpoint;
         return result;
     }
@@ -877,6 +912,8 @@ public:
         CapabilitySet capabilities;
         capabilities.set("javascript", ImplementationClass::FullyImplemented,
                          "QuickJS page scripting runtime");
+        capabilities.set("javascript-modules", ImplementationClass::ImplementedWithRestrictions,
+                         "host-installed native Flatworm bindings; Flatworm.module and flatworm: ES imports; no filesystem or network import loader");
         capabilities.set("console", ImplementationClass::PartiallyImplemented,
                          "log/info/warn/error/debug; space-joined string conversion, no format substitutions");
         capabilities.set("promises", ImplementationClass::ImplementedWithRestrictions,
@@ -964,10 +1001,12 @@ private:
 
     RuntimePtr runtime_;
     ContextPtr context_;
+    std::unique_ptr<flatworm::ModuleBindings> modules_;
     ConsoleHandler console_handler_;
     DocumentScriptHost* document_host_ = nullptr;
     bool active_ = false;
     ExecutionScope* scope_ = nullptr;
+    std::size_t module_counter_ = 0;
 
     friend class ExecutionScope;
 };

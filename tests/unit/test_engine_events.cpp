@@ -227,6 +227,73 @@ TEST(SessionRequest, ConvertsPostToGetOn303) {
     EXPECT_EQ(response.body, "GET:");
 }
 
+TEST(SessionRequest, BeforeRequestCancellationPreventsTransportAndResponseEvents) {
+    Browser browser;
+    auto client = std::make_unique<MemoryNetworkClient>();
+    const auto* network = client.get();
+    browser.set_network_client(std::move(client));
+    auto session = browser.create_session();
+    int responses = 0;
+    browser.events().subscribe(EventType::BeforeRequest, [&](Event& event) {
+        EXPECT_EQ(event.session_id, session->id());
+        event.cancelled = true;
+    });
+    browser.events().subscribe(EventType::AfterResponse, [&](Event&) { ++responses; });
+    HttpRequest request;
+    request.method = "POST";
+    request.url = "https://example.test/rpc";
+    request.body = "{}";
+    try {
+        session->request(std::move(request));
+        FAIL() << "expected request cancellation";
+    } catch (const Error& error) {
+        EXPECT_EQ(error.code(), ErrorCode::SecurityViolation);
+    }
+    EXPECT_TRUE(network->requests().empty());
+    EXPECT_EQ(responses, 0);
+}
+
+TEST(SessionRequest, BeforeRedirectCancellationReturnsTheOriginalResponseWithoutFollowing) {
+    Browser browser;
+    auto client = std::make_unique<MemoryNetworkClient>();
+    const auto* network = client.get();
+    HttpResponse redirect;
+    redirect.status = 307;
+    redirect.body = "redirect";
+    redirect.headers.emplace_back("Location", "/target");
+    client->set_response("https://example.test/rpc", std::move(redirect));
+    browser.set_network_client(std::move(client));
+    auto session = browser.create_session();
+    browser.events().subscribe(EventType::BeforeRedirect, [&](Event& event) {
+        EXPECT_EQ(event.session_id, session->id());
+        event.cancelled = true;
+    });
+    HttpRequest request;
+    request.url = "https://example.test/rpc";
+    const auto response = session->request(std::move(request));
+    EXPECT_EQ(response.status, 307);
+    EXPECT_EQ(response.body, "redirect");
+    EXPECT_EQ(response.final_url, "https://example.test/rpc");
+    EXPECT_EQ(network->requests().size(), 1u);
+}
+
+TEST(EngineEvents, BeforeNavigationCancellationPreservesTheInstalledDocumentAndUrl) {
+    Browser browser;
+    auto client = std::make_unique<MemoryNetworkClient>();
+    const auto* network = client.get();
+    browser.set_network_client(std::move(client));
+    auto session = browser.create_session();
+    session->load_html("<p>retained</p>", "https://example.test/current");
+    browser.events().subscribe(EventType::BeforeNavigation, [&](Event& event) {
+        EXPECT_EQ(event.session_id, session->id());
+        event.cancelled = true;
+    });
+    session->navigate("https://example.test/next");
+    EXPECT_EQ(session->current_url(), "https://example.test/current");
+    EXPECT_EQ(session->document()->query_selector("p")->text(), "retained");
+    EXPECT_TRUE(network->requests().empty());
+}
+
 TEST(SessionScripts, ExecutesExternalScripts) {
     BrowserConfig config;
     config.javascript = true;

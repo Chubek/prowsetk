@@ -26,6 +26,7 @@ function(prowsetk_gtest name prefix labels)
 endfunction()
 
 add_subdirectory(plugins)
+add_subdirectory(modules)
 add_subdirectory(unit)
 add_subdirectory(integration)
 

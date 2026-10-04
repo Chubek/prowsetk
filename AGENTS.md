@@ -20,13 +20,15 @@ full browser compatibility or pixel-perfect rendering.
 
 Maintain four execution layers with hard boundaries:
 
-- **C++** — host application, engine core, native plugins (`ProwseTk-Plugin.h`).
+- **C++** — host application, engine core, native plugins (`ProwseTk-Plugin.h`)
+  and native page-runtime modules (`Flatwork-Module.h`).
 - **Lua** — session control (`lprowse`) and extensions (`lprowsext`).
 - **WASM** — portable, sandboxed plugins behind the `WasmRuntime` abstraction.
 - **JavaScript** — page scripting only, executed by QuickJS inside Flatworm.
 
-Do not blur these layers. JavaScript is not an extension mechanism. Lua must not
-receive raw Wasmtime handles. The WASM runtime must stay behind `WasmRuntime`.
+Do not blur these layers. Page JavaScript does not implement browser extensions;
+native Flatworm modules extend its runtime from C/C++. Lua must not receive raw
+Wasmtime handles. The WASM runtime must stay behind `WasmRuntime`.
 
 ### Driver scripts
 
@@ -51,6 +53,9 @@ in `tests/integration/test_drivers.cpp` and a `prowsetk run` CLI test in
   `Storage`, and `EventDispatcher`. Keep those responsibilities separate.
 - The native plugin ABI is C-compatible and versioned by
   `PROWSETK_PLUGIN_ABI_VERSION`. Do not leak C++ types across that boundary.
+- The independent native Flatworm module ABI is C-compatible and versioned by
+  `FLATWORM_MODULE_ABI_VERSION` in `include/Flatwork-Module.h`. Do not expose
+  QuickJS handles, DOM pointers or Lua state across it.
 - WASM plugin contracts are defined in WIT. Do not design new plugins around raw
   C ABI functions such as `plugin->on_request(char*, char*)`.
 - WASI is **off** by default. Network access is host-mediated through
@@ -76,6 +81,7 @@ prowsetk/
 ├── wit/
 ├── lua/
 ├── plugins/
+├── flatworm-modules/
 ├── drivers/
 ├── examples/
 ├── resources/
@@ -458,6 +464,49 @@ Rules:
 - The plugin ABI and the Lua layer are unaffected: this is page scripting
   only (README "JavaScript Execution").
 
+### Native Flatworm page-runtime modules
+
+Keep definition validation, shared-library ownership and host registration in
+`src/flatworm/module.cpp`; QuickJS lowering and the installed-only `flatworm:`
+import loader belong in `src/flatworm/module_bindings.cpp`. The public C++
+loading/registry interface is `flatworm_module.hpp`, and `JavaScriptRuntime`
+owns installation and ECMAScript module evaluation. Browser module registrations
+are inherited by future runtimes/sessions. Capability queries must not create
+native instances. Modules are explicit, trusted native host code with
+synchronous callbacks; JavaScript time/memory limits cannot sandbox them.
+
+Preserve frozen export namespaces, typed scalar/length-delimited string/JSON
+transfers, count/byte/call-depth bounds, generic value-free callback errors,
+atomic failed installation, cleanup after failed initialization, reverse-order
+shutdown and library retention through context/job destruction. Module state
+persists with the session's JavaScript context across document loads and is
+released on session closure. Native callbacks must not reenter the same runtime
+or open sockets for pages; networking remains host-mediated. Static module
+script elements support native imports only; do not claim general remote module
+graphs or dynamic DOM-injected module scripts. QuickJS-disabled runtimes report
+Unsupported and JavaScript-disabled sessions create no native instances.
+
+Keep C ABI/C++ entry-linkage shared-library fixtures and labeled, timeout-bounded
+coverage under `tests/modules`, `tests/unit/test_flatworm_modules.cpp` and
+`tests/integration/test_flatworm_modules.cpp`, including ABI validation,
+ownership, native exceptions, transfer bounds, import policy, lifecycle and
+cross-layer behavior. The buildable C module and embedder example lives in
+`examples/flatworm-module`; modules need only the ABI header to compile.
+
+The first shipped native module is `flatworm-modules/rpc` (`flatworm:rpc`),
+built with `PROWSETK_BUILD_FLATWORM_MODULES=ON`. Keep JSON syntax, encoding,
+protocol validation/correlation and ABI adaptation separate. It uses only the
+C++20 standard library and the module ABI; networking remains page fetch/XHR
+through the owning Session. Preserve per-runtime automatic IDs, notification
+no-reply rules, type-sensitive ID correlation, exact safe-integer validation
+before wire-number rounding, duplicate-key rejection, UTF-8 validation and
+bounded JSON/batches/output. Payloads remain caller data; errors/logs never
+include their values, including getter/toJSON conversion failures. Session
+events must propagate cancellation back to the request/navigation path.
+Keep hermetic, labeled, timeout-bounded unit/integration coverage in
+`tests/unit/test_rpc_module.cpp` and `tests/integration/test_rpc_module.cpp`.
+See the module README for its exports and supported protocol restrictions.
+
 ---
 
 ## Synthetic Interaction Driver & SPA Event Cascades
@@ -760,8 +809,16 @@ Python binding builds keep their module, package wrapper, and generated stubs
 inside each preset's binary directory. CTest imports that package. Sanitizer
 runtime discovery lives in `cmake/PythonSanitizers.cmake`; runtime preloading
 and Python-only leak suppression apply to stub generation and pytest, while
-C++ sanitizer tests retain leak checking. This prevents default and ASan builds
-from overwriting each other's Python modules in the source tree.
+C++ sanitizer tests retain their configured leak checking. Clang compiler-rt
+discovery uses the compiler's target triple. The ASan test preset accepts
+equal-sized duplicate globals from the static core linked into native plugins
+while still checking size-mismatched ODR violations. Preset-local packages prevent
+default and ASan builds from overwriting each other's Python modules in the
+source tree.
+
+Sanitized Debug builds compile QuickJS with `-O1` to keep instrumentation-induced
+native-stack growth within its existing stack bound; sanitizers and debug
+information remain enabled.
 
 Encrypted-storage tests retain production-cost key derivation and use a bounded
 300-second timeout to accommodate sanitizer instrumentation; other unit tests

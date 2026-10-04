@@ -26,7 +26,7 @@ available libraries and build configuration.
 
 | Layer | Responsibility | Typical interface |
 |---|---|---|
-| C++ | Host application, engine, native plugins | `Browser`, `Session`, plugin registry |
+| C++ | Host application, engine, native plugins, native page modules | `Browser`, `Session`, plugin registry, module registry |
 | Lua | Driver orchestration and extensions | `lprowse`, `lprowsext`, tool modules |
 | JavaScript | Scripts belonging to the loaded page | QuickJS web-platform shim |
 | WASM | Portable plugin contract behind a runtime abstraction | `WasmRuntime`, WIT |
@@ -35,6 +35,13 @@ Lua objects are managed host handles. Page JavaScript receives opaque element
 handles through the web-platform shim. Native plugins cross a versioned C ABI.
 WASM contracts are defined in WIT; the current runtime implementation reports
 disabled support, including with the WASM build preset.
+
+Page-runtime modules are a separate extension point from plugins. A plugin
+registers hooks with the browser and may see its events; a native module
+exports functions and constants to page scripts through its own C ABI
+(`Flatwork-Module.h`) and is loaded explicitly by the C++ host. Modules never
+receive engine, DOM, or network handles: page networking stays in the owning
+Session. `flatworm:rpc` is the shipped example (Chapter 12).
 
 ## Terms used throughout the manual
 
@@ -46,6 +53,9 @@ disabled support, including with the WASM build preset.
 - **Extension:** Lua code adding extraction or automation behavior to a host.
 - **Plugin:** a native, Lua, or WASM registration; its implementation and loader
   determine which hooks actually run.
+- **Native module:** a Flatworm page-runtime library exposing JavaScript
+  functions and constants through the module ABI. Distinct from a plugin: the
+  host selects it, and it runs inside the page's script context.
 - **IR:** an intermediate page representation. The canonical IR is the
   ProwseEvent start/attribute/text/end stream.
 - **Projection:** selected PDQL fields serialized as result rows.
@@ -79,3 +89,13 @@ interfaces expose the same engine to other clients.
 Reference: repository `README.md`; public headers under `include/prowsetk/`.
 
 **Next:** [Build and installation](02-build-and-installation.md).
+
+## Implementation progression
+
+The manual index records the order in which the engine's surfaces arrived, from
+the canonical page IR through the queryable DOM, the page web platform, native
+modules, and the first shipped module. Each stage stayed downstream of the
+boundaries already in place, was selected explicitly rather than by default, and
+landed with labeled CTest coverage. See
+[Implementation progression](README.md#implementation-progression) in the index
+for the full table.

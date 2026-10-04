@@ -108,6 +108,24 @@ add_dependencies(prowsetk_unit_plugins prowsetk_test_plugin)
 prowsetk_gtest(prowsetk_unit_javascript "prowsetk.unit.javascript."
     "unit;javascript" test_javascript_runtime.cpp)
 
+prowsetk_gtest(prowsetk_unit_flatworm_modules "prowsetk.unit.flatworm-module."
+    "unit;javascript;core" test_flatworm_modules.cpp)
+target_compile_definitions(prowsetk_unit_flatworm_modules PRIVATE
+    TEST_MODULE_PATH="$<TARGET_FILE:flatworm_test_module>"
+    TEST_BAD_MODULE_PATH="$<TARGET_FILE:flatworm_test_bad_module>"
+    TEST_NO_ENTRY_PATH="$<TARGET_FILE:flatworm_test_no_entry>"
+    TEST_THROWING_ENTRY_PATH="$<TARGET_FILE:flatworm_test_throwing_entry>")
+add_dependencies(prowsetk_unit_flatworm_modules
+    flatworm_test_module flatworm_test_bad_module flatworm_test_no_entry flatworm_test_throwing_entry)
+
+if(TARGET flatworm_module_rpc)
+    prowsetk_gtest(prowsetk_unit_rpc "prowsetk.unit.rpc."
+        "unit;javascript;rpc" test_rpc_module.cpp)
+    target_include_directories(prowsetk_unit_rpc PRIVATE
+        "${PROJECT_SOURCE_DIR}/flatworm-modules/rpc/src")
+    target_link_libraries(prowsetk_unit_rpc PRIVATE flatworm_rpc_impl)
+endif()
+
 prowsetk_gtest(prowsetk_unit_flatworm_host "prowsetk.unit.script_host."
     "unit;document;javascript" test_flatworm_host.cpp)
 

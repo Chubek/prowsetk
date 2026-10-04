@@ -20,6 +20,21 @@ prowsetk_gtest(prowsetk_integration_script_platform
     "prowsetk.integration.script_platform."
     "integration;javascript;document" test_script_platform.cpp)
 
+prowsetk_gtest(prowsetk_integration_flatworm_modules
+    "prowsetk.integration.flatworm-module."
+    "integration;javascript;document;lua" test_flatworm_modules.cpp)
+target_compile_definitions(prowsetk_integration_flatworm_modules PRIVATE
+    TEST_MODULE_PATH="$<TARGET_FILE:flatworm_test_module>")
+add_dependencies(prowsetk_integration_flatworm_modules flatworm_test_module)
+
+if(TARGET flatworm_module_rpc)
+    prowsetk_gtest(prowsetk_integration_rpc "prowsetk.integration.rpc."
+        "integration;javascript;document;lua;rpc" test_rpc_module.cpp)
+    target_compile_definitions(prowsetk_integration_rpc PRIVATE
+        RPC_MODULE_PATH="$<TARGET_FILE:flatworm_module_rpc>")
+    add_dependencies(prowsetk_integration_rpc flatworm_module_rpc)
+endif()
+
 prowsetk_gtest(prowsetk_integration_scrape2postman "prowsetk.integration.scrape2postman."
     "integration;plugin;endpoint-extraction;lua" test_scrape2postman.cpp)
 target_link_libraries(prowsetk_integration_scrape2postman PRIVATE

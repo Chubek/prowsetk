@@ -190,6 +190,13 @@ bool looks_like_id_segment(const std::string& seg) {
 // --- Minimal JSON parser (objects, arrays, scalars) ------------------------
 
 struct JsonValue {
+    JsonValue();
+    ~JsonValue();
+    JsonValue(const JsonValue&);
+    JsonValue(JsonValue&&) noexcept;
+    JsonValue& operator=(const JsonValue&);
+    JsonValue& operator=(JsonValue&&) noexcept;
+
     enum class Kind { Null, Bool, Integer, Number, String, Array, Object };
     Kind kind = Kind::Null;
     bool boolean = false;
@@ -197,6 +204,14 @@ struct JsonValue {
     std::vector<JsonValue> array;
     std::vector<std::pair<std::string, JsonValue>> object;
 };
+
+// Define recursive container operations after the value type is complete.
+JsonValue::JsonValue() = default;
+JsonValue::~JsonValue() = default;
+JsonValue::JsonValue(const JsonValue&) = default;
+JsonValue::JsonValue(JsonValue&&) noexcept = default;
+JsonValue& JsonValue::operator=(const JsonValue&) = default;
+JsonValue& JsonValue::operator=(JsonValue&&) noexcept = default;
 
 struct JsonParser {
     const char* cur;

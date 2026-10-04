@@ -2,6 +2,10 @@
 
 [Manual index](README.md)
 
+Flatworm's native page-JavaScript bindings use the independent
+`Flatwork-Module.h` ABI and module registry, covered in
+[Chapter 12](12-javascript.md#native-flatworm-modules).
+
 ## Registry lifecycle
 
 PluginRegistry owns loaded libraries and descriptors. Loading, initializing,

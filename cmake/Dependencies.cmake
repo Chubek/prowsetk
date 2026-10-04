@@ -230,6 +230,7 @@ if(PROWSETK_ENABLE_JAVASCRIPT)
                          "${CMAKE_BINARY_DIR}/third_party/quickjs"
                          EXCLUDE_FROM_ALL)
         set_target_properties(qjs PROPERTIES POSITION_INDEPENDENT_CODE ON)
+        prowsetk_optimize_sanitized_dependency(qjs)
         set(PROWSETK_HAVE_QUICKJS ON CACHE INTERNAL
             "QuickJS runtime available")
         add_library(ProwseTk::quickjs ALIAS qjs)

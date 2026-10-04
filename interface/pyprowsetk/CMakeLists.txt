@@ -66,13 +66,24 @@ prowsetk_python_sanitizers(pyprowsetk_core PROWSETK_PYTHON_SANITIZER_ENV)
 
 # Stub generation (PEP 561) - best-effort
 if(Python_Interpreter_FOUND)
-    nanobind_add_stub(pyprowsetk_stub
-        MODULE pyprowsetk._core
-        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/pyprowsetk/_core.pyi"
-        PYTHON_PATH "${CMAKE_CURRENT_BINARY_DIR}"
-        DEPENDS pyprowsetk_core
-        VERBOSE
-    )
+    # Use the same compiler-specific preload environment as pytest instead of
+    # having nanobind independently rediscover the sanitizer runtime.
+    set(PROWSETK_PYTHON_STUB "${CMAKE_CURRENT_BINARY_DIR}/pyprowsetk/_core.pyi")
+    set(PROWSETK_PYTHON_STUBGEN "${NB_DIR}/src/stubgen.py")
+    set(PROWSETK_PYTHON_STUB_EXECUTABLE "${Python_EXECUTABLE}")
+    if(PROWSETK_PYTHON_SANITIZER_ENV)
+        nanobind_resolve_python_path()
+        set(PROWSETK_PYTHON_STUB_EXECUTABLE "${NB_PY_PATH}")
+    endif()
+    add_custom_command(OUTPUT "${PROWSETK_PYTHON_STUB}"
+        COMMAND "${CMAKE_COMMAND}" -E env ${PROWSETK_PYTHON_SANITIZER_ENV}
+            "${PROWSETK_PYTHON_STUB_EXECUTABLE}" "${PROWSETK_PYTHON_STUBGEN}"
+            -i "${CMAKE_CURRENT_BINARY_DIR}" -m pyprowsetk._core
+            -o "${PROWSETK_PYTHON_STUB}"
+        DEPENDS pyprowsetk_core "${PROWSETK_PYTHON_STUBGEN}"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        VERBATIM)
+    add_custom_target(pyprowsetk_stub ALL DEPENDS "${PROWSETK_PYTHON_STUB}")
 endif()
 
 # Register pytest suite with CTest when pytest is available

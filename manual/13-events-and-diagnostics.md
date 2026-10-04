@@ -18,9 +18,16 @@ const auto subscription = browser.events().subscribe(
 browser.events().unsubscribe(subscription);
 ```
 
-Cancellation is honored at supported pre-operation stages. Native plugin
-request hooks provide explicit replacement/rejection contracts. Do not assume
-that an arbitrary event-field edit rewrites a request.
+Cancellation is honored at the pre-operation stages a session dispatches:
+`before_navigation`, `before_request`, and `before_redirect`. A cancelled
+navigation returns without fetching or replacing the installed document, a
+cancelled request throws `SecurityViolation` before transport and without
+emitting `after_response`, and a cancelled redirect returns the response that
+carried the `Location` header without following it. Cancellation flags set on
+browser-scope events, such as a `Browser::handle_unsupported_api` warning, have
+no operation to cancel. Native plugin request hooks provide explicit
+replacement/rejection contracts. Do not assume that an arbitrary event-field
+edit rewrites a request.
 
 Lua subscriptions receive event-table snapshots:
 

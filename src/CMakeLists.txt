@@ -41,6 +41,8 @@ set(PROWSETK_CORE_SOURCES
     flatworm/css_selector.cpp
     flatworm/dom.cpp
     flatworm/xpath.cpp
+    flatworm/module.cpp
+    flatworm/module_bindings.cpp
     endpoint/endpoint_extraction.cpp)
 
 prowsetk_add_library(prowsetk_core ${PROWSETK_CORE_SOURCES})

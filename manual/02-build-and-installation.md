@@ -51,6 +51,7 @@ For example, use `cmake --preset asan`, `cmake --build --preset asan`, and
 | `PROWSETK_BUILD_TESTS` | `ON` | Register and build CTest suites |
 | `PROWSETK_BUILD_EXAMPLES` | `ON` | Build C++/Lua examples |
 | `PROWSETK_BUILD_CLI` | `ON` | Build `prowsetk` |
+| `PROWSETK_BUILD_FLATWORM_MODULES` | `ON` | Build shipped native page-runtime modules (`rpc`) |
 | `PROWSETK_ENABLE_JAVASCRIPT` | `ON` | Use QuickJS when available |
 | `PROWSETK_ENABLE_WASM` | `OFF` | Select optional WASM integration |
 | `PROWSETK_WASM_RUNTIME` | `wasmtime` | Runtime selection behind `WasmRuntime` |
@@ -102,14 +103,25 @@ plugin native libraries install under `lib/prowsetk/plugins`, their callable Lua
 modules under `lib/prowsetk/lua`, and their headers under
 `include/prowsetk/plugins`; add the module directory to `LUA_CPATH` before
 `require`-ing it, as described in [Chapter 21](21-native-and-wasm-plugins.md).
+Shipped Flatworm module libraries install under
+`${CMAKE_INSTALL_LIBDIR}/prowsetk/flatworm-modules`; the C++ host selects them
+explicitly as described in [Chapter 12](12-javascript.md).
 
 ## Tests and documentation
 
-`ctest --preset default -R pdql --output-on-failure` selects a component.
-CTest cases have labels and finite timeouts; the encrypted-storage tests have
-a 300-second timeout for production-cost key derivation under instrumentation.
-Python modules and stubs are isolated per preset. CTest configures sanitizer
-preloading for Python.
+```sh
+ctest --preset default -R pdql --output-on-failure
+ctest --preset default -R 'prowsetk\.(unit|integration)\.rpc\.' --output-on-failure
+build/default/flatworm-modules/rpc/flatworm_rpc_example \
+  build/default/flatworm-modules/rpc/libflatworm_rpc.so
+```
+
+The first command selects a component, the second selects the shipped JSON-RPC
+module suites, and the third runs that module's offline example, which prints
+`42`. CTest cases have labels and finite timeouts; the encrypted-storage tests
+have a 300-second timeout for production-cost key derivation under
+instrumentation. Python modules and stubs are isolated per preset. CTest
+configures sanitizer preloading for Python.
 
 Build this manual with `bash scripts/build-docs.sh`. Pandoc produces combined
 HTML and LaTeX source under `build/docs`; a TeX engine is a separate requirement

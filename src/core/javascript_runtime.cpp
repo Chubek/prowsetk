@@ -32,6 +32,8 @@ public:
                          "no JavaScript engine linked into this build");
         capabilities.set("console", ImplementationClass::Unsupported);
         capabilities.set("fetch", ImplementationClass::Unsupported);
+        capabilities.set("javascript-modules", ImplementationClass::Unsupported,
+                         "native page-runtime modules require QuickJS");
         return capabilities;
     }
 };
@@ -207,6 +209,16 @@ bool DocumentScriptHost::insert_before(ElementHandle, ElementHandle,
 bool DocumentScriptHost::detach_element(ElementHandle) { return false; }
 
 // ---- Runtime base ----------------------------------------------------------
+
+ScriptResult JavaScriptRuntime::evaluate_module(std::string_view, const ScriptOptions&) {
+    return {false, {}, "JavaScript modules are not available in this runtime"};
+}
+
+void JavaScriptRuntime::install_module(std::shared_ptr<const FlatwormModule>) {
+    throw Error(ErrorCode::Unsupported, "Flatworm modules are not available in this runtime");
+}
+
+std::vector<FlatwormModuleInfo> JavaScriptRuntime::modules() const { return {}; }
 
 ScriptResult JavaScriptRuntime::run_microtasks(const ScriptOptions&) {
     return {false, {}, "JavaScript microtasks are not available in this runtime"};

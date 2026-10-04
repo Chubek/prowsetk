@@ -18,6 +18,7 @@ include(Dependencies)
 option(PROWSETK_BUILD_TESTS    "Build the test suite"                    ON)
 option(PROWSETK_BUILD_EXAMPLES "Build the example programs"              ON)
 option(PROWSETK_BUILD_CLI      "Build the prowsetk command-line interface" ON)
+option(PROWSETK_BUILD_FLATWORM_MODULES "Build the shipped native Flatworm modules" ON)
 option(PROWSETK_ENABLE_WASM    "Enable the WebAssembly plugin runtime"   OFF)
 set(PROWSETK_WASM_RUNTIME "wasmtime" CACHE STRING "WASM runtime backend")
 option(PROWSETK_ENABLE_WASI    "Enable unrestricted WASI capabilities"   OFF)
@@ -33,6 +34,10 @@ if(PROWSETK_BUILD_TESTS)
 endif()
 
 add_subdirectory(src)
+
+if(PROWSETK_BUILD_FLATWORM_MODULES)
+    add_subdirectory(flatworm-modules)
+endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/CMakeLists.txt")
     add_subdirectory(tools)

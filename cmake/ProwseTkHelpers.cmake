@@ -23,6 +23,23 @@ function(prowsetk_add_executable name)
     prowsetk_set_warnings(${name})
 endfunction()
 
+# Native Flatworm modules depend only on their C ABI, never on QuickJS/core.
+function(prowsetk_add_flatworm_module name)
+    add_library(${name} MODULE ${ARGN})
+    target_include_directories(${name} PRIVATE "${PROJECT_SOURCE_DIR}/include")
+    prowsetk_set_warnings(${name})
+endfunction()
+
+# Unoptimized, instrumented interpreter frames can exhaust their native-stack
+# budget during ordinary callbacks. Keep sanitizers and debug info enabled.
+function(prowsetk_optimize_sanitized_dependency target)
+    get_target_property(options ${target} COMPILE_OPTIONS)
+    if(CMAKE_C_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$"
+            AND "${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_DEBUG};${options}" MATCHES "-fsanitize=")
+        target_compile_options(${target} PRIVATE "$<$<CONFIG:Debug>:-O1>")
+    endif()
+endfunction()
+
 # prowsetk_add_test(<name> <sources...>)
 # Creates a test executable and registers it with CTest. Callers add LABELS,
 # TIMEOUT, and library links afterwards.
