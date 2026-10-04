@@ -332,7 +332,7 @@ TEST(OpencodeBridgeV2, PromptWaitsForCompletedAssistant) {
             EXPECT_NE(request.body.find("clean"), std::string::npos);
             return json_response(R"({"data":{"id":"msg_9","type":"user"}})");
         }
-        EXPECT_EQ(request.url, "http://127.0.0.1:4096/api/session/s1/message");
+        EXPECT_EQ(request.url, "http://127.0.0.1:4096/api/session/s1/message?order=desc&limit=128");
         if (calls == 1) return json_response(R"({"data":[]})");
         if (calls == 3) {
             return json_response(R"({"data":[

@@ -58,7 +58,11 @@ Real OpenCode v2 servers mount the API under `/api` (`POST /api/session`,
 speak those routes: `prompt` then polls the message list until a new
 completed assistant message arrives (bounded by `prompt_wait_ms` and the
 request budget), and `tools` is rejected since the v2 prompt route takes text
-only. `scripts/run-scrape-booking.sh` exercises exactly this path. Plain HTTP is loopback-only unless `allow_remote_http` is set; HTTPS is unrestricted.
+only. `scripts/run-scrape-booking.sh` uses this path through the marionette
+controller. Decision-only C++ callers use `create_session(true)` to install a
+V2 deny-all tool permission policy; ordinary session creation retains its
+default behavior. Poll bounded newest messages and reject assistant errors.
+Plain HTTP is loopback-only unless `allow_remote_http` is set; HTTPS is unrestricted.
 
 ---
 
@@ -111,7 +115,7 @@ plugins/opencode-bridge/
 │   └── test_lua_api.cpp    # Lua integration tests
 └── README.md               # Configuration and usage instructions
 
-`OpenCodeClient::prompt_message` is the additive documented text-parts protocol
-used by opencode-marionette. Keep it distinct from legacy `prompt`/`prompt_v2`,
+`OpenCodeClient::prompt_message` is the additive synchronous text-parts protocol
+available to opencode-marionette clients with an empty API prefix. Keep it distinct from `prompt`/`prompt_v2`,
 retain transport budgets/redirection/authentication policy, reject assistant
 errors, and ignore reasoning parts when extracting the assistant text.

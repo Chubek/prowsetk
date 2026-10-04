@@ -153,5 +153,11 @@ accumulates through scrape-endpoints and schema-grabber, exporting heuristic
 OpenAPI/Postman schemas with incomplete coverage metadata. The ABI-v2 facade
 loads without network traffic and does not automatically drive pages. See the
 [plugin guide](../plugins/opencode-marionette/README.md) for configuration and limits.
+The runner defaults to OpenCode V2 `/api` prompt/message polling with tools
+denied for its decision session. `scripts/run-scrape-booking.sh` supplies a
+trusted Booking policy and prepares the authenticated session with the existing
+driver before controlling it; both exports contain schema enrichment.
+Offline HTML uses an in-memory page transport and zero GET probes, while
+OpenCode remains a separate explicit connection.
 
 **Next:** [Intermediate representations](22-intermediate-representations.md).

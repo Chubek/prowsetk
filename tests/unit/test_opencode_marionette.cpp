@@ -65,3 +65,25 @@ TEST(MarionetteDiscovery, AllPathsCandidateOptionPreservesDefaultAndDropsAssets)
 TEST(MarionetteDecisions, LiteralControlBytesFailStrictJson) {
     EXPECT_THROW(m::parse_decisions("{\"version\":1,\"goal\":\"a\nb\",\"actions\":[]}"), prowsetk::Error);
 }
+
+TEST(MarionetteOpenCode, V2DecisionSessionDeniesToolsAndRejectsAssistantErrors) {
+    prowsetk::MemoryNetworkClient network;
+    unsigned turn = 0;
+    network.set_handler([&](const auto& request) {
+        if (request.url.ends_with("/api/session")) {
+            EXPECT_EQ(request.body, R"({"permissions":[{"action":"*","resource":"*","effect":"deny"}]})");
+            return prowsetk::HttpResponse{200, {}, R"({"data":{"id":"ses_decisions"}})", {}, {}};
+        }
+        if (request.method == "POST") return prowsetk::HttpResponse{200, {}, "{}", {}, {}};
+        return prowsetk::HttpResponse{200, {}, turn++ ? R"({"data":[{"id":"msg_failure","type":"assistant","time":{"completed":2},"finish":"error","error":{"message":"private-error"},"content":[{"type":"text","text":"{\"action\":\"stop\"}"}]}]})" : R"({"data":[]})", {}, {}};
+    });
+    b::BridgeConfig config;
+    config.api_prefix = "/api";
+    b::OpenCodeClient client(network, config);
+    EXPECT_EQ(client.create_session(true), "ses_decisions");
+    try { client.prompt("ses_decisions", "choose"); FAIL(); }
+    catch (const prowsetk::Error& error) {
+        EXPECT_EQ(error.code(), prowsetk::ErrorCode::PluginError);
+        EXPECT_EQ(std::string(error.what()).find("private-error"), std::string::npos);
+    }
+}

@@ -119,6 +119,7 @@ struct AssistantMessage {
     // Concatenated "text" content parts (reasoning parts excluded).
     std::string text;
     bool completed = false;
+    bool failed = false;
     // Idle outcome markers, e.g. {"type":"idle","outcome":"succeeded"}.
     bool idle = false;
     bool succeeded = false;
@@ -139,8 +140,9 @@ public:
     const BridgeConfig& config() const noexcept { return config_; }
     std::size_t request_count() const noexcept { return request_count_; }
 
-    // POST /session -> agent session id.
-    std::string create_session();
+    // POST /session -> agent session id. Under /api, disable_tools installs
+    // a deny-all session permission policy for decision-only agent calls.
+    std::string create_session(bool disable_tools = false);
     // Documented opencode serve protocol: text parts in, assistant text parts
     // out. Separate from the legacy text payload and /api polling protocol.
     std::string prompt_message(const std::string& session_id, std::string_view text);

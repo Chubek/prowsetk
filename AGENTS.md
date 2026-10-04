@@ -608,6 +608,13 @@ browser handoff, the XPath success beacon
 `xpath=//h1[contains(normalize-space(.), 'Joe Litty Rooms')]`, and `--no-xcors`
 for booking.com TLD-only endpoint output. Keep these launcher defaults
 overridable and forward explicit boolean values to the driver CLI.
+The launcher invokes `ptk-opencode-marionette`, which prepares login through
+the driver's `prepare_session(args)` on a host-bound managed session and then
+controls that same session. Keep the trusted Booking action policy in
+`examples/booking-dotcom-admin-scrape/marionette-decisions.json`, preserve
+bounded action/request/GET-probe overrides and both schema-enriched exports,
+and verify `x-prowsetk-marionette.used` rather than cleanup metadata. The
+launcher owns the OpenCode server lifecycle and never prints its password.
 Launch the Booking assistant browser independently of the scraper's terminal;
 show the Enter prompt while the browser is still open. EOF cancels the handoff,
 and resuming still requires fresh session data and positive DOM confirmation.
@@ -1252,3 +1259,11 @@ probe budgets and guaranteed hook cleanup. Accumulate discovery across document
 changes, preserve observed schemas, redact exports and label coverage incomplete.
 Do not probe non-GET endpoints or claim unobserved body schemas are authoritative.
 Keep hermetic tests under tests/unit and tests/integration with finite CTest timeouts.
+The CLI defaults to V2 `/api` prompt/message polling with a deny-all agent
+tool permission policy. Keep synchronous text-parts support distinct in the
+bridge; V2 polling reads bounded newest messages and rejects assistant errors.
+`--booking-config` uses the existing driver's login preparation through
+`LuaRuntime::bind_session`, retaining the same session's cookies and context;
+no plugin Lua module is added. HTML input uses an in-memory page transport and
+disables GET probes while the separate OpenCode client remains explicit.
+Keep loopback-only launcher coverage in `tests/integration/test_booking_marionette.py`.

@@ -2178,15 +2178,40 @@ heuristic and never authoritative.
 `scripts/run-scrape-booking.sh` wraps the whole live flow: it starts a local
 `opencode serve` on 127.0.0.1:4096, captures the server password, probes
 authenticated readiness, exports the `OPENCODE_*` variables (never printed),
-runs the driver with `--opencode true`, verifies `x-prowsetk-opencode:
-used: true` in the YAML (failing loudly otherwise), and stops the server
-unless `--keep-server` is given:
+runs the **opencode-marionette** controller, verifies `x-prowsetk-marionette:
+used: true` and both export files, and stops the server unless `--keep-server`
+is given. The controller prepares login through the Booking driver's
+`prepare_session(args)` entrypoint on its managed session, then uses that same
+session's cookies, confirmed dashboard and JavaScript context for exploration.
+OpenCode V2 selects action IDs from the trusted
+`examples/booking-dotcom-admin-scrape/marionette-decisions.json` policy;
+navigation links, read-only tabs, detail expansion and pagination expose more
+API traffic. The agent session has a deny-all tool permission policy.
+`scrape-endpoints` discovers endpoints before and after each action;
+`schema-grabber` accumulates request/response schemas and typed URL parameters
+across visited documents. Both OpenAPI 3.1 YAML and Postman 2.1 JSON are written
+after a successful run:
 
 ```sh
 scripts/run-scrape-booking.sh \
   --html '<script>fetch("/api/orders")</script>' \
-  --output build/booking-cleaned.yaml
+  --output build/booking-api.yaml
 ```
+
+`--html` uses an in-memory page transport and disables GET probes; it needs no
+Booking credentials and makes no page-network requests, but still contacts
+OpenCode. Live runs use bounded same-origin GET probes for observed response
+schemas; POST and other non-GET methods are never probed. Unobserved body
+schemas remain inferred. Schemas retain provenance, confidence, redaction and
+`coverage-complete: false`; an agent stop does not establish full API coverage.
+Use `--decisions FILE` to match controls in your current extranet page. The
+shipped selectors are a starting policy, not a guarantee that every Booking
+page exposes those controls. Default budgets are 24 actions, 512 page requests
+and 64 GET schema probes; `--max-steps`, `--max-page-requests` and
+`--max-get-probes` override them within the controller's hard bounds.
+`--postman PATH` selects the collection path; otherwise it is written beside
+the YAML with a `.postman_collection.json` suffix. `--marionette-bin PATH` or
+`PROWSETK_MARIONETTE_BIN` selects another built controller.
 
 The launcher defaults to `--assistant_browser_force true`,
 `--success_beacon "xpath=//h1[contains(normalize-space(.), 'Joe Litty Rooms')]"`,
@@ -2194,10 +2219,12 @@ The launcher defaults to `--assistant_browser_force true`,
 endpoints). Live handoffs still require user approval. Pass the corresponding
 launcher options to override the beacon or browser-force setting;
 `--no-xcors false` disables that output filter. The launcher supplies explicit
-boolean values to the driver CLI.
+boolean values to the controller's login preparation. The default cookie file
+is `_scraped/booking-dotcom-admin/cookies.json` under the repository; the
+Firefox handoff refreshes it, and `--cookies-json PATH` overrides it.
 
-Omit `--html` for a live crawl (booking credentials still required as
-usual); `--no-server` reuses an already-running server instead of starting
+Omit `--html` for live exploration (imported cookies or Booking credentials
+must confirm login); `--no-server` reuses an already-running server instead of starting
 one. See `scripts/run-scrape-booking.sh --help` for ports, paths, budgets,
 and cookie/dotenv passthrough.
 
@@ -2681,3 +2708,7 @@ OpenCode authentication and default redaction apply. Discovery remains incomplet
 and heuristic. Loading the ABI-v2 facade alone is network-free; it exposes no
 Lua module. See [the plugin guide](plugins/opencode-marionette/README.md).
 It reuses existing core/bridge/schema dependencies and adds no production dependency.
+The runner defaults to OpenCode V2 `/api` prompt/message polling and can prepare
+the Booking driver's managed session through `--booking-config Prowse.toml`.
+The Booking launcher supplies its action policy, login handoff and both export
+paths. Offline HTML uses an in-memory page transport with GET probes disabled.

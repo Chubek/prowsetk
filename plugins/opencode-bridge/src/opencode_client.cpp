@@ -488,6 +488,10 @@ std::vector<AssistantMessage> parse_assistant_messages(const JsonValue& root) {
         if (!field_string(item, "id", message.id)) continue;
         const JsonValue* time = object_field(item, "time");
         message.completed = time != nullptr && object_field(*time, "completed") != nullptr;
+        const auto* error = object_field(item, "error");
+        std::string finish;
+        message.failed = (error != nullptr && error->type != JsonValue::Type::Null) ||
+            (field_string(item, "finish", finish) && finish == "error");
         const JsonValue* content = object_field(item, "content");
         if (content != nullptr && content->type == JsonValue::Type::Array) {
             for (const auto& part : content->items) {
@@ -605,8 +609,11 @@ std::string OpenCodeClient::route(std::string_view path) const {
     return normalize_base(config_.base_url) + config_.api_prefix + std::string(path);
 }
 
-std::string OpenCodeClient::create_session() {
-    const HttpResponse response = send("POST", route("/session"), "{}");
+std::string OpenCodeClient::create_session(bool disable_tools) {
+    const HttpResponse response = send("POST", route("/session"),
+        disable_tools && use_v2_api()
+            ? "{\"permissions\":[{\"action\":\"*\",\"resource\":\"*\",\"effect\":\"deny\"}]}"
+            : "{}");
     JsonValue document;
     if (json_parse(response.body, document)) {
         std::string id;
@@ -626,7 +633,7 @@ std::string OpenCodeClient::create_session() {
 // appears. Bounded by prompt_wait_ms and the request budget; never echoes
 // prompt or answer content in errors.
 std::string OpenCodeClient::prompt_v2(const std::string& session_id, std::string_view text) {
-    const std::string messages_url = route("/session/" + session_id + "/message");
+    const std::string messages_url = route("/session/" + session_id + "/message?order=desc&limit=128");
     std::set<std::string> baseline;
     {
         const HttpResponse before = send("GET", messages_url, {});
@@ -650,7 +657,7 @@ std::string OpenCodeClient::prompt_v2(const std::string& session_id, std::string
         }
         for (const auto& message : parse_assistant_messages(document)) {
             if (message.id.empty() || baseline.count(message.id) != 0) continue;
-            if (message.idle && !message.succeeded) {
+            if (message.failed || (message.idle && !message.succeeded)) {
                 throw Error(ErrorCode::PluginError, "opencode-bridge: agent run did not succeed");
             }
             if (!message.idle && message.completed && !message.text.empty()) return message.text;

@@ -2119,6 +2119,103 @@ local function enrich_with_schemas(session, page_url, seed_endpoints, args, offl
     return result
 end
 
+-- Shared login preparation for the Lua driver and the C++ marionette runner.
+-- The caller owns the session; preparation neither exports nor closes it.
+local function prepare_booking_session(session, args)
+    local url = args.url or DEFAULT_URL
+    no_xcors_only = no_xcors_requested(args)
+    if type(args.html) == "string" and args.html ~= "" then
+        session:load_html(args.html, url)
+        return url
+    end
+
+    local dotenv = load_dotenv(args.dotenv)
+    local captcha_inputs = apply_captcha_inputs(session, args, dotenv)
+    if args.assistant_browser_force == true or
+       tostring(args.assistant_browser_force or ""):lower() == "true" then
+        offer_login_assistant_browser(session, url, args,
+            "assistant browser launch forced by --assistant_browser_force")
+    end
+
+    -- Try imported cookies before requiring credentials. Confirmation checks
+    -- the HTTP response and positive DOM evidence after trusted redirects.
+    local loaded, initial_body, initial_response =
+        probe_authenticated_page(session, url, args.success_selector,
+            args.success_beacon, args.success_beacon_type)
+    local authenticated_url = loaded and initial_response.final_url or url
+    if confirmed_challenge(initial_response) then
+        error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs, initial_response), 2)
+    end
+    if not loaded then
+        local username = env("BOOKING_DOTCOM_USER", dotenv)
+        local password = env("BOOKING_DOTCOM_PASS", dotenv)
+        if not username or username == "" or not password or password == "" then
+            error("booking-dotcom-admin: missing Booking.com credentials", 2)
+        end
+        local as_token = env("BOOKING_DOTCOM_AS_TOKEN", dotenv)
+        local logged_in, login_err = pcall(function()
+            login(session, url, username, password, {
+                as_token = as_token,
+                success_selector = args.success_selector,
+                initial_body = initial_body,
+                initial_response = initial_response
+            })
+        end)
+        if not logged_in then
+            local message = tostring(login_err)
+            if message:find("requires browser JavaScript or captcha support", 1, true) then
+                error(login_err, 0)
+            end
+            if message:lower():find("challenge detected", 1, true) or
+               message:lower():find("captcha", 1, true) or
+               message:find("Human Verification", 1, true) then
+                error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs), 2)
+            end
+            error(login_err, 0)
+        end
+        local load_err
+        loaded, load_err = pcall(function()
+            authenticated_url = load_authenticated_page(session, url, args.success_selector,
+                args.success_beacon, args.success_beacon_type)
+        end)
+        if not loaded then
+            local handed_off, imported_cookies = offer_login_assistant_browser(
+                session, url, args, tostring(load_err):gsub("^[^:]+:%s*", ""))
+            if handed_off then
+                loaded, load_err = pcall(function()
+                    authenticated_url = load_authenticated_page(session, url, args.success_selector,
+                        args.success_beacon, args.success_beacon_type)
+                end)
+                if not loaded and imported_cookies == 0 then
+                    load_err = tostring(load_err) ..
+                        "; Firefox is a separate session; export fresh cookies and rerun with --cookies-json FILE"
+                end
+            end
+        end
+        if not loaded then
+            local message = tostring(load_err)
+            if message:find("requires browser JavaScript or captcha support", 1, true) then
+                error(load_err, 0)
+            end
+            if message:lower():find("challenge detected", 1, true) or
+               message:lower():find("captcha", 1, true) or
+               message:find("Human Verification", 1, true) then
+                error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs), 2)
+            end
+            error(load_err, 0)
+        end
+    end
+    return authenticated_url
+end
+
+-- LuaRuntime::bind_session supplies this managed session. Browser credentials,
+-- cookies and the page context stay in the same process for subsequent actions.
+function prepare_session(args)
+    if not _G.session then error("booking-dotcom-admin: host session required", 2) end
+    prepare_booking_session(_G.session, args or {})
+    return 0
+end
+
 function main(args)
     args = args or {}
     local url = args.url or DEFAULT_URL
@@ -2133,12 +2230,10 @@ function main(args)
     })
     local session = browser:create_session()
     local ok, err = pcall(function()
-        no_xcors_only = no_xcors_requested(args)
         local endpoints = nil
         local authenticated_flag = false
-        local authenticated_url = url
+        local authenticated_url = prepare_booking_session(session, args)
         if offline then
-            session:load_html(html, url)
             endpoints = discover(session, url, {
                 url = url,
                 html = html,
@@ -2158,92 +2253,6 @@ function main(args)
                 endpoints = filter_booking_tld(endpoints)
             end
         else
-            local dotenv = load_dotenv(args.dotenv)
-            local captcha_inputs = apply_captcha_inputs(session, args, dotenv)
-
-            -- An explicit force switch is useful when the site has not yet
-            -- produced a detectable challenge. The browser is still user
-            -- approved, but launch no longer depends on heuristics or a
-            -- failed login confirmation.
-            if args.assistant_browser_force == true or
-               tostring(args.assistant_browser_force or ""):lower() == "true" then
-                offer_login_assistant_browser(session, url, args,
-                    "assistant browser launch forced by --assistant_browser_force")
-            end
-
-            -- Cookies from Prowse.toml and --cookies-json are already in the
-            -- session jar; they are not driver arguments. Always try them first.
-            local loaded, initial_body, initial_response =
-                probe_authenticated_page(session, url, args.success_selector,
-                    args.success_beacon, args.success_beacon_type)
-            authenticated_url = loaded and initial_response.final_url or url
-            if confirmed_challenge(initial_response) then
-                error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs, initial_response), 2)
-            end
-            if not loaded then
-                local username = env("BOOKING_DOTCOM_USER", dotenv)
-                local password = env("BOOKING_DOTCOM_PASS", dotenv)
-                if not username or username == "" or not password or password == "" then
-                    error("booking-dotcom-admin: missing Booking.com credentials", 2)
-                end
-
-                local as_token = env("BOOKING_DOTCOM_AS_TOKEN", dotenv)
-                local logged_in, login_err = pcall(function()
-                    login(session, url, username, password, {
-                        as_token = as_token,
-                        success_selector = args.success_selector,
-                        initial_body = initial_body,
-                        initial_response = initial_response
-                    })
-                end)
-                if not logged_in then
-                    local message = tostring(login_err)
-                    if message:find("requires browser JavaScript or captcha support", 1, true) then
-                        error(login_err, 0)
-                    end
-                    if message:lower():find("challenge detected", 1, true) or
-                       message:lower():find("captcha", 1, true) or
-                       message:find("Human Verification", 1, true) then
-                        error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs), 2)
-                    end
-                    error(login_err, 0)
-                end
-                local load_err
-                loaded, load_err = pcall(function()
-                    authenticated_url = load_authenticated_page(session, url, args.success_selector,
-                        args.success_beacon, args.success_beacon_type)
-                end)
-                if not loaded then
-                    -- A failed post-login confirmation is exactly the case
-                    -- where a user-assisted browser may be required. Give the
-                    -- user a chance to complete the interaction, then retry
-                    -- the host-mediated confirmation before reporting failure.
-                    local handed_off, imported_cookies = offer_login_assistant_browser(
-                        session, url, args, tostring(load_err):gsub("^[^:]+:%s*", ""))
-                    if handed_off then
-                        loaded, load_err = pcall(function()
-                            authenticated_url = load_authenticated_page(session, url, args.success_selector,
-                                args.success_beacon, args.success_beacon_type)
-                        end)
-                        if not loaded and imported_cookies == 0 then
-                            load_err = tostring(load_err) ..
-                                "; Firefox is a separate session; export fresh cookies and rerun with --cookies-json FILE"
-                        end
-                    end
-                end
-                if not loaded then
-                    local message = tostring(load_err)
-                    if message:find("requires browser JavaScript or captcha support", 1, true) then
-                        error(load_err, 0)
-                    end
-                    if message:lower():find("challenge detected", 1, true) or
-                       message:lower():find("captcha", 1, true) or
-                       message:find("Human Verification", 1, true) then
-                        error("booking-dotcom-admin: " .. captcha_handler_note(captcha_inputs), 2)
-                    end
-                    error(load_err, 0)
-                end
-            end
             authenticated_flag = true
             endpoints = crawl(session, authenticated_url, args, true)
         end

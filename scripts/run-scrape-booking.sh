@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
 #
 # run-scrape-booking.sh — start a local OpenCode server and run the
-# booking-dotcom-admin-scrape driver with agent endpoint cleanup enabled.
+# opencode-marionette controller on an authenticated Booking.com session.
 #
 # Flow:
 #   1. `opencode serve` on 127.0.0.1:PORT (background, private work dir).
 #   2. Capture the server password from its log, probe authenticated
 #      readiness, and export OPENCODE_SERVER_USERNAME / OPENCODE_SERVER_PASSWORD
-#      / OPENCODE_BASE_URL for the driver (never printed).
-#   3. `prowsetk run booking-dotcom-admin --opencode true ...` so scraped
-#      endpoints go through the lopencode bridge cleanup before export.
+#      / OPENCODE_BASE_URL for the controller (never printed).
+#   3. Prepare Booking login in the controller's own session, then let OpenCode
+#      choose permitted buttons/links from a trusted, bounded decisions policy.
+#      scrape-endpoints discovers APIs before/after actions; schema-grabber
+#      enriches request/response schemas and typed URL parameters for export.
 #      Live runs force the assistant-browser handoff and use the Joe Litty
 #      Rooms XPath success beacon; exports keep booking.com endpoints only.
-#   4. Verify `x-prowsetk-opencode: used: true` in the YAML; fail loudly when
-#      the agent pass did not run (stale predictions are worse than none).
+#   4. Verify `x-prowsetk-marionette: used: true` and both output artifacts.
 #   5. Stop the server unless --keep-server.
 #
-# Offline (deterministic, no booking credentials needed):
+# Offline page (no booking credentials or page network; OpenCode still required):
 #   scripts/run-scrape-booking.sh --html '<script>fetch("/api/orders")</script>'
 #
 # Live runs need booking credentials exactly like the driver itself
@@ -35,11 +36,20 @@
 #   --no-server            reuse an existing server (needs OPENCODE_BASE_URL
 #                          or --host/--port plus OPENCODE_SERVER_PASSWORD)
 #   --html STR             offline snippet instead of a live crawl
-#   --url URL              live start URL (default: driver default)
-#   --output PATH          OpenAPI YAML output (default: driver default)
-#   --postman PATH         Postman JSON output (default: driver default)
+#   --url URL              start URL (default: https://admin.booking.com/)
+#   --output PATH          OpenAPI YAML (default: _scraped/booking-dotcom-admin/
+#                          BookingDotcomAdminPanel.yaml under the repo)
+#   --postman PATH         Postman JSON (default: beside the YAML)
+#   --decisions PATH       trusted action policy (default: Booking example's
+#                          marionette-decisions.json; customize site selectors)
+#   --marionette-bin PATH  ptk-opencode-marionette executable
+#   --max-steps N          action budget (policy default: 24, hard cap: 64)
+#   --max-page-requests N  page request budget (policy default: 512)
+#   --max-get-probes N     GET schema probe budget (policy default: 64;
+#                          offline pages always use 0)
 #   --dotenv PATH          dotenv file with booking credentials
-#   --cookies-json PATH    imported session cookies
+#   --cookies-json PATH    imported/Firefox-exported session cookies (default:
+#                          _scraped/booking-dotcom-admin/cookies.json)
 #   --assistant_browser_force BOOL  force the assistant-browser handoff
 #                          (default: true)
 #   --success_beacon QUERY login confirmation beacon (default:
@@ -47,21 +57,24 @@
 #   --success_beacon_type TYPE  beacon syntax (default: xpath)
 #   --no-xcors [BOOL]      keep only booking.com TLD endpoints (default: true)
 #   --opencode-max-requests N  bridge request budget, polls included
-#                          (default: 90)
+#                          (default: 512)
 #   --opencode-wait-ms MS  cap on waiting for an agent reply
 #                          (default: 300000)
-#   --opencode-module PATH lopencode native module (default: in-repo dev
-#                          build when present)
 #   -h, --help             show this help and exit
 #
 # Environment:
 #   OPENCODE_SERVER_USERNAME  bridge auth user (default: opencode)
 #   OPENCODE_SERVER_PASSWORD  with --no-server: bridge auth password,
-#                             otherwise captured from the server log
-#   PROWSETK_BIN              prowsetk CLI (default:
-#                             build/default/src/cli/prowsetk under the repo)
+#                             otherwise captured from the private server log
+#   PROWSETK_MARIONETTE_BIN    controller executable (default:
+#                             build/default/plugins/opencode-marionette/
+#                             ptk-opencode-marionette under the repo)
+#
+# Only caller-permitted actions run; model output is never executable code.
+# Schemas retain provenance and redaction. Coverage is explicitly incomplete.
 
 set -euo pipefail
+umask 077
 
 HOST="127.0.0.1"
 PORT="4096"
@@ -70,7 +83,7 @@ WORK_DIR=""
 KEEP_SERVER=0
 NO_SERVER=0
 HTML=""
-URL=""
+URL="https://admin.booking.com/"
 OUTPUT=""
 POSTMAN=""
 DOTENV=""
@@ -79,10 +92,13 @@ ASSISTANT_BROWSER_FORCE="true"
 SUCCESS_BEACON="xpath=//h1[contains(normalize-space(.), 'Joe Litty Rooms')]"
 SUCCESS_BEACON_TYPE="xpath"
 NO_XCORS="true"
-OPENCODE_MAX_REQUESTS="90"
+OPENCODE_MAX_REQUESTS="512"
 OPENCODE_WAIT_MS="300000"
-OPENCODE_MODULE=""
-PROWSETK_BIN="${PROWSETK_BIN:-}"
+DECISIONS=""
+MAX_STEPS=""
+MAX_PAGE_REQUESTS=""
+MAX_GET_PROBES=""
+MARIONETTE_BIN="${PROWSETK_MARIONETTE_BIN:-}"
 
 usage() {
     sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
@@ -109,6 +125,11 @@ while [[ $# -gt 0 ]]; do
         --url) URL="${2:?--url needs a value}"; shift 2 ;;
         --output) OUTPUT="${2:?--output needs a value}"; shift 2 ;;
         --postman) POSTMAN="${2:?--postman needs a value}"; shift 2 ;;
+        --decisions) DECISIONS="${2:?--decisions needs a value}"; shift 2 ;;
+        --marionette-bin) MARIONETTE_BIN="${2:?--marionette-bin needs a value}"; shift 2 ;;
+        --max-steps) MAX_STEPS="${2:?--max-steps needs a value}"; shift 2 ;;
+        --max-page-requests) MAX_PAGE_REQUESTS="${2:?--max-page-requests needs a value}"; shift 2 ;;
+        --max-get-probes|--max-schema-probes) MAX_GET_PROBES="${2:?--max-get-probes needs a value}"; shift 2 ;;
         --dotenv) DOTENV="${2:?--dotenv needs a value}"; shift 2 ;;
         --cookies-json) COOKIES_JSON="${2:?--cookies-json needs a value}"; shift 2 ;;
         --assistant_browser_force|--assistant-browser-force)
@@ -125,18 +146,29 @@ while [[ $# -gt 0 ]]; do
             shift ;;
         --opencode-max-requests) OPENCODE_MAX_REQUESTS="${2:?needs a value}"; shift 2 ;;
         --opencode-wait-ms) OPENCODE_WAIT_MS="${2:?needs a value}"; shift 2 ;;
-        --opencode-module) OPENCODE_MODULE="${2:?needs a value}"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown argument: $1 (see --help)" ;;
     esac
 done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [[ -z "$PROWSETK_BIN" ]]; then
-    PROWSETK_BIN="$REPO_ROOT/build/default/src/cli/prowsetk"
+if [[ -z "$MARIONETTE_BIN" ]]; then
+    MARIONETTE_BIN="$REPO_ROOT/build/default/plugins/opencode-marionette/ptk-opencode-marionette"
 fi
-[[ -x "$PROWSETK_BIN" ]] || die "prowsetk CLI not found at $PROWSETK_BIN
+[[ -x "$MARIONETTE_BIN" ]] || die "opencode-marionette runner not found at $MARIONETTE_BIN
   build it first: cmake --preset default && cmake --build --preset default"
+[[ -n "$DECISIONS" ]] || DECISIONS="$REPO_ROOT/examples/booking-dotcom-admin-scrape/marionette-decisions.json"
+[[ -r "$DECISIONS" ]] || die "decisions policy is unreadable: $DECISIONS"
+[[ -n "$OUTPUT" ]] || OUTPUT="$REPO_ROOT/_scraped/booking-dotcom-admin/BookingDotcomAdminPanel.yaml"
+if [[ -z "$POSTMAN" ]]; then
+    OUTPUT_BASE="$OUTPUT"
+    if [[ "$OUTPUT" == *.yaml || "$OUTPUT" == *.yml ]]; then OUTPUT_BASE="${OUTPUT%.*}"; fi
+    POSTMAN="${OUTPUT_BASE}.postman_collection.json"
+fi
+[[ -n "$COOKIES_JSON" ]] || COOKIES_JSON="$REPO_ROOT/_scraped/booking-dotcom-admin/cookies.json"
+for value in "$ASSISTANT_BROWSER_FORCE" "$NO_XCORS"; do
+    [[ "$value" == "true" || "$value" == "false" ]] || die "boolean options require true or false"
+done
 command -v curl >/dev/null 2>&1 || die "curl is required for server readiness probes"
 
 BASE_URL="http://${HOST}:${PORT}"
@@ -160,10 +192,7 @@ if [[ "$NO_SERVER" -eq 1 ]]; then
     if [[ -n "${OPENCODE_BASE_URL:-}" ]]; then
         BASE_URL="$OPENCODE_BASE_URL"
     fi
-    log "reusing existing OpenCode server at $BASE_URL"
-    if [[ -z "${OPENCODE_SERVER_PASSWORD:-}" ]]; then
-        log "warning: OPENCODE_SERVER_PASSWORD is unset; the bridge will send no credentials (expect 401s and skipped cleanup)"
-    fi
+    log "reusing existing OpenCode server"
 else
     command -v "$SERVER_BIN" >/dev/null 2>&1 || die "opencode binary not found: $SERVER_BIN"
     if [[ -z "$WORK_DIR" ]]; then
@@ -176,7 +205,7 @@ else
     log "starting $SERVER_BIN serve on ${HOST}:${PORT} (log: $SERVER_LOG)"
     # `serve` takes no work-dir argument; run it with cwd set instead.
     # Resolve the binary first so a relative --server-bin survives the cd.
-    SERVER_BIN_ABS="$(command -v "$SERVER_BIN")" || die "opencode binary not found: $SERVER_BIN"
+    SERVER_BIN_ABS="$(realpath "$(command -v "$SERVER_BIN")")" || die "opencode binary not found: $SERVER_BIN"
     (cd "$WORK_DIR" && exec "$SERVER_BIN_ABS" serve --hostname "$HOST" --port "$PORT") \
         >"$SERVER_LOG" 2>&1 &
     SERVER_PID="$!"
@@ -185,7 +214,7 @@ else
     SERVER_PASSWORD=""
     for _ in $(seq 1 60); do
         if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-            die "opencode server exited during startup; log tail: $(tail -5 "$SERVER_LOG" | tr '\n' '|')"
+            die "opencode server exited during startup (private log: $SERVER_LOG)"
         fi
         SERVER_PASSWORD="$(sed -n 's/.*server password //p' "$SERVER_LOG" | tail -1)"
         if [[ -n "$SERVER_PASSWORD" ]]; then break; fi
@@ -200,7 +229,7 @@ else
     # Authenticated readiness: the v2 session endpoint answers 200.
     for _ in $(seq 1 60); do
         if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-            die "opencode server exited during startup; log tail: $(tail -5 "$SERVER_LOG" | tr '\n' '|')"
+            die "opencode server exited during startup (private log: $SERVER_LOG)"
         fi
         if curl -s -m 5 -o /dev/null -w "%{http_code}" \
                 -u "${OPENCODE_SERVER_USERNAME}:${OPENCODE_SERVER_PASSWORD}" \
@@ -216,43 +245,35 @@ else
     log "opencode server ready at $BASE_URL"
 fi
 
-DRIVER_ARGS=(run booking-dotcom-admin
-    --config "$REPO_ROOT/examples/booking-dotcom-admin-scrape/Prowse.toml"
-    --opencode true
-    --assistant_browser_force "$ASSISTANT_BROWSER_FORCE"
-    --success_beacon "$SUCCESS_BEACON"
-    --success_beacon_type "$SUCCESS_BEACON_TYPE"
+export OPENCODE_SERVER_USERNAME="${OPENCODE_SERVER_USERNAME:-opencode}"
+export OPENCODE_BASE_URL="$BASE_URL"
+
+RUNNER_ARGS=("$DECISIONS" "$URL" "$OUTPUT" "$POSTMAN"
+    --booking-config "$REPO_ROOT/examples/booking-dotcom-admin-scrape/Prowse.toml"
+    --opencode-api-prefix /api
+    --assistant-browser-force "$ASSISTANT_BROWSER_FORCE"
+    --success-beacon "$SUCCESS_BEACON"
+    --success-beacon-type "$SUCCESS_BEACON_TYPE"
     --no-xcors "$NO_XCORS"
-    --opencode_max_requests "$OPENCODE_MAX_REQUESTS"
-    --opencode_wait_ms "$OPENCODE_WAIT_MS")
-if [[ -z "$OPENCODE_MODULE" ]]; then
-    OPENCODE_MODULE="$REPO_ROOT/build/default/plugins/opencode-bridge/lopencode.so"
-fi
-if [[ -f "$OPENCODE_MODULE" ]]; then
-    DRIVER_ARGS+=(--opencode_module "$OPENCODE_MODULE")
-fi
-[[ -n "$HTML" ]] && DRIVER_ARGS+=(--html "$HTML")
-[[ -n "$URL" ]] && DRIVER_ARGS+=(--url "$URL")
-[[ -n "$OUTPUT" ]] && DRIVER_ARGS+=(--output "$OUTPUT")
-[[ -n "$POSTMAN" ]] && DRIVER_ARGS+=(--postman "$POSTMAN")
-[[ -n "$DOTENV" ]] && DRIVER_ARGS+=(--dotenv "$DOTENV")
-[[ -n "$COOKIES_JSON" ]] && DRIVER_ARGS+=(--cookies-json "$COOKIES_JSON")
+    --opencode-max-requests "$OPENCODE_MAX_REQUESTS"
+    --opencode-wait-ms "$OPENCODE_WAIT_MS"
+    --cookies-json "$COOKIES_JSON")
+[[ -n "$HTML" ]] && RUNNER_ARGS+=(--html "$HTML")
+[[ -n "$DOTENV" ]] && RUNNER_ARGS+=(--dotenv "$DOTENV")
+[[ -n "$MAX_STEPS" ]] && RUNNER_ARGS+=(--max-steps "$MAX_STEPS")
+[[ -n "$MAX_PAGE_REQUESTS" ]] && RUNNER_ARGS+=(--max-page-requests "$MAX_PAGE_REQUESTS")
+[[ -n "$MAX_GET_PROBES" ]] && RUNNER_ARGS+=(--max-get-probes "$MAX_GET_PROBES")
 
-log "running booking-dotcom-admin driver with opencode cleanup"
-"$PROWSETK_BIN" "${DRIVER_ARGS[@]}"
+log "running opencode-marionette with scrape-endpoints discovery and schema-grabber enrichment"
+"$MARIONETTE_BIN" "${RUNNER_ARGS[@]}"
 
-# Resolve the YAML we just wrote (explicit --output or the driver default).
-YAML="$OUTPUT"
-if [[ -z "$YAML" ]]; then
-    YAML="$REPO_ROOT/_scraped/booking-dotcom-admin/BookingDotcomAdminPanel.yaml"
-fi
-[[ -f "$YAML" ]] || die "expected output YAML not found: $YAML"
+[[ -s "$OUTPUT" ]] || die "expected output YAML not found: $OUTPUT"
+[[ -s "$POSTMAN" ]] || die "expected Postman JSON not found: $POSTMAN"
 
-if awk '/^x-prowsetk-opencode:/{inblock=1; next} inblock&&/^  used: true/{found=1} inblock&&/^[^ ]/{inblock=0} END{exit !found}' "$YAML"; then
-    log "opencode cleanup ran (x-prowsetk-opencode used: true): $YAML"
-    awk '/^x-prowsetk-opencode:/{inblock=1} inblock{print} inblock&&/^  note:/{exit}' "$YAML" >&2 || true
+if awk '/^x-prowsetk-marionette:/{inblock=1; next} inblock&&/^  used: true$/{found=1} inblock&&/^[^ ]/{inblock=0} END{exit !found}' "$OUTPUT"; then
+    log "marionette exploration and schema export finished: $OUTPUT and $POSTMAN"
 else
-    die "driver finished but opencode cleanup did not run (x-prowsetk-opencode used: false) — see the note field in $YAML"
+    die "runner finished without marionette metadata in $OUTPUT"
 fi
 
 if [[ "$KEEP_SERVER" -eq 1 && -n "$SERVER_PID" ]]; then

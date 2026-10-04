@@ -187,10 +187,22 @@ prowsetk_gtest(prowsetk_integration_opencode_marionette "prowsetk.integration.op
     "integration;plugin;javascript;endpoint-extraction" test_opencode_marionette.cpp)
 target_link_libraries(prowsetk_integration_opencode_marionette PRIVATE prowsetk_opencode_marionette_static)
 target_compile_definitions(prowsetk_integration_opencode_marionette PRIVATE
+    PROWSETK_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     MARIONETTE_PLUGIN_PATH="$<TARGET_FILE:prowsetk_opencode_marionette>")
 add_dependencies(prowsetk_integration_opencode_marionette prowsetk_opencode_marionette)
 if(TARGET ptk_opencode_marionette)
     add_test(NAME prowsetk.integration.opencode-marionette.cli.usage COMMAND ptk_opencode_marionette)
     set_tests_properties(prowsetk.integration.opencode-marionette.cli.usage PROPERTIES
         LABELS "integration;plugin;endpoint-extraction" TIMEOUT 10 WILL_FAIL TRUE)
+    if(UNIX AND PROWSETK_HAVE_LUA AND PROWSETK_HAVE_TOMLPLUSPLUS AND PROWSETK_HAVE_QUICKJS)
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if(Python3_Interpreter_FOUND)
+            add_test(NAME prowsetk.integration.opencode-marionette.booking-launcher
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_booking_marionette.py"
+                    "$<TARGET_FILE:ptk_opencode_marionette>" "${PROJECT_SOURCE_DIR}")
+            set_tests_properties(prowsetk.integration.opencode-marionette.booking-launcher PROPERTIES
+                LABELS "integration;plugin;lua;javascript;endpoint-extraction" TIMEOUT 60
+                WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+        endif()
+    endif()
 endif()

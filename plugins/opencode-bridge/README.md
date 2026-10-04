@@ -47,8 +47,10 @@ OpenCode v2 servers mount everything under `/api`, so point the client at
 them with `api_prefix = "/api"` (the booking driver does this by default):
 
 - `create_session` → `POST /api/session`, id read from the `data.id` envelope.
+  C++ `create_session(true)` installs a deny-all tool permission policy for
+  decision-only sessions, as used by opencode-marionette.
 - `prompt` → `POST /api/session/:id/prompt`, then polls the session message
-  list until a new completed assistant message appears (reasoning parts
+  list (newest first, limit 128) until a new completed assistant message appears (reasoning parts
   excluded, text parts joined). Bounded by `prompt_wait_ms` and the request
   budget; a failed agent run raises instead of returning stale text. The
   `tools` argument is rejected here — the v2 prompt route takes text only.
