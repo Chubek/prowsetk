@@ -4,7 +4,7 @@ set -euo pipefail
 project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 manual_dir="$project_root/manual"
 output_dir="${1:-$project_root/build/docs}"
-chapter_count=34
+chapter_count=37
 
 if ! command -v pandoc >/dev/null 2>&1; then
     printf 'build-docs: pandoc is required to build HTML and LaTeX\n' >&2

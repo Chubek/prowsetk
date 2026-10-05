@@ -25,11 +25,13 @@ PNG/JPEG images. Build with `cmake --preset complex-gui` and
 `build/complex-gui/tools/prowse-gui/prowse-gui --file tools/prowse-gui/example.html`.
 `PROWSETK_BUILD_COMPLEX_GUI` defaults OFF and is independent of basic-gui.
 
-Read the [ProwseTk Manual](manual/README.md) for 34 chapters covering installation,
+Read the [ProwseTk Manual](manual/README.md) for 37 chapters covering installation,
 the core APIs, Lua drivers/extensions, plugins, tools, and client interfaces.
 It includes practical examples, configuration references, resource bounds, and
 the current implementation's support levels, including Qutebrowser assistant
 snapshots, Lua discovery, two-way marionettes, and the Booking API project.
+Chapters 35–37 cover outbound CDP control, Cloudflare Browser Run, and OAuth
+assistance with CLI authentication and private token caching.
 
 ## Table of Contents
 
@@ -2475,7 +2477,7 @@ display and an unreachable build tree are reported before a window would open.
 ## Build and Runtime Strategy
 
 The command reference lives in `man/man1/prowsetk.1` and
-`man/man5/Prowse.toml.5`. The [manual index](manual/README.md) links all 34
+`man/man5/Prowse.toml.5`. The [manual index](manual/README.md) links all 37
 Markdown chapters. `scripts/build-docs.sh [output-directory]` builds combined
 HTML and LaTeX with Pandoc, checking chapter completeness and resolving manual
 navigation links. Generated output defaults to `build/docs/`.
@@ -2808,7 +2810,7 @@ prowsetk/
 ├── drivers/                Lua driver scripts
 ├── examples/               Example C++ and Lua applications
 ├── tools/                  Crawling, DOM watching, IR consumers and terminal tools
-├── manual/                 Markdown manual with an index and 34 chapters
+├── manual/                 Markdown manual with an index and 37 chapters
 ├── resources/              Runtime resources and manifests
 │   └── web/                Static web interface (index.html, app.js, style.css)
 └── scripts/                Developer and scaffolding scripts

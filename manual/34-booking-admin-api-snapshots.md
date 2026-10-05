@@ -245,4 +245,4 @@ Reference: [project notes](../examples/booking-dotcom-admin-api/README.md),
 `examples/booking-dotcom-admin-api/Prowse.toml`, `api.lua`,
 `tests/integration/test_drivers.cpp`, `tests/integration/test_cli.cpp`.
 
-**Return to:** [Manual index](README.md).
+**Next:** [CDP client and remote control](35-cdp-client-and-remote-control.md).

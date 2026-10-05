@@ -54,8 +54,8 @@ complete redirect URL through hidden terminal input, then caches tokens under
 Cloudflare-bound cache. Neither a token's existence nor OAuth completion proves
 Browser Run authorization.
 
-See [Browser Run integration](../plugins/browser-run-integration/README.md) and
-[OAuth assistance](../plugins/oauth-assist/README.md) for CLI commands, remote
+See [Chapter 36: Browser Run](36-cloudflare-browser-run.md) and
+[Chapter 37: OAuth assistance](37-oauth-assistance.md) for CLI commands, remote
 snapshot semantics, bounds and cache permissions. Ordinary `prowsetk run` does
 not initiate either service automatically.
 

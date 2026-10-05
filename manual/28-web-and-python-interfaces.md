@@ -94,6 +94,11 @@ responses are protocol-valid placeholders. Compatibility is this documented
 CDP subset rather than every Chromium behavior. Use explicit ports; port 0
 prints an available listener address.
 
+[Chapter 35](35-cdp-client-and-remote-control.md) covers the separate outbound
+`CdpClient` API for controlling remote browsers. [Chapter 36](36-cloudflare-browser-run.md)
+applies it to Cloudflare Browser Run, including account authentication and
+snapshot import into Flatworm.
+
 ## Service-layer web gateway
 
 `interface/web` is a FastAPI/Uvicorn/HTTPX application delegating browser work

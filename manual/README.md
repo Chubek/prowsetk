@@ -89,6 +89,16 @@ files define the callable interfaces.
 34. [Booking admin API snapshots](34-booking-admin-api-snapshots.md) — offline
     and live project recipes, login evidence, action policies, and spec metadata.
 
+### Remote CDP, Cloudflare, and OAuth
+
+35. [CDP client and remote control](35-cdp-client-and-remote-control.md) — inbound
+    versus outbound control, WebSocket transports, commands, events, identifiers,
+    controller lifetime, and protocol bounds.
+36. [Cloudflare Browser Run](36-cloudflare-browser-run.md) — account credentials,
+    Quick Actions, the CDP CLI, persistent C++ controllers, and Flatworm snapshots.
+37. [OAuth assistance](37-oauth-assistance.md) — provider registration, PKCE,
+    manual CLI login, token refresh, private caching, and host integration.
+
 ## Conventions
 
 - Shell examples assume the repository root as the working directory, unless a
@@ -127,6 +137,7 @@ record.
 | 8. Engine corrections from module work | Session event cancellation now reaches the navigation and request paths, and JSON-conversion getter/`toJSON` failures become value-free native errors instead of leaking thrown values | `src/core/browser.cpp`, `src/flatworm/module_bindings.cpp` | 12, 13 |
 | 9. Desktop inspection | Opt-in FLTK inspector over the same Session: page preview, DOM/source/activity views, synthetic interaction, bounded `pump_events`, and host-configured logical viewport metadata with resize and restricted media-query notifications | `plugins/basic-gui`, `include/prowsetk/browser.hpp`, `src/core/web_platform_shim.hpp` | 12, 21 |
 | 10. Qutebrowser assistant bridge | Owner-only userscript IPC, inert HTML snapshot Sessions, Lua query/discovery composition, fixed two-way actions with fresh captures, and the Booking API snapshot project | `tools/qutebrowser-bridge`, `examples/booking-dotcom-admin-api` | 31–34 |
+| 11. Remote browser control and OAuth | Outbound host-mediated CDP, Cloudflare Browser Run connections and HTML snapshots, OAuth 2.0 PKCE and a private token cache | `src/core/cdp.cpp`, `plugins/browser-run-integration`, `plugins/oauth-assist` | 35–37 |
 
 Three rules held across every stage, and they are worth preserving when adding
 the next one:
@@ -163,6 +174,9 @@ the next one:
 | Service and client interfaces | 28 | `web_interface.hpp`, `interface/web`, `interface/pyprowsetk` |
 | Terminal and instrumentation | 29–30 | `tools/prowse-tui`, `plugins/ebpf-interface` |
 | Desktop inspection GUI | 12, 21 | `plugins/basic-gui`, `tests/unit/test_basic_gui.cpp`, `tests/integration/test_basic_gui*` |
+| Outbound CDP and WebSocket transport | 35 | `include/prowsetk/cdp.hpp`, `network_client.hpp`, `src/core/cdp.cpp`, `network_client.cpp` |
+| Cloudflare Browser Run | 36 | `plugins/browser-run-integration`, `include/prowsetk/browser_run.hpp` |
+| OAuth assistance and private cache | 37 | `plugins/oauth-assist`, `include/prowsetk/oauth_assist.hpp`, `project_config.hpp` |
 
 The historical plugins under `plugins/.deprecated/` are covered as migration
 context in Chapter 16. They are outside the current plugin workflow.
@@ -182,6 +196,6 @@ bash scripts/build-docs.sh
 
 The output is `build/docs/html/index.html` and
 `build/docs/latex/prowsetk.tex`. Supply a directory argument to choose another
-output root. The builder checks for this index and exactly 34 numbered chapters.
+output root. The builder checks for this index and exactly 37 numbered chapters.
 Chapter navigation becomes internal links in the combined outputs; links to
 repository references remain relative to each generated file's location.

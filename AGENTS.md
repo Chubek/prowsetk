@@ -97,7 +97,7 @@ prowsetk/
 `third_party/` is populated from `.gitmodules` and is excluded by `.gitignore`.
 `scripts/scaffold.sh` creates or refreshes this skeleton.
 
-`manual/README.md` indexes 34 separate numbered Markdown chapters covering the
+`manual/README.md` indexes 37 separate numbered Markdown chapters covering the
 implemented engine, APIs, Lua extensions, plugins, tools and Qutebrowser
 assistant-browser workflows. Keep examples and support levels aligned with
 callable interfaces when extending those surfaces.
