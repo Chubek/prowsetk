@@ -45,6 +45,15 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/CMakeLists.txt")
     add_subdirectory(tools)
 endif()
 
+# Developer launchers are plain scripts next to the sources they wrap; install
+# them so an installed tree can still start its own frontends.
+foreach(_pwtk_launcher launch-gui)
+    if(EXISTS "${PROJECT_SOURCE_DIR}/tools/${_pwtk_launcher}.sh")
+        prowsetk_install_launcher("prowsetk-${_pwtk_launcher}"
+            "${PROJECT_SOURCE_DIR}/tools/${_pwtk_launcher}.sh")
+    endif()
+endforeach()
+
 prowsetk_export_package()
 
 if(PROWSETK_BUILD_TESTS)

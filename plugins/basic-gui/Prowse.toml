@@ -8,5 +8,6 @@ type = "native"
 path = "../../build/gui/plugins/basic-gui/libprowsetk_basic_gui.so"
 enabled = true
 autoload = true
-# Native loading registers metadata only. Use ptk-basic-gui or Viewer(session)
-# to explicitly open a window on the host's desktop/main thread.
+# Native loading registers metadata only. Launch the window with
+#   tools/launch-gui.sh --url URL -- file.html
+# or open Viewer(session) explicitly on the host's desktop/main thread.

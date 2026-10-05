@@ -854,6 +854,14 @@ CSS geometry, top-layer/focus-trapping or full media-query conformance. Keep
 display-free unit/integration coverage and the optional window CTest under tests.
 See `plugins/basic-gui/README.md` for the supported preview and Web API slice.
 
+`tools/launch-gui.sh` starts that executable. It searches CMake presets for the
+binary, applies the matching runtime library path, validates the display and
+page arguments, and rejects a `--proxy` URL carrying userinfo so credentials
+never reach a process listing. Forward unrecognized arguments instead of
+guessing them, keep `--help`/`--check` working with no build and no display, and
+never log page values, URLs or proxy values. Its help/preflight paths are
+CTest cases in every configuration; only the window test needs a display.
+
 ### Python build isolation
 
 Python binding builds keep their module, package wrapper, and generated stubs

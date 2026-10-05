@@ -530,7 +530,9 @@ hooks. Preview links carry revision/node action IDs, and FLTK never loads page
 resource files or external URIs. Loading the ABI-v2 facade is display/network-free;
 the C++ `Viewer` explicitly opens a window. The `Controller` and snapshot model
 work without a display. Enable the desktop adapter with `PROWSETK_BUILD_BASIC_GUI=ON`
-or the `gui` preset. See [the plugin guide](plugins/basic-gui/README.md) for
+or the `gui` preset, then start it with `tools/launch-gui.sh --url URL` or
+`tools/launch-gui.sh --file PAGE.html`. See
+[the plugin guide](plugins/basic-gui/README.md) for
 embedding, supported preview markup, redaction and bounds.
 
 The repository includes `plugins/ai-oracle`, an optional OpenAI Responses API
@@ -2336,6 +2338,26 @@ aggregates. Unsupported expressions fail explicitly; the full proposed
 marionette/RE2 language is not implemented. C and C++ APIs remain available in
 `pdql.h` / `pdql.hpp`. Both tools reuse existing Lua, tomlplusplus and optional
 pugixml dependencies and need no WASM toolchain.
+
+### Desktop inspector launcher
+
+`tools/launch-gui.sh` starts the optional FLTK inspector. It searches the CMake
+presets for `ptk-basic-gui`, applies the matching runtime library path, and
+validates its inputs before launching:
+
+```sh
+tools/launch-gui.sh --file plugins/basic-gui/example.html   # offline
+tools/launch-gui.sh --url https://example.com               # live
+tools/launch-gui.sh --check                                # build/display check
+tools/launch-gui.sh --print-bin                            # resolved binary
+```
+
+`--url`, `--file`, `--base-url`, `--proxy`, `--no-javascript`, `--preset`,
+`--bin`, `--print-bin`, `--check` and `--verbose` are handled here; anything
+else (and everything after `--`) passes through to the executable. A missing
+display and an unreachable build tree are reported before a window would open.
+`PROWSETK_GUI_BIN` overrides discovery. See
+[plugins/basic-gui/README.md](plugins/basic-gui/README.md).
 
 ## Build and Runtime Strategy
 

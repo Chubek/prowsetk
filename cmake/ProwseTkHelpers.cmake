@@ -3,6 +3,15 @@ include_guard(GLOBAL)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
+# prowsetk_install_launcher(<name> <path>)
+# Installs a repository developer launcher script into bin/. Kept here so the
+# permission mode is applied once instead of per install() call.
+function(prowsetk_install_launcher name path)
+    install(PROGRAMS "${path}"
+        RENAME "${name}"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}")
+endfunction()
+
 # prowsetk_add_library(<name> <sources...>)
 # Creates a static library, exposes <PROJECT_SOURCE_DIR>/include publicly, and
 # applies the shared warning set.

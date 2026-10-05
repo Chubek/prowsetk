@@ -13,6 +13,28 @@ build/gui/plugins/basic-gui/ptk-basic-gui --file plugins/basic-gui/example.html
 build/gui/plugins/basic-gui/ptk-basic-gui --url https://example.com
 ```
 
+### Launcher script
+
+`tools/launch-gui.sh` locates the executable across presets, sets the matching
+runtime library path, validates the display, and forwards page options:
+
+```sh
+tools/launch-gui.sh --file plugins/basic-gui/example.html
+tools/launch-gui.sh --url https://example.com
+tools/launch-gui.sh --check            # is the GUI build usable here?
+tools/launch-gui.sh --print-bin        # which executable would run?
+```
+
+It accepts `--url`, `--file`, `--base-url`, `--proxy`, `--no-javascript`,
+`--preset`, `--bin`, `--print-bin`, `--check` and `--verbose`. Unrecognized
+arguments and everything after `--` pass through to `ptk-basic-gui`, which owns
+their diagnostics. `PROWSETK_GUI_BIN` overrides discovery. A missing display is
+reported before the process starts (use `xvfb-run -a` for a headless check).
+A `--proxy` URL carrying userinfo is rejected so credentials never reach a
+process listing; use the `HTTPS_PROXY`/`HTTP_PROXY` variables instead. Verbose
+output reports stage names and whether proxy variables are set, never proxy or
+page values.
+
 The `gui` preset enables `PROWSETK_BUILD_BASIC_GUI` (default **OFF**). FLTK is
 found as a CMake config package or built from `third_party/fltk`. The vendored
 build disables demos, FLUID, OpenGL and documentation; Linux defaults to X11.
@@ -132,6 +154,8 @@ popups and unsupported graphical APIs retain their documented restricted stubs.
 
 Model, redaction, identity, navigation and script/network integration tests run
 without a display under `ctest --preset default`. `ctest --preset gui` also
-builds/tests the CLI and FLTK adapter. Its window smoke test uses `xvfb-run` when
-available, otherwise a supplied display; it skips only when neither exists.
+builds/tests the CLI, the FLTK adapter and the launcher script. Its window smoke
+test uses `xvfb-run` when available, otherwise a supplied display; it skips only
+when neither exists. The launcher script additionally runs under
+`ctest --preset default`, since its help and preflight checks need no display.
 No live website is used.

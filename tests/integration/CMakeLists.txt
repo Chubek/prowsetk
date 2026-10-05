@@ -7,10 +7,23 @@ target_link_libraries(prowsetk_integration_basic_gui PRIVATE prowsetk_basic_gui_
 target_compile_definitions(prowsetk_integration_basic_gui PRIVATE
     BASIC_GUI_PLUGIN_PATH="$<TARGET_FILE:prowsetk_basic_gui>")
 add_dependencies(prowsetk_integration_basic_gui prowsetk_basic_gui)
+
+# The launcher script's help and preflight checks are display-free, so they are
+# covered in every configuration, not only the FLTK-enabled one.
+find_program(PROWSETK_LAUNCHER_BASH bash)
+if(PROWSETK_LAUNCHER_BASH)
+    add_test(NAME prowsetk.integration.basic-gui.launcher.script
+        COMMAND "${PROWSETK_LAUNCHER_BASH}" "${PROJECT_SOURCE_DIR}/tools/launch-gui.sh" --help)
+    set_tests_properties(prowsetk.integration.basic-gui.launcher.script PROPERTIES
+        LABELS "integration;plugin;gui" TIMEOUT 15
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
 if(PROWSETK_BUILD_BASIC_GUI)
     prowsetk_add_executable(prowsetk_integration_basic_gui_window test_basic_gui_window.cpp)
     target_link_libraries(prowsetk_integration_basic_gui_window PRIVATE
         prowsetk_basic_gui ProwseTk::core ProwseTk::fltk GTest::gtest_main)
+    target_compile_definitions(prowsetk_integration_basic_gui_window PRIVATE
+        PROWSETK_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     find_program(PROWSETK_XVFB_RUN xvfb-run)
     if(PROWSETK_XVFB_RUN)
         add_test(NAME prowsetk.integration.basic-gui.window
@@ -26,6 +39,23 @@ if(PROWSETK_BUILD_BASIC_GUI)
     add_test(NAME prowsetk.integration.basic-gui.cli.invalid COMMAND ptk_basic_gui --unknown)
     set_tests_properties(prowsetk.integration.basic-gui.cli.invalid PROPERTIES
         LABELS "integration;plugin;gui" TIMEOUT 10 WILL_FAIL TRUE)
+
+    # The launcher needs no build or display for help/preflight, so it is
+    # registered under every configuration where the repository is present.
+    find_program(PROWSETK_BASH bash)
+    if(PROWSETK_BASH)
+        add_test(NAME prowsetk.integration.basic-gui.launcher.help
+            COMMAND "${PROWSETK_BASH}" "${PROJECT_SOURCE_DIR}/tools/launch-gui.sh" --help)
+        set_tests_properties(prowsetk.integration.basic-gui.launcher.help PROPERTIES
+            LABELS "integration;plugin;gui" TIMEOUT 15
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+        add_test(NAME prowsetk.integration.basic-gui.launcher.preflight
+            COMMAND "${PROWSETK_BASH}"
+                "${PROJECT_SOURCE_DIR}/tools/launch-gui.sh" --url https://example.test --file x.html)
+        set_tests_properties(prowsetk.integration.basic-gui.launcher.preflight PROPERTIES
+            LABELS "integration;plugin;gui" TIMEOUT 15 WILL_FAIL TRUE
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
 endif()
 
 if(TARGET ProwseTk::ai_oracle)

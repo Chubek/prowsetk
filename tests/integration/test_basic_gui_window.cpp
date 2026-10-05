@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
+#include <cstdio>
 #include <cstdlib>
+#include <iterator>
+#include <string>
 #include <FL/Fl.H>
 #include <FL/Fl_Button.H>
 #include <FL/Fl_Group.H>
@@ -32,6 +35,57 @@ T* first_of_type(Fl_Group& group) {
     return nullptr;
 }
 }  // namespace
+
+// The launcher script is a required part of the shipped workflow: it must work
+// with no display, and its preflight checks must be trustworthy.
+TEST(BasicGuiWindow, LauncherScriptHelpAndPreflightChecksWork) {
+    const std::string script = std::string(PROWSETK_SOURCE_DIR) + "/tools/launch-gui.sh";
+    ASSERT_NE(std::fopen(script.c_str(), "r"), nullptr);
+
+    // The script is single-quoted throughout; these fixture values cannot
+    // terminate the quote.
+    const auto run = [&script](std::initializer_list<std::string> args) {
+        std::string command = "bash '" + script + "'";
+        for (const auto& argument : args) {
+            // A single quote would terminate the shell quoting, so reject it
+            // rather than letting a fixture inject shell syntax.
+            EXPECT_EQ(argument.find('\''), std::string::npos) << "unsafe fixture";
+            command += " '" + argument + "'";
+        }
+        command += " 2>&1";
+        std::string output;
+        std::FILE* pipe = popen(command.c_str(), "r");
+        if (pipe == nullptr) return output;
+        char buffer[512];
+        while (std::fgets(buffer, sizeof(buffer), pipe) != nullptr) output += buffer;
+        pclose(pipe);
+        return output;
+    };
+
+    // Help never needs a build or a display, and documents the build step.
+    const auto help = run({"--help"});
+    EXPECT_NE(help.find("--url"), std::string::npos);
+    EXPECT_NE(help.find("--file"), std::string::npos);
+    EXPECT_NE(help.find("--proxy"), std::string::npos);
+    EXPECT_NE(help.find("cmake --build --preset gui"), std::string::npos);
+    EXPECT_NE(help.find("PROWSETK_GUI_BIN"), std::string::npos);
+    // Preconditions fail loudly instead of launching a broken window.
+    EXPECT_NE(run({"--url", "https://app.test", "--file", "x.html"}).find("not both"), std::string::npos);
+    EXPECT_NE(run({"--url", "file:///etc/passwd"}).find("http:// or https://"), std::string::npos);
+    EXPECT_NE(run({"--file", "/nonexistent-page.html"}).find("not readable"), std::string::npos);
+    EXPECT_NE(run({"--bin", "/nonexistent/ptk-basic-gui"}).find("not executable"), std::string::npos);
+    // A proxy URL with userinfo is refused so credentials never reach `ps`.
+    EXPECT_NE(run({"--url", "https://app.test", "--proxy",
+                   "http://user:secret@proxy.test:8080"}).find("credentials"),
+              std::string::npos);
+    // Unknown options are forwarded to the binary, which owns their diagnostics.
+    EXPECT_EQ(run({"--unknown-option"}).find("invalid arguments"), std::string::npos);
+    // A no-display launch is reported, not silently ignored.
+    const auto display = std::getenv("DISPLAY");
+    if (display == nullptr || *display == '\0') {
+        EXPECT_NE(run({"--file", "/dev/null"}).find("no display"), std::string::npos);
+    }
+}
 
 TEST(BasicGuiWindow, LiveWindowRefreshAndClosureRetainSessionOwnership) {
 #if defined(__linux__)
