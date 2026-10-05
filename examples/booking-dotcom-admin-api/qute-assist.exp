@@ -1,0 +1,195 @@
+#!/usr/bin/expect -f
+# One-shot Qutebrowser assistant-browser run for booking-admin-api.
+#
+# Orchestrates the manual's one-shot workflow with no automated prompts of its
+# own: starts the owner-only bridge broker, prints the single userscript line
+# to run in Qutebrowser, then runs the driver until it consumes the snapshot.
+# The inherently manual steps stay manual by design (open Qutebrowser, log in,
+# solve MFA/human verification, run :spawn); the script never fabricates that
+# consent. With --launch the broker's own [y/N] approval is relayed to you and
+# answered only with your keystroke.
+#
+# Usage:
+#   qute-assist.exp [--directory DIR] [--url URL] [--timeout SEC]
+#     [--wait-ms MS] [--output FILE] [--postman FILE] [--actions-file FILE]
+#     [--launch] [--browser BIN] [--success-xpath XPATH]
+#     [--bridge-bin BIN] [--cli-bin BIN] [--ipc-module SO] [--help]
+#
+# Exit: 0 on exported specs, 1 on bridge/driver failure, 2 on usage errors.
+
+# Robust output: after stdin reaches EOF, plain send_user can throw
+# ("spawn id not open"); diagnostics must never fail the run itself.
+rename send_user orig_send_user
+proc send_user {args} { catch {uplevel 1 [list orig_send_user {*}$args]} }
+
+set HERE [file dirname $argv0]
+set DEFAULT_BRIDGE [file normalize "$HERE/../../tools/qutebrowser-bridge/ptk-qute-bridge"]
+set DEFAULT_SCRAPE [file normalize "$HERE/../../tools/qutebrowser-bridge/ptk-qute-scrape"]
+set DEFAULT_MARIONETTE [file normalize "$HERE/../../tools/qutebrowser-bridge/ptk-qute-marionette"]
+set DEFAULT_CLI [file normalize "$HERE/../../build/default/src/cli/prowsetk"]
+set DEFAULT_CONFIG [file normalize "$HERE/Prowse.toml"]
+
+set directory "build/qute-booking"
+set url "https://admin.booking.com/"
+set timeout_secs 300
+set wait_ms 30000
+set output "_scraped/booking-admin-openapi.yaml"
+set postman "_scraped/booking-admin-postman.json"
+set actions_file ""
+set success_xpath ""
+set launch 0
+set browser "qutebrowser"
+set bridge_bin ""
+set cli_bin ""
+
+proc usage {} {
+    send_user "Usage: qute-assist.exp \[options]\n"
+    send_user "  --directory DIR   broker runtime dir (default: build/qute-booking)\n"
+    send_user "  --url URL         must stay on https://admin.booking.com (default)\n"
+    send_user "  --timeout SEC     broker lifetime 1..3600 (default: 300)\n"
+    send_user "  --wait-ms MS      snapshot/action wait 1..30000 (default: 30000)\n"
+    send_user "  --output FILE     OpenAPI output (default: _scraped/booking-admin-openapi.yaml)\n"
+    send_user "  --postman FILE    Postman output (default: _scraped/booking-admin-postman.json)\n"
+    send_user "  --actions-file F  two-way marionette policy (switches to ptk-qute-marionette)\n"
+    send_user "  --launch          open the URL in Qutebrowser (broker asks your approval)\n"
+    send_user "  --browser BIN     browser for --launch (default: qutebrowser)\n"
+    send_user "  --success-xpath X XPath login-evidence override\n"
+    send_user "  --bridge-bin BIN  ptk-qute-bridge override\n"
+    send_user "  --cli-bin BIN     prowsetk CLI override\n"
+    send_user "  --ipc-module SO   lquteipc override\n"
+}
+
+set ipc_module ""
+set i 0
+while {$i < [llength $argv]} {
+    set opt [lindex $argv $i]
+    if {$opt eq "--help" || $opt eq "-h"} { usage; exit 0 }
+    if {$opt in {"--launch"}} { set launch 1; incr i; continue }
+    if {$opt ni {"--directory" "--url" "--timeout" "--wait-ms" "--output" "--postman" "--actions-file" "--browser" "--success-xpath" "--bridge-bin" "--cli-bin" "--ipc-module"}} {
+        send_user "qute-assist.exp: unknown option $opt\n"; exit 2
+    }
+    if {$i + 1 >= [llength $argv]} { send_user "qute-assist.exp: missing value for $opt\n"; exit 2 }
+    set val [lindex $argv [expr {$i + 1}]]
+    switch -- $opt {
+        "--directory"    { set directory $val }
+        "--url"          { set url $val }
+        "--timeout"      { set timeout_secs $val }
+        "--wait-ms"      { set wait_ms $val }
+        "--output"       { set output $val }
+        "--postman"      { set postman $val }
+        "--actions-file" { set actions_file $val }
+        "--browser"      { set browser $val }
+        "--success-xpath" { set success_xpath $val }
+        "--bridge-bin"   { set bridge_bin $val }
+        "--cli-bin"      { set cli_bin $val }
+        "--ipc-module"   { set ipc_module $val }
+        default { send_user "qute-assist.exp: unknown option $opt\n"; exit 2 }
+    }
+    incr i 2
+}
+if {![string match "https://admin.booking.com*" $url]} {
+    send_user "qute-assist.exp: URL must stay on https://admin.booking.com\n"
+    exit 2
+}
+if {![string is integer -strict $timeout_secs] || $timeout_secs < 1 || $timeout_secs > 3600} {
+    send_user "qute-assist.exp: --timeout must be 1..3600\n"
+    exit 2
+}
+if {![string is integer -strict $wait_ms] || $wait_ms < 1 || $wait_ms > 30000} {
+    send_user "qute-assist.exp: --wait-ms must be 1..30000\n"
+    exit 2
+}
+if {$bridge_bin eq ""} {
+    if {[file executable $DEFAULT_BRIDGE]} { set bridge_bin $DEFAULT_BRIDGE } else { set bridge_bin "ptk-qute-bridge" }
+}
+if {$cli_bin eq ""} {
+    if {[file executable $DEFAULT_CLI]} { set cli_bin $DEFAULT_CLI } else { set cli_bin "prowsetk" }
+}
+if {$actions_file ne "" && ![file readable $actions_file]} {
+    send_user "qute-assist.exp: actions file unreadable\n"
+    exit 1
+}
+
+set bridge_json [file normalize "$directory/bridge.json"]
+set broker_cmd [list $bridge_bin serve --directory $directory --url $url --timeout $timeout_secs]
+if {$launch} { lappend broker_cmd --launch --browser $browser }
+
+proc cleanup {} {
+    global broker_spawn
+    if {[info exists broker_spawn]} {
+        catch {exec kill [exp_pid $broker_spawn]}
+        catch {wait -i $broker_spawn}
+        unset broker_spawn
+    }
+}
+
+trap { cleanup; exit 130 } {SIGINT SIGTERM}
+set timeout 30
+
+# 1. Broker. With --launch its own y/N approval is relayed to the human.
+spawn -noecho {*}$broker_cmd
+set broker_spawn $spawn_id
+if {$launch} {
+    expect {
+        -re {Open the configured page.*\[y/N\][^\n]*} {
+            send_user "\nqute-assist: the bridge asks: $expect_out(0)\n"
+            send_user "qute-assist: open Qutebrowser at $url? \[y/N\] "
+            expect_user -timeout 120 -re "(.*)\n" {
+                send "$expect_out(1,string)\n"
+            } timeout {
+                send_user "\nqute-assist: approval timed out\n"
+                cleanup; exit 1
+            } eof {
+                send_user "\nqute-assist: approval cancelled\n"
+                cleanup; exit 1
+            }
+        }
+        "qutebrowser bridge ready" { }
+        timeout { send_user "qute-assist: broker did not start\n"; cleanup; exit 1 }
+        eof { send_user "qute-assist: broker exited early\n"; cleanup; exit 1 }
+    }
+}
+expect {
+    "qutebrowser bridge ready" { }
+    timeout { send_user "qute-assist: broker did not become ready\n"; cleanup; exit 1 }
+    eof { send_user "qute-assist: broker exited before ready\n"; cleanup; exit 1 }
+}
+send_user "qute-assist: bridge ready; log in in Qutebrowser, then run:\n"
+if {$actions_file eq ""} {
+    send_user "  :spawn --userscript $DEFAULT_SCRAPE --bridge $bridge_json\n"
+} else {
+    send_user "  :spawn --userscript $DEFAULT_MARIONETTE --bridge $bridge_json --settle-ms 500\n"
+}
+
+# 2. Driver. It exits once the snapshot (and any action round-trips) complete.
+set driver_cmd [list $cli_bin run booking-admin-api --config $DEFAULT_CONFIG \
+    --bridge $bridge_json --output $output --postman $postman --wait_ms $wait_ms]
+if {$actions_file ne ""} { lappend driver_cmd --actions_file $actions_file }
+if {$success_xpath ne ""} { lappend driver_cmd --success_xpath $success_xpath }
+if {$ipc_module ne ""} { lappend driver_cmd --ipc_module $ipc_module }
+spawn -noecho {*}$driver_cmd
+set driver_spawn $spawn_id
+set wait_s [expr {int($wait_ms / 1000)}]
+if {$actions_file eq ""} { set timeout [expr {$wait_s + 120}] } else { set timeout 1200 }
+set driver_status 1
+expect {
+    -i $driver_spawn eof {
+        if {[catch {wait -i $driver_spawn} driver_wait] == 0 && [llength $driver_wait] >= 4} {
+            set driver_status [lindex $driver_wait 3]
+        } else {
+            set driver_status 0
+        }
+    }
+    -i $driver_spawn timeout {
+        send_user "qute-assist: driver timed out waiting for the snapshot\n"
+        catch {exec kill [exp_pid $driver_spawn]}
+    }
+}
+
+cleanup
+if {$driver_status == 0} {
+    send_user "qute-assist: specs exported ($output, $postman)\n"
+} else {
+    send_user "qute-assist: driver failed; previous exports preserved\n"
+}
+exit $driver_status

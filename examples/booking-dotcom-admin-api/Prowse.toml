@@ -13,6 +13,14 @@ command = "qutebrowser"
 method = "qutebrowser-userscript"
 wait_timeout_ms = 30000
 
+# Optional snapshot source via plugins/browser-run-integration (Cloudflare
+# hosted Chromium). Leave commented for the default Qutebrowser workflow.
+# Control credentials prefer the environment (CLOUDFLARE_ACCOUNT_ID /
+# CLOUDFLARE_API_TOKEN override these values); never commit a real token.
+# [cloudflare]
+# account_id = ""
+# api_token = ""
+
 [[drivers]]
 name = "booking-admin-api"
 description = "Extract a Qutebrowser admin snapshot; optionally run two-way DOM actions"

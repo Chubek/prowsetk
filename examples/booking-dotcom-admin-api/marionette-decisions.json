@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "goal": "Discover the admin.booking.com API behind read-only reservations, availability and property views",
+  "max_steps": 12,
+  "max_page_requests": 128,
+  "max_get_probes": 0,
+  "actions": [
+    {"id": "reservations-tab", "kind": "click", "selector": "button[role='tab'][aria-controls='reservations']"},
+    {"id": "availability-tab", "kind": "click", "selector": "button[role='tab'][aria-controls='availability']"},
+    {"id": "rates-tab", "kind": "click", "selector": "button[role='tab'][aria-controls='rates']"},
+    {"id": "reviews-tab", "kind": "click", "selector": "button[role='tab'][aria-controls='reviews']"},
+    {"id": "next-page", "kind": "click", "selector": "button[data-next]", "max_uses": 4},
+    {"id": "reservation-details", "kind": "click", "selector": "button[data-reservation-details]"},
+    {"id": "open-reservations", "kind": "navigate", "url": "/reservations"},
+    {"id": "open-availability", "kind": "navigate", "url": "/availability"}
+  ]
+}

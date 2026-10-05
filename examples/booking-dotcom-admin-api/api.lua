@@ -10,7 +10,32 @@ local function load_bridge()
     error('qutebrowser bridge module unavailable', 0)
 end
 local bridge = load_bridge()
+local function load_captcha_handler()
+    for _, path in ipairs({directory .. '../../plugins/captcha-handler/lua/captcha_handler.lua',
+                           directory .. '../../captcha-handler/lua/captcha_handler.lua'}) do
+        local file = io.open(path, 'rb')
+        if file then file:close(); local ok, mod = pcall(dofile, path); if ok then return mod end end
+    end
+    return nil
+end
+local captcha_handler = load_captcha_handler()
 local function fail() error('Booking assistant snapshot was not confirmed', 0) end
+
+-- Heuristic anti-bot triage using the captcha-handler Lua helper when present.
+-- Detection is never authoritative and never bypasses a challenge: a challenge
+-- is solved by the human in the assistant browser, then a fresh snapshot is
+-- sent. This emits only a value-free diagnostic and keeps the existing
+-- positive-DOM-evidence gate as the export condition.
+local function challenge_triage(current)
+    if captcha_handler == nil or type(current) ~= 'table' then return end
+    local ok, result = pcall(captcha_handler.inspect_response, 'GET', current.url, {
+        status = 200, body = current.html or '', headers = {}, final_url = current.url
+    })
+    if not ok or type(result) ~= 'table' or not result.activated then return end
+    io.stderr:write('booking-admin-api: anti-bot challenge inferred (' ..
+        tostring(result.category or 'anti-bot') ..
+        '); solve it in the assistant browser and resend a fresh snapshot\n')
+end
 
 local function evidence(active, args)
     local doc = active:document()
@@ -69,6 +94,7 @@ local function run(args)
         local seeds, seen, snapshots, actions, confirmed = {}, {}, 0, 0, 0
         local login_evidence = false
         local function collect(current)
+            challenge_triage(current)
             if not offline then
                 if prowse.url.origin(current.url) ~= 'https://admin.booking.com' then fail() end
                 login_evidence = evidence(active, args)

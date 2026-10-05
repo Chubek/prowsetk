@@ -1,0 +1,194 @@
+#!/usr/bin/expect -f
+# Cloudflare Browser Run snapshot-to-specs run for booking-admin-api.
+#
+# Fetches a rendered admin snapshot via plugins/browser-run-integration, then
+# feeds it to the existing pipeline with no further questions. Credentials are
+# asked for only when neither the environment nor Prowse.toml [cloudflare] (nor
+# the oauth-assist cache behind them) can supply them; the token is read with
+# echo disabled and never displayed, logged, or passed on any command line.
+# Nothing here bypasses CAPTCHAs: satisfy any challenge in the remote session
+# first, then re-run to re-snapshot.
+#
+# Usage:
+#   browser-run-assist.exp [--output SNAP.html] [--url URL] [--config TOML]
+#     [--to driver|marionette] [--openapi FILE] [--postman FILE]
+#     [--decisions FILE] [--fetch-bin BIN] [--marionette-bin BIN]
+#     [--cli-bin BIN] [--ipc-module SO] [--help]
+#
+# --to driver (default) needs only the built CLI; the snapshot travels inline
+# as --html, so snapshots over 512 KiB switch to --to marionette, which takes
+# the snapshot file directly but needs a running OpenCode server.
+#
+# Exit: 0 on exported specs, 1 on fetch/driver failure, 2 on usage errors.
+
+# Robust output: after stdin reaches EOF, plain send_user can throw
+# ("spawn id not open"); diagnostics must never fail the run itself.
+rename send_user orig_send_user
+proc send_user {args} { catch {uplevel 1 [list orig_send_user {*}$args]} }
+
+set HERE [file dirname $argv0]
+set DEFAULT_CONFIG [file normalize "$HERE/Prowse.toml"]
+set DEFAULT_FETCH [file normalize "$HERE/fetch-browser-run-snapshot.sh"]
+set DEFAULT_MARIONETTE [file normalize "$HERE/run-opencode-marionette.sh"]
+set DEFAULT_DECISIONS [file normalize "$HERE/marionette-decisions.json"]
+set DEFAULT_CLI [file normalize "$HERE/../../build/default/src/cli/prowsetk"]
+
+set snapshot "_scraped/booking-admin-browser-run.html"
+set url "https://admin.booking.com/"
+set config $DEFAULT_CONFIG
+set to "driver"
+set openapi "_scraped/booking-admin-openapi.yaml"
+set postman "_scraped/booking-admin-postman.json"
+set decisions $DEFAULT_DECISIONS
+set fetch_bin ""
+set marionette_bin ""
+set cli_bin ""
+set ipc_module ""
+
+proc usage {} {
+    send_user "Usage: browser-run-assist.exp \[options]\n"
+    send_user "  --output SNAP      snapshot file (default: _scraped/booking-admin-browser-run.html)\n"
+    send_user "  --url URL          must stay on https://admin.booking.com (default)\n"
+    send_user "  --config TOML      project config with optional \[cloudflare\] (default: Prowse.toml)\n"
+    send_user "  --to driver|marionette  downstream consumer (default: driver)\n"
+    send_user "  --openapi FILE     specs output (default: _scraped/booking-admin-openapi.yaml)\n"
+    send_user "  --postman FILE     Postman output (default: _scraped/booking-admin-postman.json)\n"
+    send_user "  --decisions FILE   marionette policy (default: marionette-decisions.json)\n"
+    send_user "  --fetch-bin BIN    fetch-browser-run-snapshot.sh override\n"
+    send_user "  --marionette-bin B run-opencode-marionette.sh override\n"
+    send_user "  --cli-bin BIN      prowsetk CLI override\n"
+    send_user "  --ipc-module SO    lquteipc override\n"
+}
+
+set i 0
+while {$i < [llength $argv]} {
+    set opt [lindex $argv $i]
+    if {$opt eq "--help" || $opt eq "-h"} { usage; exit 0 }
+    if {$opt ni {"--output" "--url" "--config" "--to" "--openapi" "--postman" "--decisions" "--fetch-bin" "--marionette-bin" "--cli-bin" "--ipc-module"}} {
+        send_user "browser-run-assist.exp: unknown option $opt\n"; exit 2
+    }
+    if {$i + 1 >= [llength $argv]} { send_user "browser-run-assist.exp: missing value for $opt\n"; exit 2 }
+    set val [lindex $argv [expr {$i + 1}]]
+    switch -- $opt {
+        "--output"       { set snapshot $val }
+        "--url"          { set url $val }
+        "--config"       { set config $val }
+        "--to"           { set to $val }
+        "--openapi"      { set openapi $val }
+        "--postman"      { set postman $val }
+        "--decisions"    { set decisions $val }
+        "--fetch-bin"    { set fetch_bin $val }
+        "--marionette-bin" { set marionette_bin $val }
+        "--cli-bin"      { set cli_bin $val }
+        "--ipc-module"   { set ipc_module $val }
+        default { send_user "browser-run-assist.exp: unknown option $opt\n"; exit 2 }
+    }
+    incr i 2
+}
+if {![string match "https://admin.booking.com*" $url]} {
+    send_user "browser-run-assist.exp: URL must stay on https://admin.booking.com\n"
+    exit 2
+}
+if {$to ne "driver" && $to ne "marionette"} {
+    send_user "browser-run-assist.exp: --to must be driver or marionette\n"
+    exit 2
+}
+if {$fetch_bin eq ""} { set fetch_bin $DEFAULT_FETCH }
+if {![file executable $fetch_bin]} {
+    send_user "browser-run-assist.exp: fetch helper not executable: $fetch_bin\n"
+    exit 1
+}
+if {$cli_bin eq ""} {
+    if {[file executable $DEFAULT_CLI]} { set cli_bin $DEFAULT_CLI } else { set cli_bin "prowsetk" }
+}
+
+# 1. Credentials: prompt only for what the environment does not already carry.
+#    Passed to children via the environment, never via argv or output.
+global env
+if {![info exists env(CLOUDFLARE_ACCOUNT_ID)] || $env(CLOUDFLARE_ACCOUNT_ID) eq ""} {
+    send_user "CLOUDFLARE_ACCOUNT_ID (32-char hex, empty for oauth-assist cache): "
+    expect_user -timeout 120 -re "(.*)\n" {
+        set env(CLOUDFLARE_ACCOUNT_ID) [string trim $expect_out(1,string)]
+    } timeout { send_user "\nbrowser-run-assist: input timed out\n"; exit 1 } \
+      eof { send_user "\nbrowser-run-assist: input cancelled\n"; exit 1 }
+}
+if {![info exists env(CLOUDFLARE_API_TOKEN)] || $env(CLOUDFLARE_API_TOKEN) eq ""} {
+    send_user "CLOUDFLARE_API_TOKEN (empty for TOML/oauth-assist cache): "
+    catch {system "stty -echo"}
+    expect_user -timeout 120 -re "(.*)\n" {
+        set env(CLOUDFLARE_API_TOKEN) [string trim $expect_out(1,string)]
+    } timeout { catch {system "stty echo"}; send_user "\nbrowser-run-assist: input timed out\n"; exit 1 } \
+      eof { catch {system "stty echo"}; send_user "\nbrowser-run-assist: input cancelled\n"; exit 1 }
+    catch {system "stty echo"}
+    send_user "\n"
+}
+
+# 2. Fetch. The helper refuses existing outputs and keeps tokens off argv.
+set timeout 180
+spawn -noecho $fetch_bin --output $snapshot --url $url --config $config
+set fetch_status 1
+expect {
+    -i $spawn_id "Browser Run operation completed" { set fetch_status 0 }
+    -i $spawn_id timeout { send_user "browser-run-assist: fetch timed out\n" }
+    -i $spawn_id eof {
+        if {[catch {wait -i $spawn_id} w] == 0 && [llength $w] >= 4} {
+            set fetch_status [lindex $w 3]
+        }
+    }
+}
+if {$fetch_status != 0} {
+    send_user "browser-run-assist: snapshot fetch failed (check credentials and login state)\n"
+    exit 1
+}
+send_user "browser-run-assist: snapshot saved ($snapshot)\n"
+
+# 3. Downstream: no further input.
+if {$to eq "marionette"} {
+    if {$marionette_bin eq ""} { set marionette_bin $DEFAULT_MARIONETTE }
+    if {![file executable $marionette_bin]} {
+        send_user "browser-run-assist: marionette runner not executable: $marionette_bin\n"
+        exit 1
+    }
+    set timeout 1500
+    spawn -noecho $marionette_bin --snapshot $snapshot --decisions $decisions \
+        --output $openapi --postman $postman --url $url
+    set downstream "marionette"
+} else {
+    if {[catch {file size $snapshot} snap_size] != 0} {
+        send_user "browser-run-assist: snapshot unreadable\n"
+        exit 1
+    }
+    if {$snap_size > 524288} {
+        send_user "browser-run-assist: snapshot is ${snap_size} bytes; use --to marionette for large pages\n"
+        exit 1
+    }
+    set fh [open $snapshot r]
+    set html [read $fh]
+    close $fh
+    set driver_cmd [list $cli_bin run booking-admin-api --config $config \
+        --html $html --output $openapi --postman $postman]
+    if {$ipc_module ne ""} { lappend driver_cmd --ipc_module $ipc_module }
+    set timeout 300
+    spawn -noecho {*}$driver_cmd
+    set downstream "driver"
+}
+set final 1
+expect {
+    -i $spawn_id eof {
+        if {[catch {wait -i $spawn_id} w] == 0 && [llength $w] >= 4} {
+            set final [lindex $w 3]
+        } else {
+            set final 0
+        }
+    }
+    -i $spawn_id timeout {
+        send_user "browser-run-assist: $downstream timed out\n"
+        catch {exec kill [exp_pid $spawn_id]}
+    }
+}
+if {$final == 0} {
+    send_user "browser-run-assist: specs exported ($openapi, $postman)\n"
+} else {
+    send_user "browser-run-assist: $downstream failed; previous exports preserved\n"
+}
+exit $final

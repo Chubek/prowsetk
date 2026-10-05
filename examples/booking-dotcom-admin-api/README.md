@@ -87,6 +87,150 @@ claims are made. Coverage is explicitly incomplete in both artifacts.
 Form values are removed before schema enrichment; names, types and required
 flags remain. The caller's captured DOM is retained for querying.
 
+## Anti-bot and CAPTCHA handling (no bypass)
+
+The driver does not bypass CAPTCHAs, rate limits, or WAF challenges. When
+`plugins/captcha-handler/lua/captcha_handler.lua` is present beside the checkout,
+each snapshot is triaged with its heuristic `inspect_response` classifier
+(reCAPTCHA/hCaptcha/Turnstile markers, human-verification text, 403/429 status
+signals). Detection is heuristic with provenance/confidence, never authoritative
+proof, and the diagnostic on stderr is value-free: it names only the inferred
+category, never page text, cookies, or tokens.
+
+The supported handling path is the assistant browser you already run:
+
+1. Solve the challenge interactively in the Qutebrowser tab (login, MFA,
+   human verification). This is the manual-user-prompt / wait-for-clearance
+   plan from `plugins/captcha-handler`; solver keys and clearance cookies are
+   never logged or exported.
+2. Send a fresh snapshot with `ptk-qute-scrape` (or `ptk-qute-marionette`).
+3. The driver re-checks same-origin scope and positive DOM login evidence
+   before exporting. A snapshot without login evidence still fails with the
+   generic `Booking assistant snapshot was not confirmed` error and preserves
+   previous artifacts.
+
+If the helper is absent, the driver keeps working: the login-evidence gate is
+unchanged. No solver API, webhook, pre-solved token, or cookie import is
+configured by this example.
+
+## OpenCode marionette (`plugins/opencode-marionette`)
+
+`marionette-decisions.json` is a trusted version-1 OpenCode policy for
+read-only admin views (reservation/availability/rates/reviews tabs, next-page
+pagination, reservation details, same-origin `/reservations` and
+`/availability` navigation). Selectors are illustrative starting points; match
+them to the current admin DOM. `max_get_probes` is 0 because snapshot sessions
+carry no response bodies.
+
+Workflow: capture a logged-in snapshot in Qutebrowser (solving any challenge
+there first), save its HTML to a file, then let OpenCode choose among the
+allow-listed IDs:
+
+```sh
+# Start an OpenCode server separately, e.g. `opencode serve`, then:
+examples/booking-dotcom-admin-api/run-opencode-marionette.sh \
+  --snapshot /absolute/snapshot.html \
+  --output _scraped/booking-admin-marionette-openapi.yaml \
+  --postman _scraped/booking-admin-marionette-postman.json
+```
+
+The runner calls `ptk-opencode-marionette DECISIONS URL OPENAPI POSTMAN SNAP.html`
+(build it with the default preset; override with `PROWSETK_MARIONETTE_BIN` or
+`--marionette-bin`). Behavior follows the plugin contract: OpenCode receives
+only action IDs, kinds, target presence/tag/availability and endpoint counts --
+no page text, HTML, form values, scripts, cookies, headers, selectors or typing
+values. Only listed actions run inside a bounded same-origin session; logout-like
+paths stay discovered but are never auto-probed, non-GET endpoints are never
+probed, exports are redacted, and coverage is explicitly incomplete
+(`x-prowsetk-marionette` with `used: true`). A separate optional subtractive
+cleanup pass is available through `plugins/opencode-bridge`
+(`lopencode.build_cleanup_prompt`): the agent may only drop entries, and the
+caller intersects the answer with the scraped `(method, url)` set so invented
+URLs can never enter the specs.
+
+## Remote Chromium snapshots (`plugins/browser-run-integration`)
+
+When the admin page needs full Chromium rendering beyond Flatworm's partial
+page-JS support, `ptk-browser-run content` (Cloudflare hosted browser) can
+supply the snapshot instead of Qutebrowser. The snapshot then flows through the
+same pipeline unchanged — `prowsetk run booking-admin-api --html`, or
+`run-opencode-marionette.sh --snapshot`:
+
+```sh
+export CLOUDFLARE_ACCOUNT_ID=<32-char-hex-account-id>
+export CLOUDFLARE_API_TOKEN=<token-with-Browser-Rendering-Edit>
+examples/booking-dotcom-admin-api/fetch-browser-run-snapshot.sh \
+  --output _scraped/booking-admin-browser-run.html
+```
+
+How it can be leveraged, and its limits:
+
+- **Same downstream, same gates.** The fetched HTML is an explicit snapshot:
+  import it into the JavaScript-disabled Flatworm Session (the `--html` path
+  already builds `javascript=false`), then scrape-endpoints + schema-grabber run
+  exactly as with assistant-browser captures. No cookies, JavaScript state,
+  HTTP status, or response bodies transfer with the import; the positive DOM
+  login-evidence check still applies, `authentication-verified` stays `false`,
+  and redaction/incomplete-coverage metadata are unchanged.
+- **Credentials stay control-plane.** The Cloudflare token is separate from
+  page Sessions: it travels only as a Bearer header to the fixed
+  `https://api.cloudflare.com/client/v4/accounts/{id}/browser-run` origin
+  (never in page URLs or Session headers). Environment values override the
+  `[cloudflare]` table in `Prowse.toml`; with neither token source the client
+  falls back to the Cloudflare-bound oauth-assist cache, which must itself
+  carry the Browser Rendering permission. Never commit a real token.
+- **Remote traffic is remote.** Local Session request hooks do **not**
+  intercept the remote Chromium's page requests; shape remote network/action
+  policy through Cloudflare/CDP if needed. The anti-bot triage above still
+  applies to the imported snapshot, and challenges are satisfied in the remote
+  session by the caller before re-snapshotting — this plugin provides no
+  CAPTCHA bypass.
+- **CLI scope.** `ptk-browser-run` is a single-shot client: `content` uses
+  Quick Actions navigation/load defaults, `cdp` sends one command per call
+  (use `--browser-session` to reconnect; explicitly issue `Browser.close`
+  when finished, since CLI disconnect does not close the remote browser).
+  Multi-command automation (create page, attach, drive Page/Runtime/DOM/Input
+  on one connection) is the C++ `browser_run::Client` API, and it is not a
+  transparent remote backend for the existing Lua/OpenCode controllers —
+  compose at the snapshot level instead.
+- `--output` writes caller data that may contain private page values: on POSIX
+  it creates a new `0600` file and refuses existing ones (remove or rotate a
+  previous snapshot first). Loading the native facade alone is network-free;
+  every remote call is explicit.
+
+## Assisted runs with minimal input (`expect`)
+
+Two `expect` scripts orchestrate the workflows above so you type as little as
+possible. Neither fabricates consent or logs secrets: the Qutebrowser login and
+any `--launch` approval stay human, and the Cloudflare token is asked for only
+when the environment carries neither credential, read with echo disabled and
+passed to children via the environment (never argv, logs, or specs).
+
+```sh
+# Qutebrowser one-shot: starts the broker, prints the one :spawn line to run
+# in the logged-in tab, then runs the driver until it consumes the snapshot.
+examples/booking-dotcom-admin-api/qute-assist.exp \
+  --directory build/qute-booking --timeout 300
+
+# Cloudflare snapshot-to-specs: prompts for missing credentials only, fetches
+# the rendered snapshot, then runs the driver on it (needs nothing else).
+CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... \
+  examples/booking-dotcom-admin-api/browser-run-assist.exp \
+  --output _scraped/booking-admin-browser-run.html
+```
+
+- `qute-assist.exp` wraps the one-shot workflow (`--actions-file` switches the
+  printed line and driver to the two-way `ptk-qute-marionette` round-trip;
+  `--launch` relays the broker's own `[y/N]` approval to your keystroke
+  instead of answering it). Exit is the driver's exit: `0` on exported specs,
+  `1` on bridge/driver failure with previous exports preserved.
+- `browser-run-assist.exp` wraps `fetch-browser-run-snapshot.sh` and chains
+  the result: `--to driver` (default, offline `--html` import; snapshots over
+  512 KiB are refused with a pointer to `--to marionette`, which takes the
+  snapshot file directly but needs a running OpenCode server).
+- Both scripts default every path/URL/timeout (`--help` lists overrides), pin
+  the URL to `https://admin.booking.com*`, and exit `2` on usage errors.
+
 ## Offline run and installed use
 
 ```sh
