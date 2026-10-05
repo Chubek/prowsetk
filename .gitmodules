@@ -158,3 +158,7 @@
 [submodule "third_party/openaipp"]
 	path = third_party/openaipp
 	url = https://github.com/Chubek/OpenAIpp.git
+
+[submodule "third_party/liboauthpp"]
+	path = third_party/liboauthpp
+	url = https://github.com/sirikata/liboauthcpp.git
