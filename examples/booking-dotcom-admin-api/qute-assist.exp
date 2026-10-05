@@ -126,6 +126,38 @@ proc cleanup {} {
 trap { cleanup; exit 130 } {SIGINT SIGTERM}
 set timeout 30
 
+# 0. The broker requires an owner-only (0700) directory and refuses anything
+#    else with a generic error, so settle that before spawning it. A live
+#    broker for this directory is reused, never evicted; only provably stale
+#    state is cleared.
+if {![file isdirectory $directory]} {
+    if {[catch {file mkdir $directory} err]} {
+        send_user "qute-assist: cannot create directory $directory: $err\n"
+        exit 1
+    }
+}
+if {[catch {file attributes $directory -permissions 0700} err]} {
+    send_user "qute-assist: cannot set owner-only permissions on $directory: $err\n"
+    exit 1
+}
+if {[file exists [file join $directory bridge.json]]} {
+    set live 0
+    if {[catch {exec $bridge_bin status --bridge [file join $directory bridge.json]}] == 0} {
+        set live 1
+    }
+    if {$live} {
+        send_user "qute-assist: a bridge is already serving $directory; use it or finish it first\n"
+        exit 1
+    }
+    send_user "qute-assist: clearing stale bridge state in $directory\n"
+    catch {file delete [file join $directory bridge.json]}
+    catch {file delete [file join $directory bridge.sock]}
+}
+if {[file exists [file join $directory bridge.sock]]} {
+    send_user "qute-assist: stale socket without a descriptor in $directory; remove bridge.sock and rerun\n"
+    exit 1
+}
+
 # 1. Broker. With --launch its own y/N approval is relayed to the human.
 spawn -noecho {*}$broker_cmd
 set broker_spawn $spawn_id
@@ -160,8 +192,41 @@ if {$actions_file eq ""} {
 } else {
     send_user "  :spawn --userscript $DEFAULT_MARIONETTE --bridge $bridge_json --settle-ms 500\n"
 }
+send_user "qute-assist: take your time logging in; the driver starts once the snapshot arrives.\n"
 
-# 2. Driver. It exits once the snapshot (and any action round-trips) complete.
+# 2. Wait for the snapshot before starting the driver. The driver's own wait
+#    is capped at 30s (wait_ms), far too short for a human login, so the
+#    broker's retained revision is the gate: poll status until revision > 0.
+set status_cmd [list $bridge_bin status --bridge $bridge_json]
+set wait_deadline [expr {[clock seconds] + $timeout_secs - 60}]
+if {$wait_deadline < [clock seconds] + 30} { set wait_deadline [expr {[clock seconds] + 30}] }
+set polls 0
+set snapshot_ready 0
+while {[clock seconds] < $wait_deadline} {
+    if {[catch {exec {*}$status_cmd} status_out] == 0} {
+        if {[regexp {"closed":\s*true} $status_out]} {
+            send_user "qute-assist: conversation was finished before any snapshot arrived\n"
+            cleanup; exit 1
+        }
+        if {[regexp {"revision":\s*([0-9]+)} $status_out -> rev] && $rev > 0} {
+            set snapshot_ready 1
+            break
+        }
+    }
+    after 5000
+    incr polls
+    if {$polls % 12 == 0} {
+        set left [expr {$wait_deadline - [clock seconds]}]
+        send_user "qute-assist: still waiting for the snapshot (${left}s left); send it with the :spawn line above\n"
+    }
+}
+if {!$snapshot_ready} {
+    send_user "qute-assist: no snapshot arrived before the broker lifetime ended; rerun with a larger --timeout\n"
+    cleanup; exit 1
+}
+send_user "qute-assist: snapshot received; starting the driver\n"
+
+# 3. Driver. It exits once the snapshot (and any action round-trips) complete.
 set driver_cmd [list $cli_bin run booking-admin-api --config $DEFAULT_CONFIG \
     --bridge $bridge_json --output $output --postman $postman --wait_ms $wait_ms]
 if {$actions_file ne ""} { lappend driver_cmd --actions_file $actions_file }

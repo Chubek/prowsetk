@@ -230,6 +230,10 @@ CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... \
   snapshot file directly but needs a running OpenCode server).
 - Both scripts default every path/URL/timeout (`--help` lists overrides), pin
   the URL to `https://admin.booking.com*`, and exit `2` on usage errors.
+- `qute-assist.exp` ensures the broker directory is owner-only (`0700`) before
+  starting the broker — a hand-made directory with wider permissions would
+  otherwise fail with the broker's generic error. A live broker for the
+  directory is never evicted; only provably stale state is cleared.
 
 ## Offline run and installed use
 
