@@ -11,8 +11,8 @@ endif()
 add_library(ProwseTk::basic_gui_model ALIAS prowsetk_basic_gui_model)
 prowsetk_install_library(prowsetk_basic_gui_model)
 
-add_library(prowsetk_basic_gui SHARED src/plugin_entry.cpp src/marionette.cpp)
-target_link_libraries(prowsetk_basic_gui PUBLIC ProwseTk::core PRIVATE prowsetk_basic_gui_model prowsetk_opencode_marionette_static)
+add_library(prowsetk_basic_gui SHARED src/plugin_entry.cpp src/marionette.cpp src/opencode.cpp)
+target_link_libraries(prowsetk_basic_gui PUBLIC ProwseTk::core PRIVATE prowsetk_basic_gui_model prowsetk_opencode_bridge_static prowsetk_opencode_marionette_static)
 target_include_directories(prowsetk_basic_gui PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")

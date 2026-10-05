@@ -44,7 +44,7 @@ display-free. `--help` also runs without a display. FLTK's LGPL license includes
 its static-linking exception; see `third_party/fltk/COPYING`.
 
 Options: `--url URL` or `--file FILE`, `--base-url URL` for offline relative
-references, `--no-javascript`, `--proxy URL`, `--marionette LUA-FILE`, `--goal TEXT`, `--help`. File startup uses a memory
+references, `--no-javascript`, `--proxy URL`, `--marionette LUA-FILE`, `--goal TEXT`, `--opencode-url URL`, `--help`. File startup uses a memory
 transport that rejects all page requests, including script-initiated navigation;
 it can be used for deterministic inspection. Launch without `--file` for live
 browsing. HTML files are bounded to 16 MiB.
@@ -82,7 +82,34 @@ cookies, proxies, TLS verification, request/response hooks and cancellation.
 Calls are synchronous on the GUI thread; network requests can temporarily block
 the controls. Close releases the timer and event subscription.
 
-## OpenCode Lua marionette
+## OpenCode bridge and marionette
+
+The GUI cooperates with `plugins/opencode-bridge` and
+`plugins/opencode-marionette` through their existing C++ interfaces. The
+**OpenCode** tab sets an optional server base URL for both plugins. Leave it
+empty to use the connection environment. **Check OpenCode** explicitly creates
+a decision-only API session to verify the connection and authentication, without
+loading or acting on the page. Each check/inquiry/run uses its own agent session.
+
+**Ask OpenCode** sends your prompt and a bounded structural description of the
+currently displayed page through `opencode-bridge`: canonical node paths, tags,
+and hidden/disabled flags. It omits page text, attribute values, source, scripts,
+cookies, headers, URL queries and fragments. Replies are advisory and never
+executed. They are hidden by default; **Console values** enables local display
+for subsequent replies. Use the **Marionette** tab for permitted browser actions.
+Both tabs use a separate agent transport and server credentials from the
+connection environment; changing the agent URL does not alter page networking.
+The API accepts loopback HTTP or verified HTTPS, and rejects credential-bearing
+URLs and redirects. The GUI does not launch OpenCode automatically.
+
+`--opencode-url URL` sets the same server override at startup. C++ embedders can
+use `Viewer::set_opencode_base_url`, or the display-free Controller's
+`set_opencode_base_url`, `check_opencode` and `ask_opencode` methods. The latter
+two accept an optional borrowed agent transport for hermetic testing. Linking
+the GUI facade alone does not establish a connection; explicit operations do.
+No new production dependency or plugin ABI change is introduced.
+
+### Lua marionette
 
 The **Marionette** tab contains a Lua editor, **Load Lua**, **Run marionette**,
 and an **OpenCode goal** field. Load `plugins/basic-gui/marionette.lua`, edit its
@@ -91,7 +118,7 @@ The initial editor has no allowed actions; load/edit a policy to permit browsing
 A nonempty goal field overrides the policy's goal. Goals go to OpenCode, so keep
 credentials and other secrets out of them.
 
-Start an OpenCode API server separately (`opencode serve`). The GUI reads
+Start an OpenCode API server separately (`opencode serve`). When no URL override is set, the GUI reads
 `OPENCODE_BASE_URL` (default `http://127.0.0.1:4096`),
 `OPENCODE_SERVER_USERNAME`, and `OPENCODE_SERVER_PASSWORD`. It uses the existing
 bridge's V2 `/api` protocol, deny-all agent tool permissions, separate host

@@ -105,8 +105,22 @@ TEST(BasicGuiWindow, LiveWindowRefreshAndClosureRetainSessionOwnership) {
             "<input id='input'><button id='button' onclick=\"document.querySelector('#state').textContent='Clicked'\">Click me</button>"
             "</body></html>");
         EXPECT_TRUE(observed->requests().empty());
+        viewer.set_opencode_base_url("http://127.0.0.1:4096");
         viewer.show();
         Fl::check();
+        {
+            auto* window = Fl::first_window();
+            ASSERT_NE(window, nullptr);
+            auto* server = dynamic_cast<Fl_Input*>(named_widget(*window, "OpenCode URL"));
+            auto* check = named_widget(*window, "Check OpenCode");
+            auto* ask = named_widget(*window, "Ask OpenCode");
+            ASSERT_NE(server, nullptr); ASSERT_NE(check, nullptr); ASSERT_NE(ask, nullptr);
+            EXPECT_STREQ(server->value(), "http://127.0.0.1:4096");
+            // URL validation runs before any live server request.
+            server->value("file:///private"); check->do_callback();
+            EXPECT_TRUE(observed->requests().empty());
+            server->value("http://127.0.0.1:4096");
+        }
         if (prowsetk::make_javascript_runtime()->name() != "null") {
             auto* window = Fl::first_window();
             ASSERT_NE(window, nullptr);

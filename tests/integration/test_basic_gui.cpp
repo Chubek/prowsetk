@@ -220,3 +220,78 @@ TEST(BasicGuiIntegration, MarionetteRejectsCrossOriginActionsBeforeOpenCode) {
     EXPECT_TRUE(agent.requests().empty());
     EXPECT_TRUE(observed->requests().empty());
 }
+
+TEST(BasicGuiIntegration, OpenCodeBridgeChecksUseSeparateTransportWithoutDrivingPage) {
+    Browser browser;
+    auto page = std::make_unique<MemoryNetworkClient>();
+    auto* observed = page.get();
+    browser.set_network_client(std::move(page));
+    auto session = browser.create_session();
+    Controller controller(*session);
+    controller.set_opencode_base_url("https://agent.test");
+    GuiAgent agent({});
+    controller.check_opencode(&agent.transport);
+    ASSERT_EQ(agent.transport.requests().size(), 1u);
+    EXPECT_EQ(agent.transport.requests().front().url, "https://agent.test/api/session");
+    EXPECT_TRUE(observed->requests().empty());
+    EXPECT_FALSE(session->document());
+    EXPECT_EQ(browser.live_session_count(), 1u);
+}
+
+TEST(BasicGuiIntegration, OpenCodeBridgeAdviceUsesStructuralContextAndDoesNotExecuteReply) {
+    Browser browser;
+    auto page = std::make_unique<MemoryNetworkClient>();
+    auto* observed = page.get();
+    browser.set_network_client(std::move(page));
+    auto session = browser.create_session();
+    session->set_header("Authorization", "Bearer page-private");
+    Controller controller(*session);
+    controller.set_opencode_base_url("https://agent.test");
+    controller.load_html("<input value='form-private'><textarea>text-private</textarea>"
+        "<p data-token='attribute-private'>page-private</p><button hidden disabled>Click</button>"
+        "<script>var secret='script-private'</script>", "https://app.test/start?custom=private-query#private-fragment");
+    const auto document = session->document();
+    const auto original = document->html();
+    GuiAgent agent({"Advice is advisory", "session.close()"});
+    const auto hidden = controller.ask_opencode("Suggest permitted actions", &agent.transport);
+    EXPECT_EQ(hidden.find("Advice is advisory"), std::string::npos);
+    controller.show_console_values(true);
+    EXPECT_EQ(controller.ask_opencode("Suggest permitted actions", &agent.transport), "session.close()");
+    EXPECT_EQ(session->document(), document);
+    EXPECT_EQ(document->html(), original);
+    EXPECT_TRUE(observed->requests().empty());
+    bool state_sent = false;
+    for (const auto& request : agent.transport.requests()) {
+        EXPECT_EQ(request.body.find("private"), std::string::npos);
+        EXPECT_EQ(request.body.find("data-token"), std::string::npos);
+        EXPECT_EQ(request.body.find("tag=script"), std::string::npos);
+        state_sent |= request.body.find("tag=button hidden disabled") != std::string::npos;
+        for (const auto& header : request.headers) EXPECT_EQ(header.second.find("page-private"), std::string::npos);
+        EXPECT_TRUE(request.url.starts_with("https://agent.test/api/"));
+    }
+    EXPECT_TRUE(state_sent);
+}
+
+TEST(BasicGuiIntegration, OpenCodeConnectionIsSharedWithMarionetteAndRejectsReentry) {
+    if (!LuaRuntime::available()) GTEST_SKIP();
+    Browser browser;
+    auto session = browser.create_session();
+    Controller controller(*session);
+    controller.load_html("<p>Initial</p>", "https://app.test/start");
+    controller.set_opencode_base_url("https://agent.test");
+    GuiAgent agent({R"({\"action\":\"stop\"})"});
+    EXPECT_TRUE(controller.run_marionette(navigation_marionette, {}, &agent.transport).stopped);
+    for (const auto& request : agent.transport.requests()) EXPECT_TRUE(request.url.starts_with("https://agent.test/api/"));
+    MemoryNetworkClient reentrant;
+    bool rejected = false;
+    reentrant.set_handler([&](const HttpRequest&) -> HttpResponse {
+        try { controller.check_opencode(&reentrant); }
+        catch (const Error& error) { rejected = error.code() == ErrorCode::InvalidArgument; }
+        EXPECT_THROW(controller.set_opencode_base_url("https://other-agent.test"), Error);
+        return {200, {}, R"({"data":{"id":"checked"}})", {}, {}};
+    });
+    controller.check_opencode(&reentrant);
+    EXPECT_TRUE(rejected);
+    EXPECT_EQ(controller.opencode_base_url(), "https://agent.test");
+    EXPECT_EQ(reentrant.requests().size(), 1u);
+}

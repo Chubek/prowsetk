@@ -21,6 +21,7 @@
 #   --base-url URL       base URL for relative references in --file
 #                        (default: https://offline.test/)
 #   --proxy URL          HTTP(S)/SOCKS5 proxy for page requests
+#   --opencode-url URL   OpenCode server override for both GUI integrations
 #   --marionette PATH    trusted Lua policy script to run through OpenCode
 #   --goal TEXT          override its OpenCode goal (forwarded to the GUI)
 #   --no-javascript      load the document without page scripting

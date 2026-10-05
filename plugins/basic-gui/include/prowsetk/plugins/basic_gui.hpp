@@ -80,6 +80,13 @@ public:
     bool type(std::size_t node, std::uint64_t revision, std::string_view text);
     std::optional<std::size_t> find(std::string_view css_selector) const;
     std::string evaluate(std::string_view javascript);
+    // Explicit, separate OpenCode IPC through opencode-bridge. Empty URL uses
+    // OPENCODE_BASE_URL; credentials stay in the server authentication environment.
+    // Link prowsetk_basic_gui. Replies are advisory and hidden unless opted in.
+    void set_opencode_base_url(std::string_view url);
+    const std::string& opencode_base_url() const noexcept { return opencode_base_url_; }
+    void check_opencode(NetworkClient* agent_transport = nullptr);
+    std::string ask_opencode(std::string_view prompt, NetworkClient* agent_transport = nullptr);
     // Trusted Lua main(args) returns version-1 decisions JSON. The host runs
     // the bounded OpenCode loop on this session. Link prowsetk_basic_gui.
     // A supplied agent transport is borrowed for this synchronous call only.
@@ -114,6 +121,7 @@ private:
     bool dirty_ = true;
     bool show_values_ = false;
     bool marionette_running_ = false;
+    std::string opencode_base_url_;
 };
 
 // Optional FLTK adapter. No FLTK headers enter the public API. Window creation
@@ -130,6 +138,7 @@ public:
     void load_html(std::string_view html, std::string_view base_url = "https://offline.test/");
     void refresh();
     void close();
+    void set_opencode_base_url(std::string_view url);
     MarionetteResult run_marionette(std::string_view lua, std::string_view goal = {});
     MarionetteResult run_marionette_file(const std::filesystem::path& path,
                                         std::string_view goal = {});

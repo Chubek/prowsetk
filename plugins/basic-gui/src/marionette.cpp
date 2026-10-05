@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <utility>
+#include "opencode_config.hpp"
 
 #include <prowsetk/error.hpp>
 #include <prowsetk/lua_runtime.hpp>
@@ -79,9 +80,7 @@ MarionetteResult Controller::run_marionette(std::string_view source, std::string
             namespace bridge = plugins::opencode_bridge;
             auto policy = marionette::parse_decisions(json);
             if (!goal.empty()) policy.goal = goal;
-            auto config = bridge::config_from_environment();
-            config.api_prefix = "/api";
-            config.max_requests = 512;
+            auto config = detail::opencode_config(opencode_base_url_);
             // Agent IPC never uses page cookies, headers or the page transport.
             auto network = agent_transport ? nullptr : make_socket_network_client();
             bridge::OpenCodeClient client(agent_transport ? *agent_transport : *network, config);

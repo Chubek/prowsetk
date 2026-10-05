@@ -155,3 +155,23 @@ TEST(BasicGui, MarionetteFilesAreBoundedAndErrorsOmitPaths) {
         EXPECT_EQ(std::string(error.what()).find(file.string()), std::string::npos);
     }
 }
+
+TEST(BasicGui, OpenCodeConfigurationIsValidatedWithoutNetworkOrPageChanges) {
+    Browser browser;
+    auto session = browser.create_session();
+    Controller controller(*session);
+    MemoryNetworkClient agent;
+    controller.set_opencode_base_url("https://agent.test");
+    EXPECT_EQ(controller.opencode_base_url(), "https://agent.test");
+    for (const auto url : {"file:///private", "http://remote.test:4096",
+                           "https://user:private@agent.test", "https://agent.test/?token=private"}) {
+        EXPECT_THROW(controller.set_opencode_base_url(url), Error);
+        EXPECT_EQ(controller.opencode_base_url(), "https://agent.test");
+    }
+    EXPECT_THROW(controller.set_opencode_base_url(std::string(4097, 'x')), Error);
+    EXPECT_THROW(controller.ask_opencode("", &agent), Error);
+    EXPECT_THROW(controller.ask_opencode(std::string(4097, 'x'), &agent), Error);
+    EXPECT_THROW(controller.ask_opencode("Inspect", &agent), Error);
+    EXPECT_TRUE(agent.requests().empty());
+    EXPECT_FALSE(session->document());
+}

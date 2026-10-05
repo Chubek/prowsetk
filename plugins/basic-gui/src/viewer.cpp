@@ -32,16 +32,16 @@ namespace prowsetk::basic_gui {
 struct Viewer::Impl {
     Controller controller;
     Fl_Double_Window window{1100, 800, "ProwseTk / Flatworm inspector"};
-    Fl_Text_Buffer source_buffer, node_buffer, console_buffer, network_buffer, marionette_buffer;
+    Fl_Text_Buffer source_buffer, node_buffer, console_buffer, network_buffer, marionette_buffer, agent_reply_buffer;
     std::unique_ptr<Fl_Tabs> tabs;
     std::vector<std::unique_ptr<Fl_Group>> groups;
-    std::unique_ptr<Fl_Button> back, forward, reload, open, go, find, click, type, evaluate, clear, load_lua, run_lua;
-    std::unique_ptr<Fl_Input> address, selector, script, goal;
+    std::unique_ptr<Fl_Button> back, forward, reload, open, go, find, click, type, evaluate, clear, load_lua, run_lua, connect_agent, ask_agent;
+    std::unique_ptr<Fl_Input> address, selector, script, goal, server, agent_prompt;
     std::unique_ptr<Fl_Secret_Input> input;
     std::unique_ptr<Fl_Check_Button> values;
     std::unique_ptr<Fl_Help_View> page;
     std::unique_ptr<Fl_Hold_Browser> nodes;
-    std::unique_ptr<Fl_Text_Display> source, node_detail, console, network;
+    std::unique_ptr<Fl_Text_Display> source, node_detail, console, network, agent_reply;
     std::unique_ptr<Fl_Text_Editor> marionette_editor;
     std::unique_ptr<Fl_Box> status;
     std::optional<std::size_t> selected;
@@ -95,6 +95,19 @@ struct Viewer::Impl {
         auto& network_group = group(10, 125, 1080, 568, "Network");
         network = display(14, 129, 1072, 560, network_buffer);
         network_group.resizable(network.get()); network_group.end();
+        auto& agent_group = group(10, 125, 1080, 568, "OpenCode");
+        server = std::make_unique<Fl_Input>(115, 137, 830, 28, "OpenCode URL");
+        server->maximum_size(4096);
+        server->tooltip("Empty uses OPENCODE_BASE_URL or loopback default. Authentication uses server environment variables.");
+        connect_agent = button(960, 137, 120, "Check OpenCode");
+        agent_prompt = std::make_unique<Fl_Input>(115, 177, 830, 28, "Ask about page");
+        agent_prompt->maximum_size(4096);
+        ask_agent = button(960, 177, 120, "Ask OpenCode");
+        agent_reply = display(14, 217, 1072, 472, agent_reply_buffer);
+        agent_reply_buffer.text("Check the OpenCode server, then ask about the displayed page structure.\n"
+            "Replies are advisory; enable Console values to view subsequent replies.\n"
+            "The Marionette tab runs permitted browser actions through opencode-marionette.");
+        agent_group.resizable(agent_reply.get()); agent_group.end();
         auto& marionette_group = group(10, 125, 1080, 568, "Marionette");
         goal = std::make_unique<Fl_Input>(110, 137, 720, 28, "OpenCode goal");
         goal->maximum_size(4096);
@@ -311,6 +324,18 @@ struct Viewer::Impl {
             } else if (widget == self.evaluate.get() || widget == self.script.get()) {
                 const auto result = self.controller.evaluate(self.script->value());
                 self.render(); self.message(result); return;
+            } else if (widget == self.connect_agent.get() || widget == self.ask_agent.get()) {
+                self.controller.set_opencode_base_url(self.server->value());
+                self.message("Contacting OpenCode"); self.window.redraw(); Fl::flush();
+                if (widget == self.connect_agent.get()) {
+                    self.controller.check_opencode();
+                    self.message("OpenCode API/authentication check succeeded");
+                } else {
+                    const auto reply = self.controller.ask_opencode(self.agent_prompt->value());
+                    self.agent_reply_buffer.text(reply.c_str());
+                    self.render(); self.message("OpenCode replied; advice is not executed");
+                }
+                return;
             } else if (widget == self.load_lua.get()) {
                 Fl_Native_File_Chooser chooser;
                 chooser.title("Load trusted Lua marionette"); chooser.filter("Lua\t*.lua");
@@ -328,6 +353,7 @@ struct Viewer::Impl {
                 self.message("Lua loaded; edit permitted actions, then Run marionette");
                 return;
             } else if (widget == self.run_lua.get()) {
+                self.controller.set_opencode_base_url(self.server->value());
                 std::unique_ptr<char, decltype(&std::free)> text(self.marionette_buffer.text(), &std::free);
                 self.message("Marionette running; waiting for OpenCode");
                 self.window.redraw(); Fl::flush();
@@ -350,6 +376,10 @@ void Viewer::navigate(std::string_view url) { impl_->controller.navigate(url); i
 void Viewer::load_html(std::string_view html, std::string_view base_url) { impl_->controller.load_html(html, base_url); impl_->render(); }
 void Viewer::refresh() { impl_->refresh(); }
 void Viewer::close() { impl_->stop(); }
+void Viewer::set_opencode_base_url(std::string_view url) {
+    impl_->controller.set_opencode_base_url(url);
+    impl_->server->value(impl_->controller.opencode_base_url().c_str());
+}
 MarionetteResult Viewer::run_marionette(std::string_view lua, std::string_view goal) {
     impl_->message("Marionette running; waiting for OpenCode");
     impl_->window.redraw(); Fl::flush();

@@ -18,7 +18,10 @@ retains the version-2 C ABI. Opening a live viewer is an explicit C++
 `basic_gui::Viewer(session)` operation. The core/default build and the plugin's
 controller/projection tests remain headless. Preview clicks and typing use
 Session synthetic interactions; networking, cookies, TLS and request hooks stay
-in the host engine. The Marionette tab can load a trusted Lua preparation script
+in the host engine. The OpenCode tab uses `opencode-bridge` to check server
+authentication and request advisory replies from bounded structural context;
+its server URL override also applies to `opencode-marionette`. Replies are
+hidden by default and never executed. The Marionette tab can load a trusted Lua preparation script
 whose `main(args)` returns decisions JSON, then run the existing bounded OpenCode
 action loop on the displayed session. `--marionette FILE --goal TEXT` provides
 startup execution. OpenCode runs separately; its credentials/transport remain

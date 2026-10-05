@@ -525,7 +525,10 @@ The repository includes `plugins/basic-gui`, an optional FLTK browser inspector.
 `ptk-basic-gui` supplies URL navigation/history, a basic HTML page preview,
 DOM/attribute inspection, sanitized source, console/network activity, synthetic
 clicks/typing, explicit page-JavaScript evaluation and Lua-configured OpenCode
-marionette runs. The Marionette tab loads trusted Lua `main(args)` scripts that
+marionette runs. Its OpenCode tab checks a server and requests advisory replies
+through `opencode-bridge` using structural page context; both tabs share the
+server override and keep agent authentication separate from page networking.
+The Marionette tab loads trusted Lua `main(args)` scripts that
 return bounded action policies; OpenCode chooses permitted action IDs on the
 displayed Session. See the plugin guide for connection setup and script examples.
 It uses the owning Flatworm Session; every network request retains host policies, cookies and

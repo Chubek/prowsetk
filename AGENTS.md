@@ -852,6 +852,14 @@ read host viewport dimensions, notify resize/visualViewport/media listeners and
 support semantic details/dialog state and form-control activation. Do not claim
 CSS geometry, top-layer/focus-trapping or full media-query conformance. Keep
 display-free unit/integration coverage and the optional window CTest under tests.
+The GUI's OpenCode tab uses `opencode-bridge` for explicit API/authentication
+checks and advisory inquiries. Its validated server override also applies to
+`opencode-marionette`. Send only bounded structural page context to inquiries,
+with no page text/attribute values/scripts/credentials or URL query/fragment.
+Replies must remain advisory, unexecuted and hidden by default until local
+console-value opt-in. Agent IPC uses its own transport and authentication; do
+not change page networking or connect implicitly on facade loading. Reject
+reentry and configuration changes during any active agent operation.
 GUI marionettes are trusted Lua preparation scripts whose `main(args)` returns
 version-1 decisions JSON; this differs from the CLI driver's integer result.
 Bind the displayed session only for the synchronous run, destroy the fresh Lua

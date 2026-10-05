@@ -9,7 +9,7 @@
 
 int main(int argc, char** argv) {
     try {
-        std::string url, file, marionette, goal, base = "https://offline.test/";
+        std::string url, file, marionette, goal, opencode_url, base = "https://offline.test/";
         prowsetk::BrowserConfig config;
         config.timeout_ms = 10000;
         for (int i = 1; i < argc; ++i) {
@@ -17,18 +17,19 @@ int main(int argc, char** argv) {
             if (arg == "--help" || arg == "-h") {
                 std::cout << "Usage: ptk-basic-gui [--url HTTP(S)-URL | --file HTML-FILE]\n"
                              "                     [--base-url URL] [--no-javascript] [--proxy URL]\n"
-                             "                     [--marionette LUA-FILE] [--goal TEXT]\n"
+                             "                     [--marionette LUA-FILE] [--goal TEXT] [--opencode-url URL]\n"
                              "Flatworm inspector: basic page preview, DOM, sanitized source, console and network.\n";
                 return 0;
             }
             if (arg == "--no-javascript") config.javascript = false;
-            else if ((arg == "--url" || arg == "--file" || arg == "--base-url" || arg == "--proxy" || arg == "--marionette" || arg == "--goal") && i + 1 < argc) {
+            else if ((arg == "--url" || arg == "--file" || arg == "--base-url" || arg == "--proxy" || arg == "--marionette" || arg == "--goal" || arg == "--opencode-url") && i + 1 < argc) {
                 const std::string value = argv[++i];
                 if (arg == "--url") url = value;
                 else if (arg == "--file") file = value;
                 else if (arg == "--base-url") base = value;
                 else if (arg == "--marionette") marionette = value;
                 else if (arg == "--goal") goal = value;
+                else if (arg == "--opencode-url") opencode_url = value;
                 else config.proxy = prowsetk::parse_proxy_url(value);
             } else throw prowsetk::Error(prowsetk::ErrorCode::InvalidArgument, "invalid arguments");
         }
@@ -45,6 +46,7 @@ int main(int argc, char** argv) {
                                   "built without FLTK");
         }
         prowsetk::basic_gui::Viewer viewer(*session);
+        if (!opencode_url.empty()) viewer.set_opencode_base_url(opencode_url);
         if (!url.empty()) viewer.navigate(url);
         if (!file.empty()) {
             const auto size = std::filesystem::file_size(file);

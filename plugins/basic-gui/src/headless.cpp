@@ -10,6 +10,9 @@ void Viewer::navigate(std::string_view) {}
 void Viewer::load_html(std::string_view, std::string_view) {}
 void Viewer::refresh() {}
 void Viewer::close() {}
+void Viewer::set_opencode_base_url(std::string_view) {
+    throw Error(ErrorCode::Unsupported, "basic-gui was built without FLTK");
+}
 MarionetteResult Viewer::run_marionette(std::string_view, std::string_view) {
     throw Error(ErrorCode::Unsupported, "basic-gui was built without FLTK");
 }
