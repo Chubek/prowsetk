@@ -214,3 +214,17 @@ if(TARGET prowsetk_qute_ipc)
         TEST_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_dependencies(prowsetk_unit_qutebrowser prowsetk_qute_ipc)
 endif()
+prowsetk_gtest(prowsetk_unit_cdp_client "prowsetk.unit.cdp-client."
+    "unit;web-interface" test_cdp_client.cpp)
+prowsetk_gtest(prowsetk_unit_browser_run "prowsetk.unit.browser-run."
+    "unit;plugin" test_browser_run.cpp)
+target_link_libraries(prowsetk_unit_browser_run PRIVATE ProwseTk::browser_run)
+if(UNIX)
+    prowsetk_gtest(prowsetk_unit_oauth_assist "prowsetk.unit.oauth-assist."
+        "unit;plugin;storage" test_oauth_assist.cpp)
+    target_link_libraries(prowsetk_unit_oauth_assist PRIVATE ProwseTk::oauth_assist)
+    target_compile_definitions(prowsetk_unit_oauth_assist PRIVATE TEST_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    if(PROWSETK_HAVE_OPENSSL)
+        target_compile_definitions(prowsetk_unit_oauth_assist PRIVATE PROWSETK_TEST_OPENSSL=1)
+    endif()
+endif()

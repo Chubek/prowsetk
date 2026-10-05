@@ -35,6 +35,30 @@ arguments = [
 Run it with `prowsetk run inspect --config Prowse.toml --html '<h1>Local</h1>'`.
 Chapter 10 supplies the complete driver body.
 
+## Cloudflare Browser Run and OAuth
+
+`ptk-browser-run` and the C++ Browser Run client consume `[cloudflare].account_id`
+and `[cloudflare].api_token`; nonempty `CLOUDFLARE_ACCOUNT_ID` and
+`CLOUDFLARE_API_TOKEN` override them. These credentials are control-plane inputs,
+not page request headers. An API token needs Browser Rendering – Edit permission.
+
+`ptk-oauth-assist` consumes `[oauth]`: `client_id`, `scopes`,
+`authorization_endpoint`, `token_endpoint`, and `redirect_uri`.
+`PROWSETK_OAUTH_CLIENT_ID` / `PROWSETK_OAUTH_SCOPES` override the first two.
+Cloudflare endpoints default to `https://dash.cloudflare.com/oauth2/auth` and
+`https://dash.cloudflare.com/oauth2/token`; the default redirect URI is
+`http://localhost:8976/oauth/callback`. Supply a provider-registered public client
+and approved scopes/redirect. Login prints an authorization URL and accepts the
+complete redirect URL through hidden terminal input, then caches tokens under
+`$HOME/.cache/ProwseTk/OAuth`. With no explicit API token, Browser Run uses this
+Cloudflare-bound cache. Neither a token's existence nor OAuth completion proves
+Browser Run authorization.
+
+See [Browser Run integration](../plugins/browser-run-integration/README.md) and
+[OAuth assistance](../plugins/oauth-assist/README.md) for CLI commands, remote
+snapshot semantics, bounds and cache permissions. Ordinary `prowsetk run` does
+not initiate either service automatically.
+
 ## Paths and arguments
 
 `project.root` resolves relative to the configuration file's directory unless

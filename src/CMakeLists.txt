@@ -10,6 +10,10 @@ set(PROWSETK_CORE_SOURCES
     core/redaction.cpp
     core/storage.cpp
     core/network_client.cpp
+    core/cdp.cpp
+    ../flatworm-modules/rpc/src/json.cpp
+    ../flatworm-modules/rpc/src/json_parser.cpp
+    ../flatworm-modules/rpc/src/json_encoder.cpp
     core/flatworm_host.cpp
     core/javascript_runtime.cpp
     core/quickjs_runtime.cpp
@@ -114,6 +118,8 @@ add_library(ProwseTk::core ALIAS prowsetk_core)
 prowsetk_install_library(prowsetk_core)
 
 add_subdirectory(session)
+add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/oauth-assist" "${CMAKE_BINARY_DIR}/plugins/oauth-assist")
+add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/browser-run-integration" "${CMAKE_BINARY_DIR}/plugins/browser-run-integration")
 add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/basic-gui" "${CMAKE_BINARY_DIR}/plugins/basic-gui")
 add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/complex-gui" "${CMAKE_BINARY_DIR}/plugins/complex-gui")
 

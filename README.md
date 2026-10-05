@@ -576,6 +576,30 @@ the engine's event loop, timers, request hooks, and session lifecycle events.
 
 ## Plugin System
 
+[`plugins/browser-run-integration`](plugins/browser-run-integration/README.md)
+adds an explicit Cloudflare Browser Run client: authenticated remote CDP
+connections, Quick Actions HTML fetching, and snapshot import into a
+JavaScript-disabled Flatworm Session for existing queries/extractors. The core
+outbound `CdpClient` complements the existing inbound CDP server, with bounded
+RFC 6455 WebSocket transport through `NetworkClient`. Remote page networking
+runs in Cloudflare, outside local Session hooks. Use `CLOUDFLARE_ACCOUNT_ID` /
+`CLOUDFLARE_API_TOKEN` or `[cloudflare].account_id` / `api_token` in `Prowse.toml`.
+`ptk-browser-run` exposes `content` and single-command `cdp` operations; persistent
+C++ clients support multi-command marionettes. See the plugin guide for limits
+and the existing Flatworm CDP compatibility restrictions.
+
+[`plugins/oauth-assist`](plugins/oauth-assist/README.md) provides
+`ptk-oauth-assist login|refresh|status|logout`, explicit OAuth 2.0 authorization
+code/PKCE, and a private cache at `$HOME/.cache/ProwseTk/OAuth/token.json`.
+`[oauth]` configures the registered public client, scopes, endpoints and redirect
+URI; `PROWSETK_OAUTH_CLIENT_ID` / `PROWSETK_OAUTH_SCOPES` override those fields.
+Login uses a browser authorization URL and hidden-input manual redirect handoff.
+The existing `third_party/liboauthpp` is an OAuth 1.0a library; its encoding
+helper is reused, while OAuth 2.0 is implemented separately with OpenSSL and
+host HTTP. Cloudflare client registration/scopes must be supplied by the host;
+no Wrangler identity is borrowed and no OAuth grant is assumed to authorize
+Browser Run. Both native ABI-v2 facades load without network activity.
+
 The repository includes `plugins/basic-gui`, an optional FLTK browser inspector.
 `ptk-basic-gui` supplies URL navigation/history, a basic HTML page preview,
 DOM/attribute inspection, sanitized source, console/network activity, synthetic
@@ -1405,6 +1429,15 @@ prowsetk serialize --vtd --stdout --html '<h1>Report</h1>' \
 ```
 
 ### Automation protocols
+
+`include/prowsetk/cdp.hpp` also provides an outbound `CdpClient` for controlling
+remote CDP browsers. It preserves command IDs, flattened target session IDs and
+interleaved events over a host-owned `WebSocket`. `NetworkClient::open_websocket`
+has an optional POSIX/OpenSSL implementation for verified WSS and WS; alternate
+hosts can inject a transport. See the Browser Run guide for supported framing,
+timeouts, event-queue bounds and failure behavior. The existing server below is
+the separate inbound bridge; adding a client does not imply full Chromium domain
+coverage in Flatworm.
 
 The `webdriver` command exposes the W3C WebDriver HTTP protocol directly from
 the headless engine. It supports the standard session lifecycle, navigation,
@@ -2527,6 +2560,7 @@ optional components depending on the build configuration.
 | `libmagic` | File and content-type detection |
 | `libbpf` | Optional eBPF object, program, map, link, ring-buffer, and perf-buffer integration |
 | `libmill` | Concurrency and coroutine utilities |
+| `liboauthpp` (`liboauthcpp`) | Optional OAuth 1.0a library; percent-encoding helper reused by oauth-assist's separate OAuth 2.0 implementation |
 | `libtomcrypt` | Encrypted storage primitives (PBKDF2-HMAC-SHA256 and AES-GCM) |
 | `llhttp` | HTTP/1.1 message parsing |
 | `lmdb` | Durable bounded cache and crawler frontier for the optional spider plugin |
@@ -2536,7 +2570,7 @@ optional components depending on the build configuration.
 | `nanobind` | Python bindings; requires Python 3.9+ development support |
 | `nexus` | Optional HTTP/3 (QUIC) transport |
 | `openaipp` | Optional OpenAI wire/authentication helpers for `plugins/ai-oracle`; includes cpp-httplib, MetaTk/DSLtk, and nlohmann-json headers |
-| `openssl` | Optional verified HTTPS for the POSIX socket transport (3.0+) |
+| `openssl` | Optional verified HTTPS/WSS, RFC 6455 handshake/masking randomness, and OAuth 2.0 PKCE (3.0+) |
 | `pugixml` | XML handling and XPath |
 | `quickjs` | Page JavaScript runtime and backend for native Flatworm module bindings, including `flatworm:rpc` |
 | `re2` | Safe regular-expression matching |

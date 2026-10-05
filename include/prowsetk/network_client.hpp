@@ -11,6 +11,8 @@
 
 namespace prowsetk {
 
+class WebSocket;
+
 enum class ProxyScheme { None, Http, Https, Socks5 };
 struct ProxyConfig {
     ProxyScheme scheme = ProxyScheme::None;
@@ -55,6 +57,10 @@ public:
     virtual ~NetworkClient() = default;
 
     virtual HttpResponse send(const HttpRequest& request) = 0;
+
+    // Explicit host-mediated RFC 6455 upgrade. request.url uses ws/wss; no
+    // redirects, cookies or page headers are implicitly attached.
+    virtual std::unique_ptr<WebSocket> open_websocket(const HttpRequest& request);
 
     virtual std::string name() const { return "network"; }
     virtual void set_proxy(ProxyConfig proxy) { (void)proxy; }

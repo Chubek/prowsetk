@@ -314,6 +314,39 @@ the work is not done.
 
 # Additions & Revisions
 
+## Outbound CDP, Browser Run and OAuth assistance
+
+The existing inbound `CdpServer` remains in `src/core/playwright.cpp`; the
+outbound `CdpClient` is in `src/core/cdp.cpp` with the public `cdp.hpp` API.
+`NetworkClient::open_websocket` owns transport policy and the optional verified
+POSIX/OpenSSL WS/WSS implementation. Keep IDs/session IDs correlated, strict
+bounded JSON, masked client frames, fragmentation/ping handling, bounded queues,
+transaction deadlines and value-free failures. The shared private JSON codec is
+the same source implementation used by the RPC module; do not add another parser.
+One command is outstanding; reentry and malformed/mismatched peer envelopes fail.
+This does not make Flatworm's inbound CDP bridge fully Chromium-compatible.
+
+`plugins/browser-run-integration` keeps Cloudflare control credentials separate
+from page Sessions. Environment overrides `[cloudflare]` TOML credentials;
+missing API tokens may use the Cloudflare-bound oauth-assist cache. Bearer headers
+go only to the fixed API origin; never put them in URLs. Remote Chromium page
+traffic is not intercepted by local Session hooks. Snapshot import requires
+JavaScript-disabled Flatworm and transfers no cookies or HTTP authentication
+evidence. Native facade loading stays network-free. C++ is the multi-command API;
+the CLI is a Quick Actions/single-CDP-command client, not a transparent remote
+backend for existing Lua/OpenCode controllers.
+
+`plugins/oauth-assist` supplies OAuth 2.0 S256 PKCE with one-use state validation,
+host-mediated HTTPS exchange/refresh and a POSIX owner-only, symlink-resistant,
+atomic cache at `$HOME/.cache/ProwseTk/OAuth`. `third_party/liboauthpp` implements
+OAuth 1.0a only; its encoding helper does not implement Cloudflare OAuth 2.0.
+Keep discovery/build glue in `cmake/Dependencies.cmake`, OpenSSL optional, and
+never borrow a third party's OAuth client identity. Provider-approved public
+client IDs, redirect URIs and scopes are caller configuration. The manual CLI
+handoff hides redirect input and expires; it does not run a callback listener.
+Logout deletes local credentials, not provider grants. Keep protocol, cache,
+configuration, facade and CLI tests hermetic under tests with finite bounds.
+
 ## AI oracle
 
 `plugins/ai-oracle` uses OpenAIpp's JSON/authentication helpers behind the host

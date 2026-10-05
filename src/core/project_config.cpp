@@ -368,6 +368,18 @@ void parse_variables(const toml::table& root, ProjectConfig& config) {
 ProjectConfig parse_root(const toml::table& root) {
     ProjectConfig config;
 
+    if (const auto* cloudflare = find_table(root, "cloudflare")) {
+        config.cloudflare_account_id = table_string(*cloudflare, "account_id", "");
+        config.cloudflare_api_token = table_string(*cloudflare, "api_token", "");
+    }
+    if (const auto* oauth = find_table(root, "oauth")) {
+        config.oauth.client_id = table_string(*oauth, "client_id", "");
+        config.oauth.scopes = table_string(*oauth, "scopes", "");
+        config.oauth.redirect_uri = table_string(*oauth, "redirect_uri", config.oauth.redirect_uri);
+        config.oauth.authorization_endpoint = table_string(*oauth, "authorization_endpoint", config.oauth.authorization_endpoint);
+        config.oauth.token_endpoint = table_string(*oauth, "token_endpoint", config.oauth.token_endpoint);
+    }
+
     if (const auto* project = find_table(root, "project")) {
         config.name = table_string(*project, "name", config.name);
         config.version = table_string(*project, "version", config.version);

@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "prowsetk/oauth_assist.hpp"
 
 namespace prowsetk {
 
@@ -156,6 +157,11 @@ struct ProjectConfig {
     std::uint32_t lua_execution_timeout_ms = 30000;
 
     std::string network_proxy;
+
+    // Explicit remote-browser credentials; never attached to a page Session.
+    std::string cloudflare_account_id;
+    std::string cloudflare_api_token;
+    oauth_assist::Config oauth;
 
     std::vector<DriverConfig> drivers;
     std::vector<ExtensionConfig> extensions;

@@ -133,6 +133,25 @@ else()
     message(STATUS "ProwseTk: OpenSSL unavailable; socket transport is HTTP only")
 endif()
 
+# liboauthcpp's upstream CMake predates modern policies. Keep the vendored
+# sources untouched and declare its library here, without demos or global flags.
+find_package(liboauthcpp CONFIG QUIET)
+set(PROWSETK_SYSTEM_OAUTHCPP OFF)
+if(TARGET oauthcpp)
+    set(PROWSETK_SYSTEM_OAUTHCPP ON)
+    add_library(ProwseTk::oauthcpp ALIAS oauthcpp)
+elseif(EXISTS "${PROJECT_SOURCE_DIR}/third_party/liboauthpp/src/liboauthcpp.cpp")
+    set(_oauth "${PROJECT_SOURCE_DIR}/third_party/liboauthpp")
+    add_library(prowsetk_oauthcpp STATIC
+        "${_oauth}/src/base64.cpp" "${_oauth}/src/HMAC_SHA1.cpp"
+        "${_oauth}/src/liboauthcpp.cpp" "${_oauth}/src/SHA1.cpp" "${_oauth}/src/urlencode.cpp")
+    set_target_properties(prowsetk_oauthcpp PROPERTIES POSITION_INDEPENDENT_CODE ON EXPORT_NAME oauthcpp)
+    target_include_directories(prowsetk_oauthcpp SYSTEM PUBLIC
+        "$<BUILD_INTERFACE:${_oauth}/include>" "$<INSTALL_INTERFACE:include>")
+    add_library(ProwseTk::oauthcpp ALIAS prowsetk_oauthcpp)
+    prowsetk_install_library(prowsetk_oauthcpp)
+endif()
+
 set(PROWSETK_LIBTOMCRYPT_SOURCE_DIR
     "${PROJECT_SOURCE_DIR}/third_party/libtomcrypt")
 if(EXISTS "${PROWSETK_LIBTOMCRYPT_SOURCE_DIR}/CMakeLists.txt")

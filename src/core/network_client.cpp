@@ -1,4 +1,9 @@
 #include "prowsetk/network_client.hpp"
+#include "prowsetk/cdp.hpp"
+#include "protocol_json.hpp"
+#include <chrono>
+#include <array>
+#include <optional>
 
 #include <algorithm>
 #include <cctype>
@@ -14,6 +19,8 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/x509v3.h>
+#include <openssl/rand.h>
+#include <openssl/sha.h>
 #endif
 
 #include "prowsetk/error.hpp"
@@ -288,6 +295,18 @@ public:
     SocketConnection(const SocketConnection&) = delete;
     SocketConnection& operator=(const SocketConnection&) = delete;
 
+    void deadline(int milliseconds) {
+        deadline_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
+    }
+    void check_deadline() {
+        if (!deadline_) return;
+        auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(*deadline_ - std::chrono::steady_clock::now()).count();
+        if (remaining <= 0) throw Error(ErrorCode::Timeout, "WebSocket operation timed out");
+        const timeval timeout{static_cast<long>(remaining / 1000), static_cast<long>((remaining % 1000) * 1000)};
+        ::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        ::setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    }
+
     void enable_tls(const std::string& host) {
 #ifdef PROWSETK_HAVE_OPENSSL
         std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> context(SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
@@ -335,6 +354,7 @@ public:
     }
 
     ssize_t write(const char* bytes, std::size_t size) {
+        check_deadline();
 #ifdef PROWSETK_HAVE_OPENSSL
         if (ssl_) {
             std::size_t written = 0;
@@ -344,10 +364,15 @@ public:
             return static_cast<ssize_t>(written);
         }
 #endif
+#ifdef MSG_NOSIGNAL
+        return ::send(fd_, bytes, size, MSG_NOSIGNAL);
+#else
         return ::send(fd_, bytes, size, 0);
+#endif
     }
 
     ssize_t read(char* bytes, std::size_t size) {
+        check_deadline();
 #ifdef PROWSETK_HAVE_OPENSSL
         if (ssl_) {
             std::size_t received = 0;
@@ -365,6 +390,7 @@ public:
 
 private:
     int fd_;
+    std::optional<std::chrono::steady_clock::time_point> deadline_;
 #ifdef PROWSETK_HAVE_OPENSSL
     std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> proxy_context_{nullptr, SSL_CTX_free};
     std::unique_ptr<SSL, decltype(&SSL_free)> proxy_ssl_{nullptr, SSL_free};
@@ -384,8 +410,181 @@ private:
 #endif
 };
 
+#ifdef PROWSETK_HAVE_OPENSSL
+std::string websocket_base64(const unsigned char* bytes, std::size_t count) {
+    std::string result(4 * ((count + 2) / 3), '\0');
+    EVP_EncodeBlock(reinterpret_cast<unsigned char*>(result.data()), bytes, static_cast<int>(count));
+    return result;
+}
+class SocketWebSocket final : public WebSocket {
+public:
+    SocketWebSocket(std::unique_ptr<SocketConnection> socket, int timeout, std::size_t limit)
+        : socket_(std::move(socket)), timeout_(timeout), limit_(limit) {}
+    void send(std::string_view text) override {
+        socket_->deadline(timeout_);
+        if (text.size() > limit_) throw Error(ErrorCode::ResourceLimit, "WebSocket message limit");
+        try { flatworm::rpc::validate_utf8(text); }
+        catch (...) { throw Error(ErrorCode::ParseError, "invalid WebSocket UTF-8"); }
+        frame(1, text);
+    }
+    std::string receive() override {
+        // The last send starts the transaction deadline; notifications must not
+        // extend it indefinitely while a CDP response is outstanding.
+        std::string message;
+        bool started = false;
+        for (unsigned frames = 0; frames < 4096; ++frames) {
+            const auto head = read(2);
+            const auto first = static_cast<unsigned char>(head[0]);
+            const auto second = static_cast<unsigned char>(head[1]);
+            const auto opcode = first & 15;
+            const bool final = (first & 128) != 0;
+            if ((first & 112) || (second & 128)) fail();
+            std::uint64_t size = second & 127;
+            if (size == 126 || size == 127) {
+                const auto extended = read(size == 126 ? 2 : 8);
+                size = 0;
+                for (unsigned char byte : extended) size = (size << 8) | byte;
+                if ((extended.size() == 2 && size < 126) || (extended.size() == 8 && (size < 65536 || size >> 63))) fail();
+            }
+            if (opcode >= 8 && (!final || size > 125)) fail();
+            if (size > limit_ || (opcode < 8 && size > limit_ - message.size())) throw Error(ErrorCode::ResourceLimit, "WebSocket message limit");
+            auto payload = read(static_cast<std::size_t>(size));
+            if (opcode == 8) throw Error(ErrorCode::NetworkError, "WebSocket peer closed");
+            if (opcode == 9) { frame(10, payload); continue; }
+            if (opcode == 10) continue;
+            if ((opcode != 0 && opcode != 1) || (opcode == 0 && !started) || (opcode == 1 && started)) fail();
+            started = true;
+            message += payload;
+            if (final) {
+                try { flatworm::rpc::validate_utf8(message); } catch (...) { fail(); }
+                return message;
+            }
+        }
+        throw Error(ErrorCode::ResourceLimit, "WebSocket frame limit");
+    }
+private:
+    std::unique_ptr<SocketConnection> socket_;
+    int timeout_;
+    std::size_t limit_;
+    [[noreturn]] static void fail() { throw Error(ErrorCode::ParseError, "invalid WebSocket frame"); }
+    std::string read(std::size_t size) {
+        std::string result(size, '\0');
+        std::size_t done = 0;
+        while (done < size) {
+            const auto n = socket_->read(result.data() + done, size - done);
+            if (n <= 0) throw Error(ErrorCode::NetworkError, "WebSocket read failed");
+            done += static_cast<std::size_t>(n);
+        }
+        return result;
+    }
+    void frame(unsigned char opcode, std::string_view text) {
+        std::array<unsigned char, 4> mask{};
+        if (RAND_bytes(mask.data(), 4) != 1) throw Error(ErrorCode::Internal, "WebSocket randomness failed");
+        std::string wire(1, static_cast<char>(128 | opcode));
+        if (text.size() < 126) wire += static_cast<char>(128 | text.size());
+        else {
+            const unsigned count = text.size() <= 65535 ? 2 : 8;
+            wire += static_cast<char>(128 | (count == 2 ? 126 : 127));
+            for (unsigned i = count; i > 0; --i) wire += static_cast<char>((static_cast<std::uint64_t>(text.size()) >> ((i - 1) * 8)) & 255);
+        }
+        for (auto byte : mask) wire += static_cast<char>(byte);
+        for (std::size_t i = 0; i < text.size(); ++i) wire += static_cast<char>(static_cast<unsigned char>(text[i]) ^ mask[i % 4]);
+        std::size_t done = 0;
+        while (done < wire.size()) {
+            const auto n = socket_->write(wire.data() + done, wire.size() - done);
+            if (n <= 0) throw Error(ErrorCode::NetworkError, "WebSocket write failed");
+            done += static_cast<std::size_t>(n);
+        }
+    }
+};
+#endif
+
 class SocketNetworkClient : public NetworkClient {
 public:
+    std::unique_ptr<WebSocket> open_websocket(const HttpRequest& request) override {
+#ifdef PROWSETK_HAVE_OPENSSL
+        if (request.timeout_ms < 1 || request.timeout_ms > 300000 || request.max_response_bytes < 1 ||
+            request.max_response_bytes > 16 * 1024 * 1024 || request.url.size() > 8192 ||
+            request.url.find('@') != std::string::npos || request.url.find('#') != std::string::npos ||
+            std::any_of(request.url.begin(), request.url.end(), [](unsigned char c) { return c <= 32 || c == 127; }))
+            throw Error(ErrorCode::InvalidArgument, "invalid WebSocket request");
+        auto endpoint = request.url;
+        if (endpoint.starts_with("wss://")) endpoint.replace(0, 3, "https");
+        else if (endpoint.starts_with("ws://")) endpoint.replace(0, 2, "http");
+        else throw Error(ErrorCode::InvalidUrl, "WebSocket requires ws or wss");
+        const auto url = parse_url(endpoint);
+        const auto selected = request.proxy.enabled() ? request.proxy : (proxy_.enabled() ? proxy_ : proxy_from_environment(endpoint));
+        const auto port = url.port.empty() ? (url.scheme == "https" ? "443" : "80") : url.port;
+        auto socket = std::make_unique<SocketConnection>(open_connection(selected.enabled() ? selected.host : unbracket_host(url.host), selected.enabled() ? selected.port : port, request.timeout_ms));
+        socket->deadline(request.timeout_ms);
+        if (selected.scheme == ProxyScheme::Https) socket->enable_tls(selected.host);
+        if (selected.scheme == ProxyScheme::Socks5) socks5_handshake(*socket, selected, url.host, port);
+        else if (selected.enabled()) {
+            write_all(*socket, "CONNECT " + url.host + ":" + port + " HTTP/1.1\r\nHost: " + url.host + ":" + port + proxy_authorization(selected) + "\r\n\r\n");
+            read_proxy_connect(*socket);
+        }
+        if (url.scheme == "https") socket->enable_tls(unbracket_host(url.host));
+        std::array<unsigned char, 16> nonce{};
+        if (RAND_bytes(nonce.data(), 16) != 1) throw Error(ErrorCode::Internal, "WebSocket randomness failed");
+        const auto key = websocket_base64(nonce.data(), nonce.size());
+        const auto challenge = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+        std::array<unsigned char, SHA_DIGEST_LENGTH> hash{};
+        SHA1(reinterpret_cast<const unsigned char*>(challenge.data()), challenge.size(), hash.data());
+        auto path = url.path.empty() ? "/" : url.path;
+        if (url.has_query) path += "?" + url.query;
+        std::string wire = "GET " + path + " HTTP/1.1\r\nHost: " + url.host + ":" + port +
+            "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: " + key;
+        std::size_t header_bytes = 0;
+        for (const auto& [name, value] : request.headers) {
+            header_bytes += name.size() + value.size();
+            const auto lower = to_lower(name);
+            if (name.empty() || header_bytes > 32768 || !std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isalnum(c) || c == '-'; }) ||
+                std::any_of(value.begin(), value.end(), [](unsigned char c) { return c < 32 || c == 127; }) ||
+                lower == "host" || lower == "connection" || lower == "upgrade" || lower.starts_with("sec-websocket") ||
+                lower == "proxy-authorization" || lower == "content-length" || lower == "transfer-encoding")
+                throw Error(ErrorCode::InvalidArgument, "invalid WebSocket header");
+            wire += "\r\n" + name + ": " + value;
+        }
+        write_all(*socket, wire + "\r\n\r\n");
+        std::string response;
+        while (!response.ends_with("\r\n\r\n")) {
+            char byte;
+            if (response.size() >= 65536) throw Error(ErrorCode::ResourceLimit, "WebSocket handshake limit");
+            if (socket->read(&byte, 1) != 1) throw Error(ErrorCode::NetworkError, "WebSocket handshake failed");
+            response += byte;
+        }
+        if (!response.starts_with("HTTP/1.1 101 ")) throw Error(ErrorCode::NetworkError, "WebSocket upgrade rejected");
+        std::map<std::string, std::string> headers;
+        std::istringstream lines(response.substr(response.find("\r\n") + 2));
+        std::string line;
+        while (std::getline(lines, line) && line != "\r") {
+            const auto colon = line.find(':');
+            if (colon == std::string::npos || colon == 0 || line.front() == ' ' || line.front() == '\t')
+                throw Error(ErrorCode::NetworkError, "invalid WebSocket handshake");
+            const auto name = to_lower(line.substr(0, colon));
+            const auto value = trim(line.substr(colon + 1));
+            if (name == "connection" || name == "upgrade") {
+                if (headers.contains(name)) headers[name] += "," + value;
+                else headers[name] = value;
+            } else if (name.starts_with("sec-websocket-")) {
+                if (!headers.emplace(name, value).second) throw Error(ErrorCode::NetworkError, "invalid WebSocket handshake");
+            }
+        }
+        const auto has_token = [](const std::string& list, std::string_view wanted) {
+            std::istringstream tokens(to_lower(list));
+            std::string token;
+            while (std::getline(tokens, token, ',')) if (trim(token) == wanted) return true;
+            return false;
+        };
+        if (!has_token(headers["upgrade"], "websocket") || !has_token(headers["connection"], "upgrade") ||
+            headers["sec-websocket-accept"] != websocket_base64(hash.data(), hash.size()) ||
+            headers.contains("sec-websocket-extensions") || headers.contains("sec-websocket-protocol"))
+            throw Error(ErrorCode::NetworkError, "invalid WebSocket handshake");
+        return std::make_unique<SocketWebSocket>(std::move(socket), request.timeout_ms, request.max_response_bytes);
+#else
+        return NetworkClient::open_websocket(request);
+#endif
+    }
     HttpResponse send(const HttpRequest& request) override {
         const Url url = parse_url(request.url);
         ProxyConfig selected = request.proxy.enabled() ? request.proxy : (proxy_.enabled() ? proxy_ : proxy_from_environment(request.url));

@@ -318,3 +318,24 @@ if(TARGET ptk_opencode_marionette)
 endif()
 prowsetk_gtest(prowsetk_integration_render "prowsetk.integration.render."
     "integration;document;javascript" test_render.cpp)
+prowsetk_gtest(prowsetk_integration_browser_run "prowsetk.integration.browser-run."
+    "integration;plugin;web-interface" test_browser_run.cpp)
+target_link_libraries(prowsetk_integration_browser_run PRIVATE ProwseTk::browser_run)
+target_compile_definitions(prowsetk_integration_browser_run PRIVATE
+    TEST_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    BROWSER_RUN_PLUGIN="$<TARGET_FILE:prowsetk_browser_run_plugin>"
+    OAUTH_ASSIST_PLUGIN="$<TARGET_FILE:prowsetk_oauth_assist_plugin>")
+add_dependencies(prowsetk_integration_browser_run prowsetk_browser_run_plugin prowsetk_oauth_assist_plugin)
+if(UNIX AND PROWSETK_HAVE_OPENSSL AND TARGET ptk-oauth-assist AND TARGET ptk-browser-run)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        prowsetk_add_executable(prowsetk_cdp_client_probe cdp_client_probe.cpp)
+        target_link_libraries(prowsetk_cdp_client_probe PRIVATE ProwseTk::core)
+        add_test(NAME prowsetk.integration.remote-protocols
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_remote_protocols.py"
+                $<TARGET_FILE:prowsetk_cdp_client_probe> $<TARGET_FILE:ptk-oauth-assist> $<TARGET_FILE:ptk-browser-run>)
+        set_tests_properties(prowsetk.integration.remote-protocols PROPERTIES
+            LABELS "integration;plugin;web-interface;storage" TIMEOUT 60
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+endif()
