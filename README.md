@@ -25,10 +25,11 @@ PNG/JPEG images. Build with `cmake --preset complex-gui` and
 `build/complex-gui/tools/prowse-gui/prowse-gui --file tools/prowse-gui/example.html`.
 `PROWSETK_BUILD_COMPLEX_GUI` defaults OFF and is independent of basic-gui.
 
-Read the [ProwseTk Manual](manual/README.md) for 30 chapters covering installation,
+Read the [ProwseTk Manual](manual/README.md) for 34 chapters covering installation,
 the core APIs, Lua drivers/extensions, plugins, tools, and client interfaces.
 It includes practical examples, configuration references, resource bounds, and
-the current implementation's support levels.
+the current implementation's support levels, including Qutebrowser assistant
+snapshots, Lua discovery, two-way marionettes, and the Booking API project.
 
 ## Table of Contents
 
@@ -2345,6 +2346,25 @@ and cookie/dotenv passthrough.
 
 ## Automation Tools
 
+### Qutebrowser assistant-browser bridge
+
+[`tools/qutebrowser-bridge`](tools/qutebrowser-bridge/README.md) supplies
+`ptk-qute-send`, `ptk-qute-scrape` and `ptk-qute-marionette` userscripts invoked
+with `:spawn --userscript`. An owner-only Unix broker connects current-tab HTML
+snapshots to Lua drivers. The two-way marionette accepts bounded fixed DOM
+actions through `QUTE_FIFO` and invokes a fresh capture after every action.
+Snapshots load into JavaScript-disabled Flatworm sessions for selectors, PDQL
+and existing plugin composition. Page data/action values are not logged.
+
+The [Booking admin API project](examples/booking-dotcom-admin-api/README.md)
+includes `Prowse.toml`, an offline-capable Lua driver and a sample actions policy.
+It requires positive DOM login evidence for live exports and combines
+scrape-endpoints with schema-grabber. Cookies, HTTP status and response bodies
+are not available through this userscript interface; exports remain redacted,
+heuristic and incomplete. The external scripts use Python 3.9+'s standard
+library; the optional IPC module reuses Lua. Qutebrowser is only required when
+explicitly using these assistant scripts and is not linked into the core.
+
 ### Lua crawler
 
 `tools/crawler` builds `crawler`, a TOML-configured, Lua-driven breadth-first
@@ -2422,7 +2442,7 @@ display and an unreachable build tree are reported before a window would open.
 ## Build and Runtime Strategy
 
 The command reference lives in `man/man1/prowsetk.1` and
-`man/man5/Prowse.toml.5`. The [manual index](manual/README.md) links all 30
+`man/man5/Prowse.toml.5`. The [manual index](manual/README.md) links all 34
 Markdown chapters. `scripts/build-docs.sh [output-directory]` builds combined
 HTML and LaTeX with Pandoc, checking chapter completeness and resolving manual
 navigation links. Generated output defaults to `build/docs/`.
@@ -2754,7 +2774,7 @@ prowsetk/
 ├── drivers/                Lua driver scripts
 ├── examples/               Example C++ and Lua applications
 ├── tools/                  Crawling, DOM watching, IR consumers and terminal tools
-├── manual/                 Markdown manual with an index and 30 chapters
+├── manual/                 Markdown manual with an index and 34 chapters
 ├── resources/              Runtime resources and manifests
 │   └── web/                Static web interface (index.html, app.js, style.css)
 └── scripts/                Developer and scaffolding scripts

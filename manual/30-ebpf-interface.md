@@ -105,4 +105,4 @@ with actual support and producer coverage reported honestly.
 Reference: `plugins/ebpf-interface/include/prowsetk/plugins/ebpf_interface.hpp`,
 `plugins/ebpf-interface/src/ebpf_interface.cpp`, native `plugin_entry.cpp`.
 
-**Return to:** [Manual index](README.md).
+**Next:** [Qutebrowser assistant browser](31-qutebrowser-assistant-browser.md).

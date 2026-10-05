@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "actions": [
+    {"type": "click", "selector": "button[role='tab'][aria-controls='reservations']"}
+  ]
+}

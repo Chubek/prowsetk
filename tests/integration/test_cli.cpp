@@ -69,6 +69,24 @@ TEST(CliCrawler, BookingExampleRunsOfflineThroughProwseConfig) {
     EXPECT_NE(read_file(output).find("CLI booking crawler"), std::string::npos);
 }
 
+TEST(CliDriverRun, QutebrowserBookingOfflineProwseProject) {
+#if !defined(QUTE_IPC_PATH) || !defined(PROWSETK_HAVE_TOMLPLUSPLUS)
+    GTEST_SKIP() << "Qutebrowser project dependencies unavailable";
+#else
+    const auto output = std::string(TEST_BINARY_DIR) + "/qute-cli.yaml";
+    const auto postman = std::string(TEST_BINARY_DIR) + "/qute-cli.postman.json";
+    const auto config = std::string(PROWSETK_SOURCE_DIR) + "/examples/booking-dotcom-admin-api/Prowse.toml";
+    const auto command = quote_shell(PROWSETK_CLI_BIN) + " run booking-admin-api --config " + quote_shell(config) +
+        " --html " + quote_shell("<script>fetch('/api/cli?limit=3&token=private_marker')</script>") +
+        " --output " + quote_shell(output) + " --postman " + quote_shell(postman) +
+        " --ipc_module " + quote_shell(QUTE_IPC_PATH);
+    ASSERT_EQ(run_command(command), 0);
+    EXPECT_NE(read_file(output).find("/api/cli"), std::string::npos);
+    EXPECT_EQ(read_file(output).find("private_marker"), std::string::npos);
+    EXPECT_NE(read_file(postman).find("x-prowsetk-qutebrowser"), std::string::npos);
+#endif
+}
+
 // Writes a Prowse.toml that declares the shipped drivers with absolute script
 // paths, so the CLI test exercises the real driver scripts.
 void write_fixture_config(const std::string& path) {

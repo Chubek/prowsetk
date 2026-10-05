@@ -78,6 +78,17 @@ files define the callable interfaces.
 30. [eBPF interface](30-ebpf-interface.md) — optional libbpf runtime and
     host-mediated endpoint observations.
 
+### Assistant-browser snapshots and automation
+
+31. [Qutebrowser assistant browser](31-qutebrowser-assistant-browser.md) —
+    userscripts, installation, broker lifecycle, protocol, and tab/origin scope.
+32. [Lua snapshots and API discovery](32-lua-snapshots-and-api-discovery.md) —
+    IPC API, inert Sessions, PDQL, plugin composition, and private exports.
+33. [Two-way Qutebrowser marionettes](33-qutebrowser-marionettes.md) — fixed
+    actions, fresh captures, DOM postconditions, budgets, and failure handling.
+34. [Booking admin API snapshots](34-booking-admin-api-snapshots.md) — offline
+    and live project recipes, login evidence, action policies, and spec metadata.
+
 ## Conventions
 
 - Shell examples assume the repository root as the working directory, unless a
@@ -108,13 +119,14 @@ record.
 |---|---|---|---|
 | 1. Canonical page IR | ProwseEvent start/attribute/text/end stream, with ProwseXAS/ProwseDOM compatibility projections, ProwseVTD binary frames and ProwseIML text with macros; XPath-driven listeners and walkers | `src/core/ir_model.cpp`, `ir_layout.cpp`, `ir_filter.cpp`, `ir_events.cpp`, `ir_vtd.cpp`, `ir_iml.cpp`, `ir_registry.cpp`, `lprowseir` | 12, 22 |
 | 2. Downstream IR consumers | `prowsetk serialize` emits NDJSON, VTD or IML; the C-only `page2pdf` and independent `page2latex` compile the same encodings without touching the engine or DOM | `src/cli/`, `tools/page2pdf`, `tools/page2latex` | 3, 22, 23 |
-| 3. Queryable DOM and PDQL | Bounded tag globs, XPath mixins, RE2 filters, marionette walkers, aggregates, and JSON/YAML/XML/S-expression serializers exposed to C/C++, Lua `lpdql` and CLI workflows | `include/prowsetk/pdql.h`, `src/pdql/`, `lua/` | 7, 8 |
+| 3. Queryable DOM and PDQL | Bounded tag globs, core XPath, equality guards, projections, trimming, numeric aggregates, and JSON/YAML/XML/S-expression serializers exposed to C/C++, Lua `lpdql` and driver workflows | `include/prowsetk/pdql.h`, `src/pdql/`, `lua/` | 7, 8 |
 | 4. Page web platform | Host-mediated `fetch`/XHR, `Headers`/`Response`, timers, storage, cookies, DOM events and `MutationObserver` installed over handle-based primitives, with inert layout-dependent observers | `src/core/web_platform_shim.hpp`, `src/core/flatworm_host.cpp` | 12 |
 | 5. Synthetic interaction | Full pointer/click cascade with `submit`, the controlled-input keyboard cascade through native value descriptors, layout-free interactability heuristics, and a bounded flush after every action | `web_platform_shim.hpp`, `FlatwormScriptHost` | 12 |
 | 6. Native module ABI | Independent version-1 page-runtime ABI: definition validation, host registry, library ownership, per-runtime lifecycle, frozen exports, typed transfers, and an installed-only `flatworm:` module loader | `include/Flatwork-Module.h`, `include/prowsetk/flatworm_module.hpp`, `src/flatworm/module*.cpp` | 12, 21 |
 | 7. First shipped module | `flatworm:rpc`: JSON-RPC 2.0 request/notification builders, success and error envelopes, strict wire validation, ID correlation for batches, bounded JSON, an offline embedder example, and unit/integration suites | `flatworm-modules/rpc/` | 12 |
 | 8. Engine corrections from module work | Session event cancellation now reaches the navigation and request paths, and JSON-conversion getter/`toJSON` failures become value-free native errors instead of leaking thrown values | `src/core/browser.cpp`, `src/flatworm/module_bindings.cpp` | 12, 13 |
 | 9. Desktop inspection | Opt-in FLTK inspector over the same Session: page preview, DOM/source/activity views, synthetic interaction, bounded `pump_events`, and host-configured logical viewport metadata with resize and restricted media-query notifications | `plugins/basic-gui`, `include/prowsetk/browser.hpp`, `src/core/web_platform_shim.hpp` | 12, 21 |
+| 10. Qutebrowser assistant bridge | Owner-only userscript IPC, inert HTML snapshot Sessions, Lua query/discovery composition, fixed two-way actions with fresh captures, and the Booking API snapshot project | `tools/qutebrowser-bridge`, `examples/booking-dotcom-admin-api` | 31–34 |
 
 Three rules held across every stage, and they are worth preserving when adding
 the next one:
@@ -137,7 +149,7 @@ the next one:
 |---|---|---|
 | Core API and Flatworm | 5–8, 12–15 | `include/prowsetk/`, `src/core/`, `src/flatworm/`, `src/pdql/` |
 | CLI and project settings | 3–4, 10 | `src/cli/prowsetk_main.cpp`, `src/core/project_config.cpp`, `drivers/` |
-| Native Lua modules and extensions | 8–11, 22 | `src/core/lua_runtime.cpp`, `lua/` |
+| Native Lua modules and extensions | 8–11, 22, 32 | `src/core/lua_runtime.cpp`, `lua/`, `tools/qutebrowser-bridge/ipc.cpp` |
 | Managed Lua handle lifetime | 9, 11 | `src/core/lua_runtime.cpp` userdata finalizers, `Browser::live_session_count()` |
 | Authentication/discovery plugins | 16–20 | `plugins/scrape-endpoints`, `ezlogin`, `captcha-handler`, `restful-resolver`, `schema-grabber` |
 | Plugin ABI and WASM design | 21 | `ProwseTk-Plugin.h`, `plugin_registry.hpp`, `wasm_runtime.hpp`, `wit/` |
@@ -146,7 +158,8 @@ the next one:
 | AI oracle service | 21 | `plugins/ai-oracle`, `tests/unit/test_ai_oracle*`, `tests/integration/test_ai_oracle.cpp` |
 | IR consumers | 22–23 | `src/core/ir_*.cpp`, `tools/page2pdf`, `tools/page2latex` |
 | Crawling and watching | 24–26 | `tools/crawler`, `tools/pagewatch`, `plugins/spider`, `tools/automation` |
-| Browser handoff | 16, 18, 24, 27 | assistant-browser settings, `plugins/beacon`, Booking.com examples |
+| Browser handoff | 16, 18, 24, 27, 31–34 | assistant-browser settings, `plugins/beacon`, `tools/qutebrowser-bridge`, Booking.com examples |
+| Snapshot queries and two-way assistant actions | 31–34 | `tools/qutebrowser-bridge/lua/`, `userscript.py`, `broker.py`, `examples/booking-dotcom-admin-api` |
 | Service and client interfaces | 28 | `web_interface.hpp`, `interface/web`, `interface/pyprowsetk` |
 | Terminal and instrumentation | 29–30 | `tools/prowse-tui`, `plugins/ebpf-interface` |
 | Desktop inspection GUI | 12, 21 | `plugins/basic-gui`, `tests/unit/test_basic_gui.cpp`, `tests/integration/test_basic_gui*` |
@@ -169,6 +182,6 @@ bash scripts/build-docs.sh
 
 The output is `build/docs/html/index.html` and
 `build/docs/latex/prowsetk.tex`. Supply a directory argument to choose another
-output root. The builder checks for this index and exactly 30 numbered chapters.
+output root. The builder checks for this index and exactly 34 numbered chapters.
 Chapter navigation becomes internal links in the combined outputs; links to
 repository references remain relative to each generated file's location.

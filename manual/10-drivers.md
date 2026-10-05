@@ -58,7 +58,7 @@ tool-specific accessor. Follow each host's lifecycle and staging contract.
 |---|---|
 | `drivers/crawl_site.lua` | Same-origin, depth-bounded crawl and JSONL page metadata |
 | `drivers/login.lua` | Form login, session cookie reuse, redacted login summary |
-| `examples/booking-dotcom-admin-scrape/scrape-booking-dotcom-admin.lua` | Booking admin authentication, crawling, resolution/enrichment, OpenAPI/Postman |
+| `examples/booking-dotcom-admin-api/api.lua` | Qutebrowser admin snapshots, optional two-way actions, OpenAPI/Postman |
 | `tools/crawler/driver.lua` | Adapter to `lcrawler` |
 | `tools/crawler/booking-dotcom-admin/driver.lua` | Booking crawler adapter with its example `Prowse.toml` |
 
@@ -66,64 +66,31 @@ Driver names are project declarations, not an automatic scan of `drivers/`.
 Choose the matching example configuration with `--config` when running a driver
 outside the root project.
 
-## Booking.com example
+## Booking.com snapshot example
 
 ```sh
-prowsetk run booking-dotcom-admin \
-  --config examples/booking-dotcom-admin-scrape/Prowse.toml \
-  --html '<main><h1>Offline admin example</h1></main>' \
-  --output build/booking-offline.yaml
+build/default/src/cli/prowsetk run booking-admin-api \
+  --config examples/booking-dotcom-admin-api/Prowse.toml \
+  --html '<script>fetch("/api/reservations?limit=2")</script>' \
+  --output build/booking-offline.yaml \
+  --postman build/booking-offline.postman.json
 ```
 
-The live workflow reads dotenv before `BOOKING_DOTCOM_USER` and
-`BOOKING_DOTCOM_PASS`, tries imported session cookies first, and confirms login
-with a successful response plus actual logout/account DOM controls. It follows
-bounded trusted HTTPS redirects and crawls from the confirmed admin URL.
-Human verification/MFA can require browser interaction and importing fresh
-cookies. Cookie presence alone is not login evidence.
+The current project loads a Qutebrowser DOM snapshot into a JavaScript-disabled
+Session and composes scrape-endpoints with schema-grabber. Its optional
+`html` argument is hermetic. Live operation requires positive DOM login
+evidence; the userscript interface supplies no cookies, HTTP status, or response
+bodies. Outputs retain redaction, provenance, and incomplete-coverage metadata.
 
-After crawling, the example composes restful-resolver and schema-grabber,
-exports OpenAPI and Postman, applies API-only filtering by default, and records
-incomplete heuristic coverage. Its bounded script and API-link scans can expose
-references outside the set observed during page execution. Beacon and assistant
-options are documented by the example's source and project declaration.
+[Chapter 34](34-booking-admin-api-snapshots.md) provides the live/offline recipes,
+argument reference, evidence selectors, trusted action policies, and export
+metadata. The standalone Booking crawler's cookie/HTTP authentication and
+transport quotas are documented in [Chapter 24](24-crawler.md).
 
-For agent-selected interactions, use the Booking launcher:
-
-```sh
-scripts/run-scrape-booking.sh \
-  --output _scraped/booking-dotcom-admin/api.yaml \
-  --postman _scraped/booking-dotcom-admin/api.postman_collection.json \
-  --max-steps 24 --max-get-probes 64
-```
-
-It starts an OpenCode V2 server and invokes `ptk-opencode-marionette`. The
-driver's `prepare_session(args)` prepares login on the host-bound managed
-session, retaining its cookies and page context for C++ control. A trusted
-`marionette-decisions.json` policy defines links, tabs, details and pagination;
-`--decisions FILE` customizes selectors. Discovery and schemas accumulate
-before and after actions through scrape-endpoints and schema-grabber. Live
-GET probes are bounded, other methods are never probed, and both exports
-retain redaction, provenance and explicitly incomplete coverage.
-Automatic probes skip logout/sign-out-like paths to preserve the login session.
-The launcher defaults to the Firefox handoff and Joe Litty Rooms XPath beacon;
-`--assistant-browser-force false` reuses a confirmed imported session without
-forcing that handoff. `--html HTML` uses an in-memory page transport and zero
-GET probes while still contacting the separate OpenCode server.
-
-`--verbose`/`-v` (`--verbse` alias) reports the failing stage/error code,
-request/proxy route, response status/size/timing, imported-cookie counts and
-login evidence checks. It omits page values, URL queries, credentials and raw
-JavaScript/model errors. The launcher retains its private server log on failure
-or a verbose run. `HTTPS_PROXY`/`HTTP_PROXY` and their lowercase aliases route
-page requests; loopback bypasses proxies for the local OpenCode server.
-`FIREFOX_PROFILE_DIR` selects the exact profile used for cookie capture. The
-helper includes live WAL data, preserves JSON boolean flags and atomically
-replaces an owner-only export. Failed/empty capture or import stops the run;
-a forced handoff is not automatically repeated during the same preparation.
-
-The separate standalone Booking crawler configuration is documented in
-Chapter 24. Its transport quotas and TOML options belong to that host.
+The former `examples/booking-dotcom-admin-scrape` project has been removed.
+Its Firefox/OpenCode launcher defaults refer to that earlier project's
+preparation script and decisions file; use a configured current project rather
+than treating those defaults as a shipped Booking workflow.
 
 ## Developing drivers
 
@@ -134,5 +101,23 @@ CTest integration coverage in `test_drivers.cpp` and a `prowsetk run` case in
 workflow requires simulated login or redirect responses.
 
 Reference: `drivers/`, example `Prowse.toml` files, driver and CLI integration tests.
+
+## Qutebrowser assistant projects
+
+`examples/booking-dotcom-admin-api/Prowse.toml` declares `booking-admin-api`,
+which consumes a current-tab snapshot from the Qutebrowser userscripts in
+`tools/qutebrowser-bridge`. `ptk-qute-scrape` sends one snapshot;
+`ptk-qute-marionette` also accepts bounded Lua DOM actions and returns fresh
+captures. The driver uses JavaScript-disabled Sessions with scrape-endpoints
+and schema-grabber, supports offline `html`, and writes redacted, explicitly
+incomplete specifications. Live export requires DOM login evidence; the
+userscript interface does not expose HTTP status, cookies or response bodies.
+See the [project workflow](../examples/booking-dotcom-admin-api/README.md) and
+[bridge API](../tools/qutebrowser-bridge/README.md) for setup, actions and limits.
+The manual's complete guide starts with
+[Chapter 31](31-qutebrowser-assistant-browser.md), followed by
+[Lua composition](32-lua-snapshots-and-api-discovery.md),
+[marionette actions](33-qutebrowser-marionettes.md), and the
+[Booking project](34-booking-admin-api-snapshots.md).
 
 **Next:** [Lua extensions](11-lua-extensions.md).

@@ -68,6 +68,38 @@ TEST(Drivers, CrawlerBookingExampleUsesOfflineDriverContract) {
     ASSERT_TRUE(lua.run("assert(__crawler_result{kind='pages'}:find('Booking offline',1,true))").ok) << lua.last_error();
 }
 
+TEST(Drivers, QutebrowserBookingOfflineExportsUseRealPlugins) {
+#ifndef QUTE_IPC_PATH
+    GTEST_SKIP() << "Qutebrowser Lua IPC unavailable";
+#else
+    if (!LuaRuntime::available()) GTEST_SKIP();
+    LuaRuntime lua;
+    ASSERT_TRUE(lua.run_file(std::string(PROWSETK_SOURCE_DIR) +
+        "/examples/booking-dotcom-admin-api/api.lua").ok) << lua.last_error();
+    const auto output = std::string(TEST_BINARY_DIR) + "/qute-driver.yaml";
+    const auto postman = std::string(TEST_BINARY_DIR) + "/qute-driver.postman.json";
+    std::string code;
+    const auto result = lua.call_function("main", {
+        {"html", "string", "<script>fetch('/api/rooms?limit=2&token=private_marker')</script>"
+                           "<form action='/api/rooms' method='post'>"
+                           "<input name='count' type='number' required value='2'></form>"},
+        {"output", "path", output}, {"postman", "path", postman},
+        {"ipc_module", "path", QUTE_IPC_PATH},
+        {"actions_file", "path", "/missing/offline-policy-must-not-be-opened"}}, &code);
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_EQ(code, "0");
+    const auto yaml = read_file(output);
+    EXPECT_NE(yaml.find("/api/rooms"), std::string::npos);
+    EXPECT_NE(yaml.find("requestBody:"), std::string::npos);
+    EXPECT_NE(yaml.find("in: query"), std::string::npos);
+    EXPECT_NE(yaml.find("x-prowsetk-schema:"), std::string::npos);
+    EXPECT_NE(yaml.find("offline: true"), std::string::npos);
+    EXPECT_NE(yaml.find("complete: false"), std::string::npos);
+    EXPECT_EQ(yaml.find("private_marker"), std::string::npos);
+    EXPECT_EQ(read_file(postman).find("private_marker"), std::string::npos);
+#endif
+}
+
 TEST(Drivers, CrawlSiteWritesPageMetadata) {
     if (!LuaRuntime::available()) {
         GTEST_SKIP() << "ProwseTk was built without Lua support";

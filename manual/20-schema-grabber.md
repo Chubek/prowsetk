@@ -58,6 +58,12 @@ are available through the C++ API. Lua can also infer matched DELETE form
 fields. Keep these implementation differences in mind when choosing the
 enrichment path.
 
+Lua records a matched form field's `required` flag in its returned schema
+records, but the current Lua OpenAPI renderer does not emit the request
+object's corresponding `required` array. Postman request examples also omit
+that validation constraint. For assistant snapshot composition and its export
+policy, see [Chapter 32](32-lua-snapshots-and-api-discovery.md).
+
 ## Probes and limits
 
 | Option | Default | Meaning |

@@ -194,3 +194,23 @@ endif()
 prowsetk_gtest(prowsetk_unit_opencode_marionette "prowsetk.unit.opencode-marionette."
     "unit;plugin;endpoint-extraction" test_opencode_marionette.cpp)
 target_link_libraries(prowsetk_unit_opencode_marionette PRIVATE prowsetk_opencode_marionette_static)
+if(UNIX)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME prowsetk.unit.qutebrowser.protocol
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_qutebrowser_protocol.py"
+                "${PROJECT_SOURCE_DIR}/tools/qutebrowser-bridge")
+        set_tests_properties(prowsetk.unit.qutebrowser.protocol PROPERTIES
+            LABELS "unit;lua;plugin;web-interface" TIMEOUT 20
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+endif()
+if(TARGET prowsetk_qute_ipc)
+    prowsetk_gtest(prowsetk_unit_qutebrowser "prowsetk.unit.qutebrowser."
+        "unit;lua;document;endpoint-extraction" test_qutebrowser_bridge.cpp)
+    target_compile_definitions(prowsetk_unit_qutebrowser PRIVATE
+        QUTE_IPC_PATH="$<TARGET_FILE:prowsetk_qute_ipc>"
+        PROWSETK_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        TEST_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_dependencies(prowsetk_unit_qutebrowser prowsetk_qute_ipc)
+endif()

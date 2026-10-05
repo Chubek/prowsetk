@@ -199,6 +199,11 @@ prowsetk_gtest(prowsetk_integration_drivers "prowsetk.integration.driver."
 target_compile_definitions(prowsetk_integration_drivers PRIVATE
     PROWSETK_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     TEST_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+if(TARGET prowsetk_qute_ipc)
+    target_compile_definitions(prowsetk_integration_drivers PRIVATE
+        QUTE_IPC_PATH="$<TARGET_FILE:prowsetk_qute_ipc>")
+    add_dependencies(prowsetk_integration_drivers prowsetk_qute_ipc)
+endif()
 
 if(TARGET crawler)
     prowsetk_gtest(prowsetk_integration_crawler "prowsetk.integration.crawler."
@@ -246,6 +251,20 @@ if(PROWSETK_BUILD_CLI)
             PROWSETK_HAVE_TOMLPLUSPLUS=1)
     endif()
     add_dependencies(prowsetk_integration_cli prowsetk_cli)
+    if(TARGET prowsetk_qute_ipc)
+        target_compile_definitions(prowsetk_integration_cli PRIVATE
+            QUTE_IPC_PATH="$<TARGET_FILE:prowsetk_qute_ipc>")
+        add_dependencies(prowsetk_integration_cli prowsetk_qute_ipc)
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if(Python3_Interpreter_FOUND AND PROWSETK_HAVE_TOMLPLUSPLUS)
+            add_test(NAME prowsetk.integration.qutebrowser.userscripts
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_qutebrowser_bridge.py"
+                    "$<TARGET_FILE:prowsetk_cli>" "$<TARGET_FILE:prowsetk_qute_ipc>" "${PROJECT_SOURCE_DIR}")
+            set_tests_properties(prowsetk.integration.qutebrowser.userscripts PROPERTIES
+                LABELS "integration;lua;document;endpoint-extraction;web-interface" TIMEOUT 60
+                WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+        endif()
+    endif()
     target_sources(prowsetk_integration_cli PRIVATE
         "${PROJECT_SOURCE_DIR}/src/cli/serialize_resources.cpp")
     target_include_directories(prowsetk_integration_cli PRIVATE

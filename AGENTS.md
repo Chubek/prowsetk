@@ -97,9 +97,10 @@ prowsetk/
 `third_party/` is populated from `.gitmodules` and is excluded by `.gitignore`.
 `scripts/scaffold.sh` creates or refreshes this skeleton.
 
-`manual/README.md` indexes 30 separate numbered Markdown chapters covering the
-implemented engine, APIs, Lua extensions, plugins and tools. Keep examples and
-support levels aligned with callable interfaces when extending those surfaces.
+`manual/README.md` indexes 34 separate numbered Markdown chapters covering the
+implemented engine, APIs, Lua extensions, plugins, tools and Qutebrowser
+assistant-browser workflows. Keep examples and support levels aligned with
+callable interfaces when extending those surfaces.
 `scripts/build-docs.sh` checks chapter completeness and builds combined HTML and
 LaTeX through Pandoc, using `scripts/manual-links.lua` for navigation links.
 
@@ -1364,3 +1365,24 @@ bridge; V2 polling reads bounded newest messages and rejects assistant errors.
 no plugin Lua module is added. HTML input uses an in-memory page transport and
 disables GET probes while the separate OpenCode client remains explicit.
 Keep loopback-only launcher coverage in `tests/integration/test_booking_marionette.py`.
+
+## Qutebrowser userscript bridge
+
+`tools/qutebrowser-bridge` uses Qutebrowser's documented userscript environment
+and FIFO plus owner-only AF_UNIX IPC. Python scripts use only the standard
+library; `lquteipc` is an optional POSIX Lua module, independent of page
+networking and the native plugin ABI. Keep strict bounded JSON, private
+descriptor/socket/output permissions, finite waits/lifetimes, one active
+marionette and fixed `click`/`fill`/`navigate`/`reload` actions. Never pass page
+or action values to Qutebrowser command strings or execute arbitrary caller
+code. A new capture userscript must follow each action; the initial QUTE_HTML
+file is not a live snapshot. Keep origin checks in the broker and at in-page
+action execution, and document the tab-index limitation honestly.
+
+Snapshot Sessions disable JavaScript and all enrichment response probes. The
+bridge supplies no cookies, HTTP status, response bytes or authentication
+transfer. `examples/booking-dotcom-admin-api` requires positive DOM evidence
+for live exports but never claims HTTP authentication verification. Preserve
+offline `html`, redacted heuristic/incomplete exports, same-origin discovery
+and the caller-owned assistant browser. Register headless protocol, native
+Lua, userscript/FIFO and real driver/CLI tests under `tests/` with finite bounds.

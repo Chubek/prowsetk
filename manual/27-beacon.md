@@ -105,8 +105,10 @@ local request_json = beacon.render_request(flash)
 
 It formats messages and has no live IPC binding. Use beaconctl from a driver
 process or the C++ protocol/client components for actual registration/delivery.
-The Booking example's `--flash-on true` path coordinates a network_info Flash;
-its offline beacon JSON option supplies a hermetic input alternative.
+The former `booking-dotcom-admin-scrape` example's `--flash-on true` path used
+a network_info Flash; that example has been removed. The current
+[Booking snapshot project](34-booking-admin-api-snapshots.md) uses the separate
+Qutebrowser bridge from [Chapter 31](31-qutebrowser-assistant-browser.md).
 
 The native plugin exposes version-2 metadata/configuration, and
 FlashSessionManager manages lifecycle, capacity, expiry, connection and queues.
