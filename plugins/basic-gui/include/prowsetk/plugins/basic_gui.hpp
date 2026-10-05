@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -41,6 +42,12 @@ struct Snapshot {
 // attributes are sanitized; preview markup never contains resource URLs.
 Snapshot inspect_document(const Document& document, std::uint64_t revision = 0);
 
+struct MarionetteResult {
+    unsigned steps = 0;
+    bool stopped = false;
+    std::string reason;
+};
+
 struct Activity {
     std::string type;
     std::string detail;
@@ -73,6 +80,13 @@ public:
     bool type(std::size_t node, std::uint64_t revision, std::string_view text);
     std::optional<std::size_t> find(std::string_view css_selector) const;
     std::string evaluate(std::string_view javascript);
+    // Trusted Lua main(args) returns version-1 decisions JSON. The host runs
+    // the bounded OpenCode loop on this session. Link prowsetk_basic_gui.
+    // A supplied agent transport is borrowed for this synchronous call only.
+    MarionetteResult run_marionette(std::string_view lua, std::string_view goal = {},
+                                   NetworkClient* agent_transport = nullptr);
+    MarionetteResult run_marionette_file(const std::filesystem::path& path,
+                                        std::string_view goal = {});
     void show_console_values(bool enabled) noexcept { show_values_ = enabled; }
     bool console_values_visible() const noexcept { return show_values_; }
 
@@ -99,6 +113,7 @@ private:
     std::string offline_base_;
     bool dirty_ = true;
     bool show_values_ = false;
+    bool marionette_running_ = false;
 };
 
 // Optional FLTK adapter. No FLTK headers enter the public API. Window creation
@@ -115,6 +130,9 @@ public:
     void load_html(std::string_view html, std::string_view base_url = "https://offline.test/");
     void refresh();
     void close();
+    MarionetteResult run_marionette(std::string_view lua, std::string_view goal = {});
+    MarionetteResult run_marionette_file(const std::filesystem::path& path,
+                                        std::string_view goal = {});
     int exec();
 private:
     struct Impl;

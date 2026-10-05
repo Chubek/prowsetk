@@ -1,6 +1,7 @@
 #include <prowsetk/plugins/basic_gui.hpp>
 
 #include <charconv>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -20,25 +21,28 @@
 #include <FL/Fl_Tabs.H>
 #include <FL/Fl_Text_Buffer.H>
 #include <FL/Fl_Text_Display.H>
+#include <FL/Fl_Text_Editor.H>
 #include <FL/Fl_Native_File_Chooser.H>
 
 #include <prowsetk/error.hpp>
+#include <prowsetk/lua_runtime.hpp>
 
 namespace prowsetk::basic_gui {
 
 struct Viewer::Impl {
     Controller controller;
     Fl_Double_Window window{1100, 800, "ProwseTk / Flatworm inspector"};
-    Fl_Text_Buffer source_buffer, node_buffer, console_buffer, network_buffer;
+    Fl_Text_Buffer source_buffer, node_buffer, console_buffer, network_buffer, marionette_buffer;
     std::unique_ptr<Fl_Tabs> tabs;
     std::vector<std::unique_ptr<Fl_Group>> groups;
-    std::unique_ptr<Fl_Button> back, forward, reload, open, go, find, click, type, evaluate, clear;
-    std::unique_ptr<Fl_Input> address, selector, script;
+    std::unique_ptr<Fl_Button> back, forward, reload, open, go, find, click, type, evaluate, clear, load_lua, run_lua;
+    std::unique_ptr<Fl_Input> address, selector, script, goal;
     std::unique_ptr<Fl_Secret_Input> input;
     std::unique_ptr<Fl_Check_Button> values;
     std::unique_ptr<Fl_Help_View> page;
     std::unique_ptr<Fl_Hold_Browser> nodes;
     std::unique_ptr<Fl_Text_Display> source, node_detail, console, network;
+    std::unique_ptr<Fl_Text_Editor> marionette_editor;
     std::unique_ptr<Fl_Box> status;
     std::optional<std::size_t> selected;
     struct Action { std::size_t node; std::uint64_t revision; };
@@ -91,6 +95,22 @@ struct Viewer::Impl {
         auto& network_group = group(10, 125, 1080, 568, "Network");
         network = display(14, 129, 1072, 560, network_buffer);
         network_group.resizable(network.get()); network_group.end();
+        auto& marionette_group = group(10, 125, 1080, 568, "Marionette");
+        goal = std::make_unique<Fl_Input>(110, 137, 720, 28, "OpenCode goal");
+        goal->maximum_size(4096);
+        load_lua = button(840, 137, 110, "Load Lua");
+        run_lua = button(960, 137, 120, "Run marionette");
+        marionette_editor = std::make_unique<Fl_Text_Editor>(14, 177, 1072, 512);
+        marionette_editor->buffer(marionette_buffer);
+        marionette_editor->textfont(FL_COURIER); marionette_editor->textsize(13);
+        marionette_buffer.text(
+            "-- Load marionette.lua and edit its allowed actions for this page.\n"
+            "-- OpenCode selects action IDs; the host executes them on this session.\n"
+            "function main(args)\n"
+            "  return [[{\"version\":1,\"goal\":\"Inspect the page\",\n"
+            "    \"max_get_probes\":0,\"actions\":[]}]]\nend\n");
+        if (!LuaRuntime::available()) run_lua->deactivate();
+        marionette_group.resizable(marionette_editor.get()); marionette_group.end();
         tabs->resizable(&page_group); tabs->end();
 
         auto& eval_group = group(0, 700, 1100, 55);
@@ -175,10 +195,10 @@ struct Viewer::Impl {
         std::string console_text, network_text;
         if (controller.dropped_activity()) console_text = "[older activity discarded: " + std::to_string(controller.dropped_activity()) + "]\n";
         for (const auto& entry : controller.activity()) {
-            const bool network = entry.type == "before_request" || entry.type == "after_response" ||
+            const bool is_network = entry.type == "before_request" || entry.type == "after_response" ||
                                  entry.type == "before_redirect" || entry.type == "before_navigation" ||
                                  entry.type == "after_navigation" || entry.type == "cookie_change";
-            std::string& text = network ? network_text : console_text;
+            std::string& text = is_network ? network_text : console_text;
             text += entry.type + " " + entry.detail + " " + entry.url + "\n";
         }
         console_buffer.text(console_text.c_str()); network_buffer.text(network_text.c_str());
@@ -291,6 +311,32 @@ struct Viewer::Impl {
             } else if (widget == self.evaluate.get() || widget == self.script.get()) {
                 const auto result = self.controller.evaluate(self.script->value());
                 self.render(); self.message(result); return;
+            } else if (widget == self.load_lua.get()) {
+                Fl_Native_File_Chooser chooser;
+                chooser.title("Load trusted Lua marionette"); chooser.filter("Lua\t*.lua");
+                if (chooser.show() != 0) return;
+                std::ifstream file(chooser.filename(), std::ios::binary);
+                if (!file) throw Error(ErrorCode::IoError, "Lua file unavailable");
+                std::string text(65537, '\0');
+                file.read(text.data(), static_cast<std::streamsize>(text.size()));
+                const auto size = static_cast<std::size_t>(file.gcount());
+                if (size > 65536) throw Error(ErrorCode::ResourceLimit, "Lua file limit");
+                if (file.bad() || (!file.eof() && file.fail())) throw Error(ErrorCode::IoError, "Lua read failed");
+                text.resize(size);
+                if (text.find('\0') != std::string::npos) throw Error(ErrorCode::InvalidArgument, "Lua contains NUL");
+                self.marionette_buffer.text(text.c_str());
+                self.message("Lua loaded; edit permitted actions, then Run marionette");
+                return;
+            } else if (widget == self.run_lua.get()) {
+                std::unique_ptr<char, decltype(&std::free)> text(self.marionette_buffer.text(), &std::free);
+                self.message("Marionette running; waiting for OpenCode");
+                self.window.redraw(); Fl::flush();
+                try {
+                    const auto result = self.controller.run_marionette(text.get(), self.goal->value());
+                    self.render();
+                    self.message("Marionette " + result.reason + "; actions: " + std::to_string(result.steps));
+                } catch (...) { self.render(); throw; }
+                return;
             } else if (widget == self.clear.get()) self.controller.clear_activity();
             self.render();
         });
@@ -304,6 +350,26 @@ void Viewer::navigate(std::string_view url) { impl_->controller.navigate(url); i
 void Viewer::load_html(std::string_view html, std::string_view base_url) { impl_->controller.load_html(html, base_url); impl_->render(); }
 void Viewer::refresh() { impl_->refresh(); }
 void Viewer::close() { impl_->stop(); }
+MarionetteResult Viewer::run_marionette(std::string_view lua, std::string_view goal) {
+    impl_->message("Marionette running; waiting for OpenCode");
+    impl_->window.redraw(); Fl::flush();
+    try {
+        const auto result = impl_->controller.run_marionette(lua, goal);
+        impl_->render();
+        impl_->message("Marionette " + result.reason + "; actions: " + std::to_string(result.steps));
+        return result;
+    } catch (...) { impl_->render(); throw; }
+}
+MarionetteResult Viewer::run_marionette_file(const std::filesystem::path& path, std::string_view goal) {
+    impl_->message("Marionette running; waiting for OpenCode");
+    impl_->window.redraw(); Fl::flush();
+    try {
+        const auto result = impl_->controller.run_marionette_file(path, goal);
+        impl_->render();
+        impl_->message("Marionette " + result.reason + "; actions: " + std::to_string(result.steps));
+        return result;
+    } catch (...) { impl_->render(); throw; }
+}
 int Viewer::exec() { show(); return Fl::run(); }
 int run(Session& session) { Viewer viewer(session); return viewer.exec(); }
 

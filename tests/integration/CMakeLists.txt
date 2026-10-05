@@ -2,8 +2,8 @@ prowsetk_gtest(prowsetk_integration_navigation "prowsetk.integration.network."
     "integration;network" test_navigation.cpp)
 
 prowsetk_gtest(prowsetk_integration_basic_gui "prowsetk.integration.basic-gui."
-    "integration;plugin;javascript;document" test_basic_gui.cpp)
-target_link_libraries(prowsetk_integration_basic_gui PRIVATE prowsetk_basic_gui_model)
+    "integration;plugin;javascript;document;lua" test_basic_gui.cpp)
+target_link_libraries(prowsetk_integration_basic_gui PRIVATE prowsetk_basic_gui_model prowsetk_basic_gui)
 target_compile_definitions(prowsetk_integration_basic_gui PRIVATE
     BASIC_GUI_PLUGIN_PATH="$<TARGET_FILE:prowsetk_basic_gui>")
 add_dependencies(prowsetk_integration_basic_gui prowsetk_basic_gui)
@@ -36,6 +36,10 @@ if(PROWSETK_BUILD_BASIC_GUI)
     add_test(NAME prowsetk.integration.basic-gui.cli.help COMMAND ptk_basic_gui --help)
     set_tests_properties(prowsetk.integration.basic-gui.cli.help PROPERTIES
         LABELS "integration;plugin;gui" TIMEOUT 10)
+    add_test(NAME prowsetk.integration.basic-gui.cli.goal-without-script
+        COMMAND ptk_basic_gui --goal "Explore page")
+    set_tests_properties(prowsetk.integration.basic-gui.cli.goal-without-script PROPERTIES
+        LABELS "integration;plugin;gui;lua" TIMEOUT 10 WILL_FAIL TRUE)
     add_test(NAME prowsetk.integration.basic-gui.cli.invalid COMMAND ptk_basic_gui --unknown)
     set_tests_properties(prowsetk.integration.basic-gui.cli.invalid PROPERTIES
         LABELS "integration;plugin;gui" TIMEOUT 10 WILL_FAIL TRUE)

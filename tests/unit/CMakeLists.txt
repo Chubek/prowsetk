@@ -135,7 +135,7 @@ prowsetk_gtest(prowsetk_unit_javascript_platform "prowsetk.unit.javascript_platf
 prowsetk_gtest(prowsetk_unit_viewport "prowsetk.unit.viewport."
     "unit;javascript;document" test_viewport.cpp)
 prowsetk_gtest(prowsetk_unit_basic_gui "prowsetk.unit.basic-gui."
-    "unit;plugin;document" test_basic_gui.cpp)
+    "unit;plugin;document;lua" test_basic_gui.cpp)
 target_link_libraries(prowsetk_unit_basic_gui PRIVATE
     prowsetk_basic_gui_model prowsetk_basic_gui)
 

@@ -2,6 +2,8 @@
 #include <prowsetk/plugins/basic_gui.hpp>
 #include <prowsetk/error.hpp>
 #include <prowsetk/ir.hpp>
+#include <prowsetk/lua_runtime.hpp>
+#include <fstream>
 
 using namespace prowsetk;
 using namespace prowsetk::basic_gui;
@@ -108,4 +110,48 @@ TEST(BasicGui, DisabledViewerReportsUnsupported) {
     auto session = browser.create_session();
     try { Viewer viewer(*session); FAIL(); }
     catch (const Error& error) { EXPECT_EQ(error.code(), ErrorCode::Unsupported); }
+}
+
+TEST(BasicGui, MarionetteRejectsBadScriptsAndPoliciesWithoutContactingAgent) {
+    if (!LuaRuntime::available()) GTEST_SKIP();
+    Browser browser;
+    auto session = browser.create_session();
+    Controller controller(*session);
+    controller.load_html("<p id='state'>Initial</p>");
+    MemoryNetworkClient agent;
+    for (const auto source : {"not valid Lua !", "function main() error('private-error') end",
+                              "function main() return '{}' end", "function main() return 0 end",
+                              "function main() return setmetatable({}, {__tostring=function() error('private-error') end}) end"}) {
+        try { controller.run_marionette(source, {}, &agent); FAIL(); }
+        catch (const Error& error) { EXPECT_EQ(std::string(error.what()).find("private-error"), std::string::npos); }
+    }
+    EXPECT_TRUE(agent.requests().empty());
+    EXPECT_THROW(controller.run_marionette(std::string(65537, 'x'), {}, &agent), Error);
+    EXPECT_THROW(controller.run_marionette("", std::string(4097, 'x'), &agent), Error);
+    EXPECT_TRUE(agent.requests().empty());
+    // A failure after Lua preparation still updates the inspected live DOM.
+    EXPECT_THROW(controller.run_marionette(R"lua(
+        function main()
+            session:document():query_selector('#state'):set_text('Prepared')
+            return '{}'
+        end
+    )lua", {}, &agent), Error);
+    EXPECT_NE(controller.snapshot().preview_html.find("Prepared"), std::string::npos);
+    EXPECT_EQ(browser.live_session_count(), 1u);
+}
+
+TEST(BasicGui, MarionetteFilesAreBoundedAndErrorsOmitPaths) {
+    Browser browser;
+    auto session = browser.create_session();
+    Controller controller(*session);
+    const auto file = std::filesystem::current_path() / "basic-gui-marionette-limit.lua";
+    { std::ofstream stream(file, std::ios::binary); stream << std::string(65537, 'x'); }
+    try { controller.run_marionette_file(file); FAIL(); }
+    catch (const Error& error) { EXPECT_EQ(error.code(), ErrorCode::ResourceLimit); }
+    std::filesystem::remove(file);
+    try { controller.run_marionette_file(file); FAIL(); }
+    catch (const Error& error) {
+        EXPECT_EQ(error.code(), ErrorCode::IoError);
+        EXPECT_EQ(std::string(error.what()).find(file.string()), std::string::npos);
+    }
 }

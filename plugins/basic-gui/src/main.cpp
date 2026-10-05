@@ -9,7 +9,7 @@
 
 int main(int argc, char** argv) {
     try {
-        std::string url, file, base = "https://offline.test/";
+        std::string url, file, marionette, goal, base = "https://offline.test/";
         prowsetk::BrowserConfig config;
         config.timeout_ms = 10000;
         for (int i = 1; i < argc; ++i) {
@@ -17,19 +17,24 @@ int main(int argc, char** argv) {
             if (arg == "--help" || arg == "-h") {
                 std::cout << "Usage: ptk-basic-gui [--url HTTP(S)-URL | --file HTML-FILE]\n"
                              "                     [--base-url URL] [--no-javascript] [--proxy URL]\n"
+                             "                     [--marionette LUA-FILE] [--goal TEXT]\n"
                              "Flatworm inspector: basic page preview, DOM, sanitized source, console and network.\n";
                 return 0;
             }
             if (arg == "--no-javascript") config.javascript = false;
-            else if ((arg == "--url" || arg == "--file" || arg == "--base-url" || arg == "--proxy") && i + 1 < argc) {
+            else if ((arg == "--url" || arg == "--file" || arg == "--base-url" || arg == "--proxy" || arg == "--marionette" || arg == "--goal") && i + 1 < argc) {
                 const std::string value = argv[++i];
                 if (arg == "--url") url = value;
                 else if (arg == "--file") file = value;
                 else if (arg == "--base-url") base = value;
+                else if (arg == "--marionette") marionette = value;
+                else if (arg == "--goal") goal = value;
                 else config.proxy = prowsetk::parse_proxy_url(value);
             } else throw prowsetk::Error(prowsetk::ErrorCode::InvalidArgument, "invalid arguments");
         }
         if (!url.empty() && !file.empty()) throw prowsetk::Error(prowsetk::ErrorCode::InvalidArgument, "choose URL or file");
+        if (!goal.empty() && marionette.empty())
+            throw prowsetk::Error(prowsetk::ErrorCode::InvalidArgument, "goal requires marionette");
         prowsetk::Browser browser(config);
         // Offline startup rejects every network request, including script and
         // synthetic navigation. FLTK never fetches page resources itself.
@@ -48,6 +53,10 @@ int main(int argc, char** argv) {
             std::string html(static_cast<std::size_t>(size), '\0');
             if (!stream.read(html.data(), static_cast<std::streamsize>(html.size()))) throw prowsetk::Error(prowsetk::ErrorCode::InvalidArgument, "HTML file read failed");
             viewer.load_html(html, base);
+        }
+        if (!marionette.empty()) {
+            viewer.show();
+            viewer.run_marionette_file(marionette, goal);
         }
         return viewer.exec();
     } catch (const prowsetk::Error& error) {

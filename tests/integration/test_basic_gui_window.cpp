@@ -9,6 +9,8 @@
 #include <FL/Fl_Window.H>
 #include <FL/Fl_Input.H>
 #include <FL/Fl_Help_View.H>
+#include <FL/Fl_Text_Editor.H>
+#include <prowsetk/lua_runtime.hpp>
 #include <cstring>
 #include <prowsetk/plugins/basic_gui.hpp>
 
@@ -126,6 +128,25 @@ TEST(BasicGuiWindow, LiveWindowRefreshAndClosureRetainSessionOwnership) {
             selector->value("#input"); input->value("private-typed"); type->do_callback();
             EXPECT_EQ(session->document()->query_selector("#input")->value(), "private-typed");
             EXPECT_STREQ(input->value(), "");
+        }
+        if (prowsetk::LuaRuntime::available()) {
+            auto* window = Fl::first_window();
+            ASSERT_NE(window, nullptr);
+            auto* editor = first_of_type<Fl_Text_Editor>(*window);
+            auto* run = named_widget(*window, "Run marionette");
+            auto* goal = dynamic_cast<Fl_Input*>(named_widget(*window, "OpenCode goal"));
+            ASSERT_NE(editor, nullptr); ASSERT_NE(run, nullptr); ASSERT_NE(goal, nullptr);
+            // Exercise the real GUI callback without any OpenCode request.
+            // Lua preparation takes effect before strict policy rejection.
+            editor->buffer()->text("function main(args) assert(args.goal == 'Test goal'); "
+                "session:document():query_selector('#state'):set_text('Lua prepared'); return '{}' end");
+            goal->value("Test goal");
+            run->do_callback();
+            EXPECT_EQ(session->document()->query_selector("#state")->text(), "Lua prepared");
+            auto* preview = first_of_type<Fl_Help_View>(*window);
+            ASSERT_NE(preview, nullptr);
+            EXPECT_NE(std::strstr(preview->value(), "Lua prepared"), nullptr);
+            EXPECT_TRUE(observed->requests().empty());
         }
         viewer.refresh();
         Fl::check();

@@ -524,8 +524,11 @@ the engine's event loop, timers, request hooks, and session lifecycle events.
 The repository includes `plugins/basic-gui`, an optional FLTK browser inspector.
 `ptk-basic-gui` supplies URL navigation/history, a basic HTML page preview,
 DOM/attribute inspection, sanitized source, console/network activity, synthetic
-clicks/typing and explicit page-JavaScript evaluation. It uses the owning
-Flatworm Session; every network request retains host policies, cookies and
+clicks/typing, explicit page-JavaScript evaluation and Lua-configured OpenCode
+marionette runs. The Marionette tab loads trusted Lua `main(args)` scripts that
+return bounded action policies; OpenCode chooses permitted action IDs on the
+displayed Session. See the plugin guide for connection setup and script examples.
+It uses the owning Flatworm Session; every network request retains host policies, cookies and
 hooks. Preview links carry revision/node action IDs, and FLTK never loads page
 resource files or external URIs. Loading the ABI-v2 facade is display/network-free;
 the C++ `Viewer` explicitly opens a window. The `Controller` and snapshot model

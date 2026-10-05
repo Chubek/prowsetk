@@ -44,7 +44,7 @@ display-free. `--help` also runs without a display. FLTK's LGPL license includes
 its static-linking exception; see `third_party/fltk/COPYING`.
 
 Options: `--url URL` or `--file FILE`, `--base-url URL` for offline relative
-references, `--no-javascript`, `--proxy URL`, `--help`. File startup uses a memory
+references, `--no-javascript`, `--proxy URL`, `--marionette LUA-FILE`, `--goal TEXT`, `--help`. File startup uses a memory
 transport that rejects all page requests, including script-initiated navigation;
 it can be used for deterministic inspection. Launch without `--file` for live
 browsing. HTML files are bounded to 16 MiB.
@@ -81,6 +81,80 @@ window is open. Calls use bounded ScriptOptions (100-ms script checkpoints,
 cookies, proxies, TLS verification, request/response hooks and cancellation.
 Calls are synchronous on the GUI thread; network requests can temporarily block
 the controls. Close releases the timer and event subscription.
+
+## OpenCode Lua marionette
+
+The **Marionette** tab contains a Lua editor, **Load Lua**, **Run marionette**,
+and an **OpenCode goal** field. Load `plugins/basic-gui/marionette.lua`, edit its
+permitted actions to match your page, load or navigate the page, then run it.
+The initial editor has no allowed actions; load/edit a policy to permit browsing.
+A nonempty goal field overrides the policy's goal. Goals go to OpenCode, so keep
+credentials and other secrets out of them.
+
+Start an OpenCode API server separately (`opencode serve`). The GUI reads
+`OPENCODE_BASE_URL` (default `http://127.0.0.1:4096`),
+`OPENCODE_SERVER_USERNAME`, and `OPENCODE_SERVER_PASSWORD`. It uses the existing
+bridge's V2 `/api` protocol, deny-all agent tool permissions, separate host
+transport, redirect rejection, loopback-only plain HTTP and verified HTTPS.
+It never sends page authentication to OpenCode. No server is started implicitly.
+
+```sh
+export OPENCODE_SERVER_USERNAME=opencode
+# Set OPENCODE_SERVER_PASSWORD securely in the launching environment.
+tools/launch-gui.sh --url https://your-site.example/ \
+  --marionette plugins/basic-gui/marionette.lua --goal 'Explore the next pages'
+```
+
+These are **trusted host Lua scripts**, with the normal `lprowse`, `lprowsext`
+and `lprowseir` modules and a global managed `session` referring to the displayed
+session. A fresh Lua runtime is used for each run; subscriptions and Lua state
+are released when it ends. Lua may prepare that session before returning a
+policy. GUI marionettes have a distinct entrypoint contract from CLI drivers:
+`main(args)` returns a **version-1 decisions JSON string**, not an integer exit
+code. `args.goal` is the goal field/`--goal` value, or an empty string.
+
+```lua
+function main(args)
+    assert(session:document(), "Load a page first")
+    return [[{
+      "version": 1, "goal": "Visit the permitted next page",
+      "max_steps": 4, "max_page_requests": 32, "max_get_probes": 0,
+      "actions": [{"id": "next", "kind": "click", "selector": "a[rel=next]"}]
+    }]]
+end
+```
+
+After Lua preparation, the host runs the existing
+[OpenCode marionette controller](../opencode-marionette/README.md). OpenCode sees
+the goal, redacted URL, structural target availability and endpoint counts;
+it chooses only caller-defined click/type/navigation action IDs or `stop`.
+Selectors, typing values, page text, scripts, cookies and headers are omitted
+from agent prompts. Model output is validated as a choice and never executed as
+Lua, JavaScript or shell code. The policy's same-origin page request bounds,
+action/use limits and optional GET-probe limits apply during the host loop.
+Use `max_get_probes: 0` to avoid automatic schema GET requests. Extraction runs
+internally, but this GUI returns only action count and stop reason; it does not
+write exports or claim complete discovery.
+
+Lua source/files are capped at 64 KiB and goals at 4096 bytes. The OpenCode
+client allows at most 512 requests including polls, with a 30-second request
+timeout and a 120-second wait per reply. GUI execution is synchronous on the
+owning desktop thread: preparation and agent/network waits block controls;
+there is no in-window cancellation. Lua preparation is trusted and has no
+execution deadline or sandbox; it is outside the subsequent action policy.
+Actions are immediate and survive a later failure. Both completion and failure
+refresh the displayed DOM and navigation history. Routine Lua `print` is
+suppressed and UI/CLI errors show error codes rather than script/model values;
+trusted scripts still have ordinary Lua IO access and must handle secrets
+responsibly. Lua-disabled builds report Unsupported and disable Run.
+
+C++ embedders can call `Controller::run_marionette(source, goal, agent_transport)`
+with an optional borrowed, separate `NetworkClient` for testing, or
+`Controller::run_marionette_file(path, goal)`. These methods are implemented by
+`prowsetk_basic_gui` and run without a display; link it along with
+`ProwseTk::basic_gui_model`. `Viewer` exposes corresponding source/file methods
+and refreshes its widgets. This reuses existing dependencies and leaves the
+native plugin ABI unchanged; loading its facade remains network-free.
 
 ## Preview and bounds
 

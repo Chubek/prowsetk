@@ -852,6 +852,17 @@ read host viewport dimensions, notify resize/visualViewport/media listeners and
 support semantic details/dialog state and form-control activation. Do not claim
 CSS geometry, top-layer/focus-trapping or full media-query conformance. Keep
 display-free unit/integration coverage and the optional window CTest under tests.
+GUI marionettes are trusted Lua preparation scripts whose `main(args)` returns
+version-1 decisions JSON; this differs from the CLI driver's integer result.
+Bind the displayed session only for the synchronous run, destroy the fresh Lua
+runtime/subscriptions before returning, and never execute model responses as
+code. Reuse the OpenCode marionette controller's validated actions, same-origin
+policy and bounded V2 bridge with separate agent authentication/transport. Keep
+source/goal bounds, generic errors, suppressed routine Lua print, and refresh
+DOM/history after success or partial-action failure. Preparation remains trusted
+and synchronous, outside the subsequent action policy; document blocking waits
+and the absence of GUI cancellation honestly. Native facade loading stays
+network/display-free. No additional production dependency is needed.
 See `plugins/basic-gui/README.md` for the supported preview and Web API slice.
 
 `tools/launch-gui.sh` starts that executable. It searches CMake presets for the

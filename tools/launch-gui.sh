@@ -21,6 +21,8 @@
 #   --base-url URL       base URL for relative references in --file
 #                        (default: https://offline.test/)
 #   --proxy URL          HTTP(S)/SOCKS5 proxy for page requests
+#   --marionette PATH    trusted Lua policy script to run through OpenCode
+#   --goal TEXT          override its OpenCode goal (forwarded to the GUI)
 #   --no-javascript      load the document without page scripting
 #   --preset NAME        CMake preset to search first (default: gui)
 #   --bin PATH           explicit ptk-basic-gui executable
