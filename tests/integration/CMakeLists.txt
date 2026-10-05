@@ -1,6 +1,25 @@
 prowsetk_gtest(prowsetk_integration_navigation "prowsetk.integration.network."
     "integration;network" test_navigation.cpp)
 
+prowsetk_gtest(prowsetk_integration_complex_gui "prowsetk.integration.complex-gui."
+    "integration;plugin;document;javascript" test_complex_gui.cpp)
+target_link_libraries(prowsetk_integration_complex_gui PRIVATE ProwseTk::complex_gui)
+target_compile_definitions(prowsetk_integration_complex_gui PRIVATE
+    COMPLEX_GUI_PLUGIN_PATH="$<TARGET_FILE:prowsetk_complex_gui>")
+if(PROWSETK_BUILD_COMPLEX_GUI)
+    prowsetk_gtest(prowsetk_integration_complex_gui_window "prowsetk.integration.complex-gui.window."
+        "integration;plugin;gui" test_complex_gui_window.cpp TIMEOUT 20)
+    target_link_libraries(prowsetk_integration_complex_gui_window PRIVATE ProwseTk::complex_gui ProwseTk::fltk)
+    if(TARGET prowse_gui)
+        add_test(NAME prowsetk.integration.prowse-gui.help COMMAND prowse_gui --help)
+        set_tests_properties(prowsetk.integration.prowse-gui.help PROPERTIES
+            LABELS "integration;plugin;gui" TIMEOUT 10 PASS_REGULAR_EXPRESSION "display-list browser")
+        add_test(NAME prowsetk.integration.prowse-gui.invalid COMMAND prowse_gui --invalid)
+        set_tests_properties(prowsetk.integration.prowse-gui.invalid PROPERTIES
+            LABELS "integration;plugin;gui" TIMEOUT 10 WILL_FAIL TRUE)
+    endif()
+endif()
+
 prowsetk_gtest(prowsetk_integration_basic_gui "prowsetk.integration.basic-gui."
     "integration;plugin;javascript;document;lua" test_basic_gui.cpp)
 target_link_libraries(prowsetk_integration_basic_gui PRIVATE prowsetk_basic_gui_model prowsetk_basic_gui)
@@ -278,3 +297,5 @@ if(TARGET ptk_opencode_marionette)
         endif()
     endif()
 endif()
+prowsetk_gtest(prowsetk_integration_render "prowsetk.integration.render."
+    "integration;document;javascript" test_render.cpp)

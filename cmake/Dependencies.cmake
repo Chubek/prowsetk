@@ -1,8 +1,24 @@
 include_guard(GLOBAL)
 
-# FLTK is confined to the opt-in basic-gui frontend. The controller and the
+# stb supplies the optional header-only PNG/JPEG decoder, isolated behind
+# ProwseTk::render_stb, so no stb type reaches a public header. Without it the
+# engine still lays out and paints: images degrade to their alt text and text
+# uses the built-in metrics, which is why it is optional rather than required.
+find_package(stb CONFIG QUIET)
+if(TARGET stb::stb)
+    add_library(ProwseTk::render_stb ALIAS stb::stb)
+elseif(EXISTS "${PROJECT_SOURCE_DIR}/third_party/stb/stb_image.h")
+    add_library(prowsetk_render_stb INTERFACE)
+    target_include_directories(prowsetk_render_stb SYSTEM INTERFACE
+        "${PROJECT_SOURCE_DIR}/third_party/stb")
+    add_library(ProwseTk::render_stb ALIAS prowsetk_render_stb)
+else()
+    message(STATUS "stb not found: image decoding falls back to alt text")
+endif()
+
+# FLTK is confined to the opt-in basic-gui and complex-gui adapters. Controllers and the
 # core remain usable on machines without desktop development packages.
-if(PROWSETK_BUILD_BASIC_GUI)
+if(PROWSETK_BUILD_BASIC_GUI OR PROWSETK_BUILD_COMPLEX_GUI)
     find_package(FLTK CONFIG QUIET)
     if(NOT TARGET fltk::fltk)
         if(NOT EXISTS "${PROJECT_SOURCE_DIR}/third_party/fltk/CMakeLists.txt")

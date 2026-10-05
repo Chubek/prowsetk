@@ -8,6 +8,24 @@ Flatworm's native page-JavaScript bindings use the independent
 
 ## Registry lifecycle
 
+The independent [complex-gui](../plugins/complex-gui/README.md) plugin paints
+Flatworm's display-list records into a custom FLTK canvas. Enable
+`PROWSETK_BUILD_COMPLEX_GUI` or use the `complex-gui` preset; launch
+`build/complex-gui/tools/prowse-gui/prowse-gui`. It provides scrolling, browser
+history, hit-tested controls, masked form replacement and optional image loading.
+It has its own headless Controller and ABI-v2 facade and does not depend on
+basic-gui. Native loading remains network/display-free. Navigation is synchronous,
+and the renderer's limited CSS support applies. File startup uses an offline
+transport; see the tool README for command-line options.
+
+C++ hosts and plugins can also consume the explicit headless display-list API
+in `prowsetk/render.hpp`: `render_document` returns ordered paint records and
+`hit_test` maps coordinates to elements. See the
+[supported subset and bounds](../README.md#explicit-headless-display-lists).
+This API has no desktop dependency and no implicit network loading. Its snapshots
+must be refreshed after DOM changes. It is separate from the GUI's sanitized
+ProwseEvent preview and from page-JavaScript geometry support.
+
 The optional [basic-gui](../plugins/basic-gui/README.md) plugin supplies an FLTK
 desktop inspector. `cmake --preset gui` enables its graphical adapter;
 `tools/launch-gui.sh --file plugins/basic-gui/example.html` opens the offline

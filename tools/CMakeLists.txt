@@ -1,6 +1,7 @@
 add_subdirectory(page2pdf)
 add_subdirectory(page2latex)
 add_subdirectory(prowse-tui)
+add_subdirectory(prowse-gui)
 if(UNIX AND PROWSETK_HAVE_LUA AND PROWSETK_HAVE_TOMLPLUSPLUS)
     add_subdirectory(automation)
     add_subdirectory(crawler)

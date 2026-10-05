@@ -74,6 +74,12 @@
         "PROWSETK_WASM_RUNTIME": "wasmtime",
         "PROWSETK_ENABLE_WASI": "OFF"
       }
+    },
+    {
+      "name": "complex-gui",
+      "displayName": "Flatworm display-list desktop browser",
+      "inherits": "default",
+      "cacheVariables": { "PROWSETK_BUILD_COMPLEX_GUI": "ON" }
     }
   ],
   "buildPresets": [
@@ -83,6 +89,7 @@
     { "name": "asan",     "configurePreset": "asan" },
     { "name": "coverage", "configurePreset": "coverage" },
     { "name": "gui",      "configurePreset": "gui" },
+    { "name": "complex-gui", "configurePreset": "complex-gui" },
     { "name": "wasm",     "configurePreset": "wasm" }
   ],
   "testPresets": [
@@ -129,6 +136,12 @@
     {
       "name": "wasm",
       "configurePreset": "wasm",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "complex-gui",
+      "configurePreset": "complex-gui",
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     }

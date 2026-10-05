@@ -26,6 +26,14 @@ set(PROWSETK_CORE_SOURCES
     core/ir_vtd.cpp
     core/ir_iml.cpp
     core/ir_registry.cpp
+    core/render/css_parser.cpp
+    core/render/text_metrics.cpp
+    core/render/style_resolver.cpp
+    core/render/box_layout.cpp
+    core/render/paint.cpp
+    core/render/image.cpp
+    core/render/hit_test.cpp
+    core/render/renderer.cpp
     core/embedding.cpp
     core/web_interface.cpp
     core/playwright.cpp
@@ -82,6 +90,14 @@ if(PROWSETK_HAVE_TOMLPLUSPLUS)
     prowsetk_install_library(prowsetk_tomlplusplus)
 endif()
 
+# stb decodes raster images for the graphical core. It is header-only and stays
+# behind a PRIVATE link, so no stb type reaches a public header; without it the
+# renderer still lays out and paints, degrading images to their alt text.
+if(TARGET ProwseTk::render_stb)
+    target_compile_definitions(prowsetk_core PRIVATE PROWSETK_HAVE_STB=1)
+    target_link_libraries(prowsetk_core PRIVATE $<BUILD_INTERFACE:ProwseTk::render_stb>)
+endif()
+
 # WASM configuration is threaded through as compile definitions so the disabled
 # runtime reports the build configuration honestly (AGENTS.md 4.1, 9).
 if(PROWSETK_ENABLE_WASM)
@@ -99,6 +115,7 @@ prowsetk_install_library(prowsetk_core)
 
 add_subdirectory(session)
 add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/basic-gui" "${CMAKE_BINARY_DIR}/plugins/basic-gui")
+add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/complex-gui" "${CMAKE_BINARY_DIR}/plugins/complex-gui")
 
 if(PROWSETK_BUILD_AI_ORACLE)
     add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/ai-oracle" "${CMAKE_BINARY_DIR}/plugins/ai-oracle")

@@ -1,0 +1,13 @@
+<!doctype html><html><head><title>Display-list browser demo</title>
+<style>body{margin:24px;color:#203040}h1{color:#205ab0}section{background-color:#eef4ff;padding:18px;margin-bottom:20px;border:1px solid #8ba4cc}button{padding:8px}input{width:240px}p{line-height:24px}</style>
+</head><body><h1>Flatworm display-list browser</h1>
+<section><p>The page is painted from the core renderer's display list.</p>
+<button id="increment">Increment</button><p id="count">Count: 0</p></section>
+<section><p>Click the input, enter a replacement in the bottom editor, and Apply.</p>
+<input id="name" placeholder="Your name"><button id="greet">Greet</button><p id="greeting">Ready</p></section>
+<details><summary>Open details</summary><p>This disclosure is handled by Flatworm.</p></details>
+<div style="height:700px;background-color:#f4f4f4"><p>Scroll down to the final section.</p></div>
+<section><h2>End of the page</h2><a href="https://example.com/">Example link (offline mode blocks networking)</a></section>
+<script>let count=0;document.querySelector('#increment').onclick=()=>{document.querySelector('#count').textContent='Count: '+(++count)};
+document.querySelector('#greet').onclick=()=>{document.querySelector('#greeting').textContent='Hello '+document.querySelector('#name').value};</script>
+</body></html>

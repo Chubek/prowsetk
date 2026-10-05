@@ -50,6 +50,8 @@ in `tests/integration/test_drivers.cpp` and a `prowsetk run` CLI test in
   opt-in FLTK desktop inspector (`PROWSETK_BUILD_BASIC_GUI=OFF` by default).
   Keep its graphical dependency confined to its adapter; native plugin loading,
   the model/controller, and ordinary tests remain display-free.
+  The separate `plugins/complex-gui` adapter and `tools/prowse-gui` browser are
+  opt-in through `PROWSETK_BUILD_COMPLEX_GUI=OFF` by default as well.
 - No dependency on a third-party browser engine.
 - The public C++ API is decomposed into `Browser`, `Session`, `Document`,
   `Element`, `NetworkClient`, `JavaScriptRuntime`, `LuaRuntime`, `WebPlatform`,
@@ -514,7 +516,7 @@ See the module README for its exports and supported protocol restrictions.
 
 ## Synthetic Interaction Driver & SPA Event Cascades
 
-Flatworm does not have a layout tree, rasterizer, or hit-testing subsystem. Modern
+Page-JavaScript synthetic interactions do not use a layout tree or rasterizer. Modern
 Single Page Applications (React, Vue, Angular, Svelte) attach event listeners
 globally to the document root and track controlled component values via native
 descriptors. In order for synthetic actions executed by Lua drivers (`lprowse`) or
@@ -571,7 +573,7 @@ The keyboard/typing cascade must execute:
 4. `blur` (on focus lost)
 
 ### 3. Layout-Free Visibility & Interactability Heuristics
-Because CSS layout is a stub, physical coordinate hit-testing is unavailable. The
+Synthetic interactions use semantic DOM checks rather than display-list coordinates. The
 shim and host determine element interactability through semantic DOM heuristics:
 
 - **Visibility:** Evaluated via inline styles and attributes. An element is
@@ -881,6 +883,23 @@ guessing them, keep `--help`/`--check` working with no build and no display, and
 never log page values, URLs or proxy values. Its help/preflight paths are
 CTest cases in every configuration; only the window test needs a display.
 
+### Complex GUI / prowse-gui
+
+`plugins/complex-gui` has a display-free controller/model and a network-free ABI-v2
+facade in every build. Its optional FLTK Viewer is independent of basic-gui and
+paints the core `render_document` display list; do not substitute Fl_Help_View or
+add a parallel HTML/CSS parser. `tools/prowse-gui` is the executable consumer.
+Keep its `complex-gui` configure/build/test presets and OFF-by-default option.
+FLTK sees decoded image pixels only. Opt-in resource requests and all synthetic
+interactions use Session; page script policies, cookies and redirects still apply.
+Keep bounded history/offline HTML, per-page image budgets, live-node/revision
+validation, masked editor values, generic errors and explicit synchronous network
+limitations. Calls, checkpoints and drawing belong on the desktop thread. Never
+invoke page networking from a draw callback. No renderer values are exported or
+logged. Preserve headless model/Session tests and the finite, display-conditional
+window smoke test. See `plugins/complex-gui/README.md` for the exact supported
+browser workflow and image/layout restrictions.
+
 ### Python build isolation
 
 Python binding builds keep their module, package wrapper, and generated stubs
@@ -903,6 +922,22 @@ Encrypted-storage tests retain production-cost key derivation and use a bounded
 retain the default 60-second bound.
 
 ## DOM and DOM Maniplators
+
+### Explicit C++ display-list renderer
+
+`include/prowsetk/render.hpp` and `src/core/render/` implement an explicit,
+headless normal-flow display-list renderer. Keep CSS syntax, cascade, text
+measurement, layout, paint encoding, image decoding, and hit testing in separate
+translation units. Preserve ordered fragment references across paint kinds,
+ancestor clipping, bounded allocations and generic errors. The renderer is a
+snapshot API, independent of the page-JavaScript geometry stubs and the GUI's
+sanitized ProwseEvent preview. Hosts must rerender before acting on changed DOMs.
+Image loading is caller-supplied and must use host network policy; optional stb
+decodes PNG/JPEG bytes only. Keep default control-value redaction, negative image
+caching, and cache/request bounds. Do not claim full CSS, intrinsic image sizing,
+browser table layout, stacking contexts or text shaping. README's explicit
+display-list section is the supported contract. Keep unit and Session integration
+coverage under tests with labels and finite timeouts.
 
 ### Implemented PDQL and automation tools
 

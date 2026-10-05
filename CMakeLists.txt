@@ -11,6 +11,8 @@ option(PROWSETK_BUILD_AI_ORACLE
     "Build the optional OpenAI oracle plugin when its headers are available" ON)
 option(PROWSETK_BUILD_BASIC_GUI
     "Build the optional FLTK desktop browser inspector" OFF)
+option(PROWSETK_BUILD_COMPLEX_GUI
+    "Build the FLTK display-list browser and complex-gui adapter" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(ProwseTkHelpers)

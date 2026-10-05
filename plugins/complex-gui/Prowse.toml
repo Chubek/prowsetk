@@ -1,0 +1,12 @@
+[project]
+name = "complex-gui"
+version = "0.1.0"
+
+[[plugins]]
+name = "complex-gui"
+type = "native"
+path = "../../build/complex-gui/plugins/complex-gui/libprowsetk_complex_gui.so"
+enabled = true
+autoload = true
+# Facade loading is network/display-free. Open Viewer(session) explicitly,
+# or run build/complex-gui/tools/prowse-gui/prowse-gui.

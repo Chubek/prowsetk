@@ -1,6 +1,16 @@
 prowsetk_gtest(prowsetk_unit_version "prowsetk.unit.version."
     "unit;core" test_version.cpp)
 
+prowsetk_gtest(prowsetk_unit_complex_gui "prowsetk.unit.complex-gui."
+    "unit;plugin;document" test_complex_gui.cpp)
+target_link_libraries(prowsetk_unit_complex_gui PRIVATE ProwseTk::complex_gui)
+
+prowsetk_gtest(prowsetk_unit_render "prowsetk.unit.render."
+    "unit;document" test_render.cpp)
+if(TARGET ProwseTk::render_stb)
+    target_compile_definitions(prowsetk_unit_render PRIVATE PROWSETK_TEST_STB=1)
+endif()
+
 if(TARGET ProwseTk::ai_oracle)
     prowsetk_gtest(prowsetk_unit_ai_oracle "prowsetk.unit.ai-oracle."
         "unit;plugin" test_ai_oracle.cpp test_ai_oracle_c.c)

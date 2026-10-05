@@ -92,8 +92,8 @@ WebPlatform default_web_platform() {
     platform.declare("canvas", ImplementationClass::DummyImplementation,
                      "no pixel rendering");
     platform.declare("WebGL", ImplementationClass::Unsupported);
-    platform.declare("CSS layout", ImplementationClass::Unsupported,
-                     "no layout or rendering engine");
+    platform.declare("CSS layout", ImplementationClass::PartiallyImplemented,
+                     "explicit C++ render_document normal-flow display lists; no page-JS geometry, flex/grid, floats or stacking contexts");
     return platform;
 }
 

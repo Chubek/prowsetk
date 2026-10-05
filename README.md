@@ -16,6 +16,15 @@ basic browser GUI for viewing the live page, DOM, source and activity. Its
 graphical dependencies are confined to `plugins/basic-gui`; the core and
 default build remain headless.
 
+The separate [complex-gui](plugins/complex-gui/README.md) plugin paints the core
+display-list renderer into a custom FLTK canvas. Its browser executable lives in
+[`tools/prowse-gui`](tools/prowse-gui/README.md): navigation/history, scrolling,
+hit-tested links and controls, masked form editing, and opt-in Session-mediated
+PNG/JPEG images. Build with `cmake --preset complex-gui` and
+`cmake --build --preset complex-gui`, then run
+`build/complex-gui/tools/prowse-gui/prowse-gui --file tools/prowse-gui/example.html`.
+`PROWSETK_BUILD_COMPLEX_GUI` defaults OFF and is independent of basic-gui.
+
 Read the [ProwseTk Manual](manual/README.md) for 30 chapters covering installation,
 the core APIs, Lua drivers/extensions, plugins, tools, and client interfaces.
 It includes practical examples, configuration references, resource bounds, and
@@ -233,6 +242,51 @@ automation, while capability queries still describe the implementation
 honestly rather than claiming full browser compatibility.
 
 ## Public C++ API
+
+### Explicit headless display lists
+
+`#include <prowsetk/render.hpp>` exposes `render_document`, computed styles,
+text measurement, image caching, and `hit_test`. A render is an explicit snapshot:
+it returns ordered background, border, text, marker, image, and control records
+in CSS-pixel document coordinates. It requires neither FLTK nor a display server.
+The host paints the records and routes a hit's interactive element through the
+existing Session interaction APIs. Rerender after DOM changes or viewport changes;
+old display lists retain element handles and must not be used for later actions.
+
+```cpp
+prowsetk::RenderOptions options;
+options.viewport_width = 800;
+auto page = prowsetk::render_document(*document, options);
+auto hit = prowsetk::hit_test(page.paint, 20, 40);
+```
+
+The supported subset is normal block/inline flow, atomic inline boxes, explicit
+width/height and min/max sizes, margins/padding/borders, relative left/top offsets,
+text wrapping, visibility, ancestor clipping, list markers, and form-control
+records. The cascade reads embedded styles and inline declarations, with
+importance, specificity, source order, and inherited text properties. External
+stylesheets are not fetched. Unrecognized selectors and properties are ignored.
+Table boxes currently use block-flow fallback; flex/grid, floats, absolute
+positioning, stacking contexts, text shaping, full inline box decoration, and
+browser-conformant table layout are unsupported. Percentage margins/padding use
+the viewport width. The default measurer approximates UTF-8 advances; consumers
+can supply a `TextMeasurer`. This API does not change page-JavaScript geometry or
+canvas support, or replace the GUI's existing sanitized ProwseEvent preview.
+
+Image loading is opt-in through a caller-owned `ImageLoader` and `ImageCache`.
+The host must apply its Session network policy and bound response bytes. The
+engine opens no sockets. Optional stb decodes PNG/JPEG bytes; absent decoding or
+loading yields an image record with alt text and `degraded=true`. Images use
+explicit CSS dimensions or an alt-text-sized fallback, not intrinsic sizing.
+Control values are redacted in display records; other DOM text is caller data,
+so display lists are local presentation objects, not sanitized exports.
+
+Bounds include 40,000 elements, 256 node levels, 16 MiB of text/attributes, 4 MiB of
+stylesheet text, 40,000 rules/declarations, two million cascade candidate checks,
+400,000 paint items, and an 8 MiB/256-entry image cache. Invalid render dimensions
+throw `InvalidArgument`; document/style/line limits throw `ResourceLimit`.
+Paint/image truncation sets `RenderedPage::limited`. Loader exceptions propagate.
+No plugin ABI or WIT contract changes are required.
 
 The public C++ API separates browser responsibilities into focused components.
 All components are replaceable or extendable through documented interfaces.
@@ -2439,7 +2493,8 @@ optional components depending on the build configuration.
 |---|---|
 | `c-ares` | Asynchronous DNS resolution |
 | `fmt` | Type-safe formatting (`{fmt}`) |
-| `fltk` | Optional desktop widgets/basic HTML preview for `plugins/basic-gui`; core and default builds are display-free |
+| `fltk` | Optional desktop adapters for `basic-gui` and the separate display-list `complex-gui`/`prowse-gui`; core and default builds are display-free |
+| `stb` | Optional header-only PNG/JPEG decoder for explicit core display lists; no windowing or network dependency |
 | `gumbo-parser` | Lenient HTML parsing fallback |
 | `googletest` | CTest-registered unit and integration suites (test-only) |
 | `inja` | Template processing for generated output |
