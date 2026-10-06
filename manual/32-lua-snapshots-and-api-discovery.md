@@ -122,7 +122,7 @@ specifies that path.
 | `client:act(action, wait_ms?)` | Fresh action capture; details in Chapter 33 |
 | `client:finish()` | Close the broker conversation; returns true on success |
 | `qute.load_snapshot{html, url}` | New JavaScript-disabled Session and owning Browser |
-| `qute.scrape(session, {api_only?, include_noise?})` | Real scrape-endpoints Lua result; telemetry/error-reporting noise omitted by default |
+| `qute.scrape(session, {api_only?, include_noise?, follow_links?})` | Real scrape-endpoints Lua result; telemetry/error-reporting noise omitted by default, anchors harvested by default |
 | `qute.enrich(session, endpoints, {api_only?, collection_name?})` | Real schema-grabber Lua result |
 | `qute.login_evidence(session, {success_selector?, success_xpath?})` | Positive-DOM login beacon used by the drivers and the console |
 | `qute.challenge(snapshot)` | Advisory anti-bot triage of a captured page |
@@ -142,12 +142,16 @@ and IR interfaces as other loaded documents. Chapter 7 covers selectors and
 XPath, Chapter 8 covers PDQL, and Chapter 22 covers IR emitters. A new HTML load
 replaces the installed document; reacquire Document/Element handles afterward.
 
-`qute.scrape` enables script inspection, all-path extraction, redaction, and
-provenance. API-only filtering defaults on. It disables link following,
-recursive resolution, SPA probing, and network observation. The result contains
-the scraper's `endpoints`, `filtered_endpoints`, `openapi_yaml`, and
-`postman_json` fields. Endpoint tables are discovery inputs; apply the export
-redaction policy rather than logging their raw URL/value fields.
+`qute.scrape` enables script inspection, anchor harvesting, all-path
+extraction, redaction, and provenance. API-only filtering defaults on. It
+disables link *following* (recursive resolution), SPA probing, and network
+observation, so discovery stays local to the captured markup. Anchor harvesting
+reads `href` attributes from the loaded document and issues no request, which
+is safe on an inert Session; `follow_links = false` turns it off when you want
+form and script evidence only. The result contains the scraper's `endpoints`,
+`filtered_endpoints`, `openapi_yaml`, and `postman_json` fields. Endpoint tables
+are discovery inputs; apply the export redaction policy rather than logging
+their raw URL/value fields.
 
 `qute.enrich` consumes supplied endpoints and the snapshot Document. It disables
 GET response probes, sets their budget to zero, and keeps cross-origin probing
@@ -163,10 +167,14 @@ default sanitized projection policy.
 
 | Available evidence | Supported inference |
 |---|---|
-| Links, forms, inline script references | Endpoint method/path with provenance and confidence |
+| Anchor `href` values | GET endpoint with query parameters, provenance `html-link` |
+| Forms, inline script references | Endpoint method/path with provenance and confidence |
 | Query values and volatile path segments | Typed URL parameters and path templates |
 | Matching forms | Request field names/types and internal required flags |
 | No HTTP response bytes | Generic heuristic response metadata only |
+
+An anchor is a link the page offers, not an observed call: nothing in this
+workflow establishes that the application requests it.
 
 Form-field `required` flags are retained in the returned Lua schema records.
 The current Lua OpenAPI renderer emits request properties but does not emit

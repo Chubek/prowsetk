@@ -64,6 +64,11 @@ evidence count and conservatively widened scalar types. It drops error-reporting
 (including `/js_errors`), and refuses empty exports so noise-only captures do
 not overwrite useful files. `--include-noise` restores those candidates.
 Schema inference remains heuristic, and no response requests are issued.
+Anchor `href` values are harvested from the loaded snapshot without any
+request, so an API-shaped link contributes a GET endpoint with `html-link`
+provenance; link following, recursive resolution and SPA probing stay disabled.
+A link is something the page offers, not an observed application call, so
+capture the sections those links point at to reveal their endpoints.
 Explore application sections, filters, pagination, details and lazy-load
 controls; a DOM snapshot does not contain external bundles or historical HAR.
 The optional captcha-handler classifies captured challenges without bypassing
@@ -160,7 +165,7 @@ API is:
 | `client:act(action, wait_ms?)` | Fresh snapshot with action ID and `action_status` |
 | `client:finish()` | Close the conversation and stop its marionette |
 | `load_snapshot(snapshot)` | JavaScript-disabled Session and its owning Browser |
-| `scrape(session, {api_only?, include_noise?})` | scrape-endpoints result; telemetry/noise omitted by default |
+| `scrape(session, {api_only?, include_noise?, follow_links?})` | scrape-endpoints result; telemetry/noise omitted and anchors harvested by default |
 | `enrich(session, endpoints, {api_only?, collection_name?})` | schema-grabber result; no GET probes |
 | `write(path, bytes, ipc_module?)` | Atomic `0600` file; new directories are `0700` |
 

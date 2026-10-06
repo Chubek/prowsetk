@@ -33,15 +33,17 @@ URL="https://admin.booking.com/"
 OUTPUT="_scraped/booking-admin-browser-run.html"
 BIN="${PROWSETK_BROWSER_RUN_BIN:-}"
 
+# Print the header's usage block by marker, so editing the comments above
+# cannot silently truncate or overrun the help text.
+usage() { awk '/^# Usage:/{f=1} f && /^#/{sub(/^# ?/,""); print; next} f{exit}' "$0"; }
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --output) OUTPUT="${2:?missing value for $1}"; shift 2 ;;
         --url) URL="${2:?missing value for $1}"; shift 2 ;;
         --config) CONFIG="${2:?missing value for $1}"; shift 2 ;;
         --browser-run-bin) BIN="${2:?missing value for $1}"; shift 2 ;;
-        --help|-h)
-            sed -n '1,22p' "$0"
-            exit 0 ;;
+        --help|-h) usage; exit 0 ;;
         *) echo "fetch-browser-run-snapshot.sh: unknown option $1" >&2; exit 2 ;;
     esac
 done

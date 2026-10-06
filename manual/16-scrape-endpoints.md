@@ -53,6 +53,15 @@ JavaScript/hash links. It executes real page handlers through the synthetic
 driver, so it can produce network operations and navigation. `spa_probe = false`
 selects inspection without those actions.
 
+`follow_links` is local DOM harvesting, not navigation: it reads `href`
+attributes from the already-loaded document and emits `html-link` endpoints
+with their query parameters. It issues no request, which is why a
+JavaScript-disabled snapshot can enable it. Anchor evidence is a link the page
+offers, not an observed call — confidence is 0.75 for an API-shaped path and
+0.60 for other paths when `scrape_all_paths` is set, and 0.40 otherwise.
+Actual link *following* is `resolve_chain` or SPA probing, both of which do
+issue requests.
+
 ## Filtering and output
 
 With API-only enabled, static assets, bundles, images, fonts, media, and

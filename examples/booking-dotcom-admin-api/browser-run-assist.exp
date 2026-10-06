@@ -13,11 +13,26 @@
 #   browser-run-assist.exp [--output SNAP.html] [--url URL] [--config TOML]
 #     [--to driver|marionette] [--openapi FILE] [--postman FILE]
 #     [--decisions FILE] [--fetch-bin BIN] [--marionette-bin BIN]
-#     [--cli-bin BIN] [--ipc-module SO] [--help]
+#     [--cli-bin BIN] [--ipc-module SO] [--api-only true|false]
+#     [--verbose] [--no-xcors BOOL] [--max-steps N] [--max-page-requests N]
+#     [--opencode-max-requests N] [--opencode-wait-ms MS] [--opencode-api-prefix /api]
+#     [--help]
 #
-# --to driver (default) needs only the built CLI; the snapshot travels inline
-# as --html, so snapshots over 512 KiB switch to --to marionette, which takes
-# the snapshot file directly but needs a running OpenCode server.
+# --to driver (default) needs only the built CLI, but it passes the markup
+# inline as an argv argument, so it is capped at 512 KiB. --to marionette reads
+# the snapshot file directly (up to the 16 MiB snapshot bound) and needs a
+# running OpenCode server. This path is independent of the Qutebrowser broker:
+# see qute-assist.exp for the interactive console.
+#
+# --verbose, --no-xcors, --max-steps, --max-page-requests, --opencode-max-requests,
+# --opencode-wait-ms and --opencode-api-prefix tune the marionette only and are
+# ignored by --to driver. A snapshot run is offline with a deterministic page
+# transport, so the runner forces GET schema probes to zero; Booking login
+# preparation is not part of this launcher (see scripts/run-scrape-booking.sh).
+#
+# Telemetry and error-reporting candidates are filtered out of both
+# downstreams by default; --api-only false keeps every discovered same-origin
+# candidate for manual review.
 #
 # Exit: 0 on exported specs, 1 on fetch/driver failure, 2 on usage errors.
 
@@ -25,6 +40,21 @@
 # ("spawn id not open"); diagnostics must never fail the run itself.
 rename send_user orig_send_user
 proc send_user {args} { catch {uplevel 1 [list orig_send_user {*}$args]} }
+
+# Reject values the runner could not parse, with the same wording the wrapper
+# uses, so an unusable option never reaches a command line.
+proc unsigned_value {name value} {
+    if {![regexp {^[0-9]+$} $value]} {
+        send_user "browser-run-assist.exp: $name must be a non-negative integer\n"
+        exit 2
+    }
+}
+proc boolean_value {name value} {
+    if {$value ne "true" && $value ne "false"} {
+        send_user "browser-run-assist.exp: $name must be true or false\n"
+        exit 2
+    }
+}
 
 set HERE [file dirname $argv0]
 set DEFAULT_CONFIG [file normalize "$HERE/Prowse.toml"]
@@ -44,6 +74,14 @@ set fetch_bin ""
 set marionette_bin ""
 set cli_bin ""
 set ipc_module ""
+set api_only "true"
+set verbose 0
+set no_xcors ""
+set max_steps ""
+set max_page_requests ""
+set opencode_max_requests ""
+set opencode_wait_ms ""
+set opencode_api_prefix ""
 
 proc usage {} {
     send_user "Usage: browser-run-assist.exp \[options]\n"
@@ -58,13 +96,23 @@ proc usage {} {
     send_user "  --marionette-bin B run-opencode-marionette.sh override\n"
     send_user "  --cli-bin BIN      prowsetk CLI override\n"
     send_user "  --ipc-module SO    lquteipc override\n"
+    send_user "  --api-only BOOL    keep every same-origin candidate, true|false (default: true)\n"
+    send_user "  --verbose          value-free marionette stage/network diagnostics\n"
+    send_user "  --no-xcors BOOL    booking.com-only export filter (marionette only)\n"
+    send_user "  --max-steps N      marionette action budget (marionette only)\n"
+    send_user "  --max-page-requests N  marionette page-request budget (marionette only)\n"
+    send_user "  --opencode-max-requests N  agent request budget (marionette only)\n"
+    send_user "  --opencode-wait-ms MS  cap on waiting for an agent reply (marionette only)\n"
+    send_user "  --opencode-api-prefix /api  OpenCode V2 route prefix (marionette only)\n"
+    send_user "  --help             this text\n"
 }
 
 set i 0
 while {$i < [llength $argv]} {
     set opt [lindex $argv $i]
     if {$opt eq "--help" || $opt eq "-h"} { usage; exit 0 }
-    if {$opt ni {"--output" "--url" "--config" "--to" "--openapi" "--postman" "--decisions" "--fetch-bin" "--marionette-bin" "--cli-bin" "--ipc-module"}} {
+    if {$opt eq "--verbose" || $opt eq "-v" || $opt eq "--verbse"} { set verbose 1; incr i; continue }
+    if {$opt ni {"--output" "--url" "--config" "--to" "--openapi" "--postman" "--decisions" "--fetch-bin" "--marionette-bin" "--cli-bin" "--ipc-module" "--api-only" "--no-xcors" "--max-steps" "--max-page-requests" "--opencode-max-requests" "--opencode-wait-ms" "--opencode-api-prefix"}} {
         send_user "browser-run-assist.exp: unknown option $opt\n"; exit 2
     }
     if {$i + 1 >= [llength $argv]} { send_user "browser-run-assist.exp: missing value for $opt\n"; exit 2 }
@@ -81,6 +129,18 @@ while {$i < [llength $argv]} {
         "--marionette-bin" { set marionette_bin $val }
         "--cli-bin"      { set cli_bin $val }
         "--ipc-module"   { set ipc_module $val }
+        "--api-only"     { set api_only $val }
+        "--no-xcors"     { boolean_value $opt $val; set no_xcors $val }
+        "--max-steps"        { unsigned_value $opt $val; set max_steps $val }
+        "--max-page-requests" { unsigned_value $opt $val; set max_page_requests $val }
+        "--opencode-max-requests" { unsigned_value $opt $val; set opencode_max_requests $val }
+        "--opencode-wait-ms" { unsigned_value $opt $val; set opencode_wait_ms $val }
+        "--opencode-api-prefix" {
+            if {$val ne "/api"} {
+                send_user "browser-run-assist.exp: --opencode-api-prefix must be /api\n"; exit 2
+            }
+            set opencode_api_prefix $val
+        }
         default { send_user "browser-run-assist.exp: unknown option $opt\n"; exit 2 }
     }
     incr i 2
@@ -92,6 +152,17 @@ if {![string match "https://admin.booking.com*" $url]} {
 if {$to ne "driver" && $to ne "marionette"} {
     send_user "browser-run-assist.exp: --to must be driver or marionette\n"
     exit 2
+}
+if {$api_only ni {"true" "false"}} {
+    send_user "browser-run-assist.exp: --api-only must be true or false\n"
+    exit 2
+}
+# Marionette tuning has no meaning for the offline --to driver import; say so
+# once instead of accepting an option that cannot take effect.
+if {$to eq "driver" && ($verbose || $no_xcors ne "" || $max_steps ne "" ||
+        $max_page_requests ne "" || $opencode_max_requests ne "" ||
+        $opencode_wait_ms ne "" || $opencode_api_prefix ne "")} {
+    send_user "browser-run-assist.exp: marionette options are ignored by --to driver; use --to marionette\n"
 }
 if {$fetch_bin eq ""} { set fetch_bin $DEFAULT_FETCH }
 if {![file executable $fetch_bin]} {
@@ -149,9 +220,23 @@ if {$to eq "marionette"} {
         send_user "browser-run-assist: marionette runner not executable: $marionette_bin\n"
         exit 1
     }
+    if {[catch {file size $snapshot} snap_size] != 0} {
+        send_user "browser-run-assist: snapshot unreadable\n"
+        exit 1
+    }
+    # The runner reads the file directly, so this path has no argv-size cap.
+    send_user "browser-run-assist: marionette mode (${snap_size} bytes, needs a running OpenCode server)\n"
     set timeout 1500
-    spawn -noecho $marionette_bin --snapshot $snapshot --decisions $decisions \
-        --output $openapi --postman $postman --url $url
+    set marionette_cmd [list $marionette_bin --snapshot $snapshot --decisions $decisions \
+        --output $openapi --postman $postman --url $url]
+    if {$verbose} { lappend marionette_cmd --verbose }
+    if {$no_xcors ne ""} { lappend marionette_cmd --no-xcors $no_xcors }
+    if {$max_steps ne ""} { lappend marionette_cmd --max-steps $max_steps }
+    if {$max_page_requests ne ""} { lappend marionette_cmd --max-page-requests $max_page_requests }
+    if {$opencode_max_requests ne ""} { lappend marionette_cmd --opencode-max-requests $opencode_max_requests }
+    if {$opencode_wait_ms ne ""} { lappend marionette_cmd --opencode-wait-ms $opencode_wait_ms }
+    if {$opencode_api_prefix ne ""} { lappend marionette_cmd --opencode-api-prefix $opencode_api_prefix }
+    spawn -noecho {*}$marionette_cmd
     set downstream "marionette"
 } else {
     if {[catch {file size $snapshot} snap_size] != 0} {
@@ -159,14 +244,15 @@ if {$to eq "marionette"} {
         exit 1
     }
     if {$snap_size > 524288} {
-        send_user "browser-run-assist: snapshot is ${snap_size} bytes; use --to marionette for large pages\n"
+        send_user "browser-run-assist: snapshot is ${snap_size} bytes; the driver takes markup as an argv\n"
+        send_user "browser-run-assist: argument, so rerun with --to marionette for snapshots over 512 KiB\n"
         exit 1
     }
     set fh [open $snapshot r]
     set html [read $fh]
     close $fh
     set driver_cmd [list $cli_bin run booking-admin-api --config $config \
-        --html $html --output $openapi --postman $postman]
+        --html $html --output $openapi --postman $postman --api_only $api_only]
     if {$ipc_module ne ""} { lappend driver_cmd --ipc_module $ipc_module }
     set timeout 300
     spawn -noecho {*}$driver_cmd

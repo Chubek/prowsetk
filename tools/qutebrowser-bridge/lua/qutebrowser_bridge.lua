@@ -126,7 +126,10 @@ function bridge.scrape(active, options)
     options = options or {}
     local plugin = bridge.plugin('scrape_endpoints')
     local spec = plugin.normalize_spec{
-        follow_links=false, resolve_chain=false, spa_probe=false,
+        -- Anchor harvesting reads hrefs from the already-loaded snapshot and
+        -- issues no request, so it is safe on an inert Session. Link *following*
+        -- proper is resolve_chain/spa_probe, both disabled below.
+        follow_links=options.follow_links ~= false, resolve_chain=false, spa_probe=false,
         observe_network=false, inspect_scripts=true, redact_secrets=true,
         include_provenance=true, scrape_all_paths=true,
         api_only=options.api_only ~= false, require_api_pattern=options.api_only ~= false

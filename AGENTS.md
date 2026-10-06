@@ -1426,6 +1426,19 @@ and URL query values. Explicit CSS/XPath beacons override that inference.
 Keep stage-specific failures value-free. `qute-assist.exp` pairs IPC with the
 selected CLI build and can retain the broker for a corrected initial capture
 (`retry_login_evidence`, exit 3); never replay actions after an action has started.
+
+`bridge.scrape` harvests anchor `href` values from the loaded snapshot. That is
+local DOM reading and issues no request, unlike `resolve_chain` or SPA probing,
+so keep it enabled and keep those disabled; an anchor is a link the page offers,
+not an observed call. `run-opencode-marionette.sh` and `browser-run-assist.exp`
+forward the OpenCode runner's snapshot options (`--verbose`, `--no-xcors`,
+`--max-steps`, `--max-page-requests`, `--opencode-max-requests`,
+`--opencode-wait-ms`, `--opencode-api-prefix`). Assemble their argv with
+`set --` and `"$@"`, never a space-joined string, so a selector or beacon with
+spaces is never re-split or pathname-expanded. Login-coupled options require
+`--booking-config` and must be rejected rather than ignored when it is absent;
+budget ranges stay owned by the runner instead of being copied into shell.
+Credentials travel in the environment only.
 Use explicit Expect spawn IDs and bounded child shutdown so failure diagnostics
 and final status are delivered without waiting for the broker's whole lifetime.
 

@@ -271,6 +271,14 @@ if(PROWSETK_BUILD_CLI)
                     LABELS "integration;lua;document;endpoint-extraction;web-interface" TIMEOUT 90
                     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
             endif()
+            # The Booking assistant scripts are validated and their option
+            # forwarding inspected without an OpenCode server or a display.
+            add_test(NAME prowsetk.integration.booking-assist-scripts
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_booking_assist_scripts.py"
+                    "${PROJECT_SOURCE_DIR}")
+            set_tests_properties(prowsetk.integration.booking-assist-scripts PROPERTIES
+                LABELS "integration;plugin;endpoint-extraction" TIMEOUT 60
+                WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
         endif()
     endif()
     target_sources(prowsetk_integration_cli PRIVATE

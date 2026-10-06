@@ -97,15 +97,32 @@ TEST(QutebrowserBridge, NoiseFilteringAndMultiPageSchemaSerialization) {
     ASSERT_TRUE(setup(lua)) << lua.last_error();
     const auto result = lua.run(R"LUA(
         local active, owner = qute.load_snapshot{url='https://example.test/', html=[[
+            <a href='/api/items?limit=2'>Items</a><a href='/dashboard'>Plain page</a>
             <script>fetch('/js_errors', {method:'POST'}); fetch('/api/first?limit=2&token=private_marker');
             fetch('/telemetry', {method:'POST'});</script>
             <form action='/api/first' method='post'><input name='customer' value='private_form_marker'>
             <input name='count' type='number' required value='2'></form>
         ]]}
         local first = qute.scrape(active)
+        local paths = {}
+        for _, ep in ipairs(first.endpoints) do paths[ep.path] = true end
+        -- Anchors are harvested from the loaded snapshot without any request,
+        -- so an API-shaped link is real evidence; ordinary pages and
+        -- error-reporting/telemetry paths stay filtered.
+        assert(paths['/api/items'], 'anchor-derived API path missing')
+        assert(paths['/api/first'], 'script-derived API path missing')
+        assert(not paths['/dashboard'] and not paths['/js_errors'] and not paths['/telemetry'])
+        local linked = 0
         for _, ep in ipairs(first.endpoints) do
-            assert(ep.path ~= '/js_errors' and ep.path ~= '/telemetry')
+            if ep.path == '/api/items' then linked = linked + 1; assert(ep.discovery_method == 'html-link') end
         end
+        assert(linked == 1)
+        -- api_only=false keeps the whole same-origin candidate surface.
+        local wide = qute.scrape(active, {api_only = false})
+        local wide_paths = {}
+        for _, ep in ipairs(wide.endpoints) do wide_paths[ep.path] = true end
+        assert(wide_paths['/dashboard'] and wide_paths['/js_errors'])
+        assert(qute.scrape(active, {follow_links = false}).endpoints ~= nil)
         local previous = qute.enrich(active, first.endpoints).schemas
         active:load_html([[<script>fetch('/api/first?offset=3&limit=2.5')</script>
             <form action='/api/first' method='post'><input name='locale'></form>
@@ -115,10 +132,12 @@ TEST(QutebrowserBridge, NoiseFilteringAndMultiPageSchemaSerialization) {
         for _, schema in ipairs(next_page) do previous[#previous + 1] = schema end
         local serializer = qute.plugin('schema_grabber')
         local rendered = serializer.serialize(previous, {include_examples=false, redact_secrets=true})
-        assert(rendered.schema_count == 3)
-        assert(#qute.json.decode(rendered.postman_json).item == 3)
+        -- /api/items (anchor), /api/first (script GET + form POST), /api/second.
+        assert(rendered.schema_count == 4)
+        assert(#qute.json.decode(rendered.postman_json).item == 4)
         local _, gets = rendered.openapi_yaml:gsub('\n    get:', '')
-        assert(gets == 1)
+        assert(gets == 2)
+        assert(rendered.openapi_yaml:find('/api/items',1,true))
         assert(rendered.openapi_yaml:find('/api/first',1,true))
         assert(rendered.openapi_yaml:find('/api/second',1,true))
         assert(rendered.openapi_yaml:find('customer',1,true))

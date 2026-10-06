@@ -1,8 +1,13 @@
 #!/usr/bin/expect -f
-# Interactive Qutebrowser Lua console; --one-shot retains the driver workflow.
+# Interactive Qutebrowser Lua console; --one-shot retains the finite driver.
 #
-# Starts the owner-only broker, prints the userscript attachment line and opens
-# the Replxx/Lua console. --one-shot runs the finite driver instead.
+# Starts the owner-only broker, prints the userscript attachment line, and hands
+# the terminal to ptk-qute-repl (Manual Chapter 38). The console inspects the
+# DOM, issues the fixed browser orders of Chapter 33, accepts trusted host Lua,
+# and accumulates sanitized discovery across captures. Snapshot bodies travel
+# over private length-framed FIFOs, so a capture is bounded at 16 MiB of markup
+# rather than by escaped JSON (Chapter 39).
+#
 # The inherently manual steps stay manual by design (open Qutebrowser, log in,
 # solve MFA/human verification, run :spawn); the script never fabricates that
 # consent. With --launch the broker's own [y/N] approval is relayed to you and
@@ -10,12 +15,19 @@
 #
 # Usage:
 #   qute-assist.exp [--directory DIR] [--url URL] [--timeout SEC]
-#     [--wait-ms MS] [--output FILE] [--postman FILE] [--actions-file FILE]
-#     [--launch] [--browser BIN] [--success-selector SEL] [--success-xpath XPATH]
-#     [--one-shot] [--repl-bin BIN] [--show-values] [--max-actions N]
+#     [--wait-ms MS] [--settle-ms MS] [--output FILE] [--postman FILE]
+#     [--actions-file FILE] [--launch] [--browser BIN]
+#     [--success-selector SEL] [--success-xpath XPATH]
+#     [--one-shot] [--repl-bin BIN] [--show-values] [--include-noise]
+#     [--max-actions N] [--api-only true|false]
 #     [--bridge-bin BIN] [--cli-bin BIN] [--ipc-module SO] [--help]
 #
-# Exit: 0 on orderly REPL close or driver export, 1 on failure, 2 on usage errors.
+# --show-values/--include-noise/--max-actions configure the console.
+# --api-only, --actions-file and --wait_ms configure the finite driver.
+# --settle-ms applies to the printed marionette command in either mode.
+#
+# Exit: 0 on orderly console close or driver export, 1 on failure, 2 on usage
+# errors.
 
 # stdout remains usable after Expect observes stdin EOF from a pipeline.
 # send_user's shared exp0 handle does not, and used to swallow the final status.
@@ -35,6 +47,7 @@ set directory "build/qute-booking"
 set url "https://admin.booking.com/"
 set timeout_secs 1800
 set wait_ms 30000
+set settle_ms 500
 set output "_scraped/booking-admin-openapi.yaml"
 set postman "_scraped/booking-admin-postman.json"
 set actions_file ""
@@ -47,7 +60,9 @@ set cli_bin ""
 set repl_bin ""
 set interactive 1
 set show_values 0
+set include_noise 0
 set max_actions 256
+set api_only "true"
 
 proc usage {} {
     send_user "Usage: qute-assist.exp \[options]\n"
@@ -55,6 +70,7 @@ proc usage {} {
     send_user "  --url URL         must stay on https://admin.booking.com (default)\n"
     send_user "  --timeout SEC     broker lifetime 1..3600 (default: 1800)\n"
     send_user "  --wait-ms MS      snapshot/action wait 1..30000 (default: 30000)\n"
+    send_user "  --settle-ms MS    marionette capture delay 0..5000 (default: 500)\n"
     send_user "  --output FILE     OpenAPI output (default: _scraped/booking-admin-openapi.yaml)\n"
     send_user "  --postman FILE    Postman output (default: _scraped/booking-admin-postman.json)\n"
     send_user "  --actions-file F  two-way marionette policy (switches to ptk-qute-marionette)\n"
@@ -65,10 +81,13 @@ proc usage {} {
     send_user "  --bridge-bin BIN  ptk-qute-bridge override\n"
     send_user "  --cli-bin BIN     prowsetk CLI override\n"
     send_user "  --ipc-module SO   lquteipc override\n"
-    send_user "  --one-shot        run the finite driver instead of the Lua REPL\n"
+    send_user "  --one-shot        run the finite driver instead of the Lua console\n"
     send_user "  --repl-bin BIN    ptk-qute-repl override\n"
-    send_user "  --show-values     opt into local target labels in the REPL\n"
+    send_user "  --show-values     opt into local target labels in the console\n"
+    send_user "  --include-noise   keep telemetry/error-reporting candidates (console)\n"
     send_user "  --max-actions N   bounded interaction budget, 0..256 (default: 256)\n"
+    send_user "  --api-only BOOL   finite-driver API filtering, true|false (default: true)\n"
+    send_user "  --help            this text\n"
 }
 
 set ipc_module ""
@@ -79,7 +98,8 @@ while {$i < [llength $argv]} {
     if {$opt in {"--launch"}} { set launch 1; incr i; continue }
     if {$opt eq "--one-shot"} { set interactive 0; incr i; continue }
     if {$opt eq "--show-values"} { set show_values 1; incr i; continue }
-    if {$opt ni {"--directory" "--url" "--timeout" "--wait-ms" "--output" "--postman" "--actions-file" "--browser" "--success-selector" "--success-xpath" "--bridge-bin" "--cli-bin" "--ipc-module" "--repl-bin" "--max-actions"}} {
+    if {$opt eq "--include-noise"} { set include_noise 1; incr i; continue }
+    if {$opt ni {"--directory" "--url" "--timeout" "--wait-ms" "--settle-ms" "--output" "--postman" "--actions-file" "--browser" "--success-selector" "--success-xpath" "--bridge-bin" "--cli-bin" "--ipc-module" "--repl-bin" "--max-actions" "--api-only"}} {
         send_user "qute-assist.exp: unknown option $opt\n"; exit 2
     }
     if {$i + 1 >= [llength $argv]} { send_user "qute-assist.exp: missing value for $opt\n"; exit 2 }
@@ -89,6 +109,7 @@ while {$i < [llength $argv]} {
         "--url"          { set url $val }
         "--timeout"      { set timeout_secs $val }
         "--wait-ms"      { set wait_ms $val }
+        "--settle-ms"    { set settle_ms $val }
         "--output"       { set output $val }
         "--postman"      { set postman $val }
         "--actions-file" { set actions_file $val; set interactive 0 }
@@ -100,6 +121,7 @@ while {$i < [llength $argv]} {
         "--ipc-module"   { set ipc_module $val }
         "--repl-bin"     { set repl_bin $val }
         "--max-actions"  { set max_actions $val }
+        "--api-only"     { set api_only $val }
         default { send_user "qute-assist.exp: unknown option $opt\n"; exit 2 }
     }
     incr i 2
@@ -116,8 +138,15 @@ if {![string is integer -strict $wait_ms] || $wait_ms < 1 || $wait_ms > 30000} {
     send_user "qute-assist.exp: --wait-ms must be 1..30000\n"
     exit 2
 }
+if {![string is integer -strict $settle_ms] || $settle_ms < 0 || $settle_ms > 5000} {
+    send_user "qute-assist.exp: --settle-ms must be 0..5000\n"
+    exit 2
+}
 if {![string is integer -strict $max_actions] || $max_actions < 0 || $max_actions > 256} {
     send_user "qute-assist.exp: --max-actions must be 0..256\n"; exit 2
+}
+if {$api_only ni {"true" "false"}} {
+    send_user "qute-assist.exp: --api-only must be true or false\n"; exit 2
 }
 if {$bridge_bin eq ""} {
     if {[file executable $DEFAULT_BRIDGE]} { set bridge_bin $DEFAULT_BRIDGE } else { set bridge_bin "ptk-qute-bridge" }
@@ -150,6 +179,12 @@ if {$ipc_module eq "" && !$interactive} {
 if {$actions_file ne "" && ![file readable $actions_file]} {
     send_user "qute-assist.exp: actions file unreadable\n"
     exit 1
+}
+if {$interactive && $include_noise} {
+    send_user "qute-assist: --include-noise keeps telemetry/error-reporting candidates; exports stay heuristic\n"
+}
+if {$interactive && $api_only eq "false"} {
+    send_user "qute-assist: --api-only applies to the finite driver only; the console uses --include-noise\n"
 }
 
 set bridge_json [file normalize "$directory/bridge.json"]
@@ -243,15 +278,20 @@ send_user "qute-assist: bridge ready; use your already-logged-in admin tab (or l
 if {!$interactive && $actions_file eq ""} {
     send_user "  :spawn --userscript $DEFAULT_SCRAPE --bridge $bridge_json\n"
 } else {
-    send_user "  :spawn --userscript $DEFAULT_MARIONETTE --bridge $bridge_json --settle-ms 500\n"
+    send_user "  :spawn --userscript $DEFAULT_MARIONETTE --bridge $bridge_json --settle-ms $settle_ms\n"
 }
 if {$interactive} {
-    send_user "qute-assist: starting the Lua REPL; attach the marionette above, then use :capture, :targets, :links and :help\n"
+    if {$max_actions == 0} {
+        send_user "qute-assist: --max-actions 0 leaves no interaction budget; :capture/:discover/:export still work\n"
+    }
+    send_user "qute-assist: starting the Lua console (Chapter 38); attach the marionette above, then\n"
+    send_user "qute-assist: :capture, :targets, :links, :forms, :endpoints, :export, :help\n"
     set command [list $repl_bin --bridge $bridge_json --require-login --wait-ms $wait_ms --output $output --postman $postman]
     if {$ipc_module ne ""} { lappend command --ipc-module $ipc_module }
     if {$success_selector ne ""} { lappend command --success-selector $success_selector }
     if {$success_xpath ne ""} { lappend command --success-xpath $success_xpath }
     if {$show_values} { lappend command --show-values }
+    if {$include_noise} { lappend command --include-noise }
     spawn -noecho {*}$command
     set driver_spawn $spawn_id
     interact -i $driver_spawn
@@ -261,7 +301,11 @@ if {$interactive} {
     }
     unset driver_spawn
     cleanup
-    send_user "qute-assist: interactive session ended\n"
+    if {$result == 0} {
+        send_user "qute-assist: console closed cleanly (specs, if written: $output, $postman)\n"
+    } else {
+        send_user "qute-assist: console exited with status $result; exports may be incomplete\n"
+    }
     exit $result
 }
 send_user "qute-assist: take your time logging in; the driver starts once the snapshot arrives.\n"
@@ -277,7 +321,8 @@ set revision 0
 # 3. Driver. A rejected initial login beacon returns 3 without closing the
 # broker. Wait for a NEW capture in that case; never retry dispatched actions.
 set driver_cmd [list $cli_bin run booking-admin-api --config $DEFAULT_CONFIG \
-    --bridge $bridge_json --output $output --postman $postman --wait_ms $wait_ms --retry_login_evidence true]
+    --bridge $bridge_json --output $output --postman $postman --wait_ms $wait_ms \
+    --retry_login_evidence true --api_only $api_only]
 if {$actions_file ne ""} { lappend driver_cmd --actions_file $actions_file }
 if {$success_selector ne ""} { lappend driver_cmd --success_selector $success_selector }
 if {$success_xpath ne ""} { lappend driver_cmd --success_xpath $success_xpath }

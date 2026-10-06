@@ -241,9 +241,12 @@ outside `package.cpath`. `lib` may differ for a customized installation.
 ## Schemas, redaction, and coverage
 
 API-only filtering defaults on and excludes ordinary pages/static assets.
-Discovery uses captured DOM and inline script references, with method,
-provenance, and confidence. There is no automatic link crawl, recursive GET
-resolution, SPA network probe, or response-schema probe in this workflow.
+Discovery uses captured DOM, anchor `href` values, and inline script
+references, with method, provenance, and confidence. Anchor harvesting reads the
+loaded document and issues no request; an anchor is a link the page offers, not
+an observed application call. There is no automatic link crawl, recursive GET
+resolution, SPA network probe, or response-schema probe in this workflow, so
+capturing the sections a link points at is what reveals their endpoints.
 
 Schema-grabber's Lua path infers typed URL parameters/path templates and request
 fields from matching forms in the final snapshot for the finite driver. Form values are removed in

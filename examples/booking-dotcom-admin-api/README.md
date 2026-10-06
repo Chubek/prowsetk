@@ -81,6 +81,22 @@ The default session lasts 1,800 seconds with at most 256 actions; override with
 preset's `ptk-qute-repl`. Replxx is optional at build time
 (`PROWSETK_BUILD_QUTE_REPL`); `--one-shot` retains the workflow below.
 
+Launcher options are split by the consumer they configure:
+
+| Option | Consumer | Meaning |
+|---|---|---|
+| `--settle-ms N` | either | Marionette capture delay in the printed `:spawn` line, 0–5000 |
+| `--show-values` | console | Display target labels locally |
+| `--include-noise` | console | Keep telemetry/error-reporting candidates |
+| `--max-actions N` | either | Interaction budget, 0–256 |
+| `--api-only BOOL` | finite driver | `false` keeps every discovered same-origin candidate |
+| `--actions-file F` | finite driver | Trusted action policy; also selects `--one-shot` |
+
+Noise filtering is on by default in both launchers' downstreams, so
+`/js_errors` and similar paths no longer reach an export unless you ask for
+them. In the console use `--include-noise`; in the finite driver use
+`--api-only false`.
+
 ## One-shot workflow
 
 From the repository root:
@@ -157,7 +173,13 @@ the driver finishes the conversation; the browser stays open.
 
 Discovery stays on `https://admin.booking.com` and API-only filtering is enabled
 by default. `--api_only false` broadens extraction to ordinary same-origin
-paths. Schema enrichment uses the final capture's forms/scripts; endpoints
+paths. Anchor `href` values are harvested from the captured markup without any
+request, so an API-shaped link counts as evidence with provenance `html-link`;
+link *following*, recursive resolution and SPA probing stay disabled. A link is
+something the page offers, not a call the application is known to make. Use the
+console's navigation orders to capture the pages those links point at, since
+each capture contributes its own forms and inline scripts. Schema enrichment
+uses the final capture's forms/scripts; endpoints
 from earlier captures are retained but may have only generic request hints.
 Response bodies are unavailable, so no GET probes or observed response-schema
 claims are made. Coverage is explicitly incomplete in both artifacts.
@@ -297,7 +319,7 @@ CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... \
   --output _scraped/booking-admin-browser-run.html
 ```
 
-- `qute-assist.exp` defaults to the Lua REPL above. `--one-shot` wraps the
+- `qute-assist.exp` defaults to the Lua console above. `--one-shot` wraps the
   finite driver workflow (`--actions-file` also selects the driver and switches the
   printed line and driver to the two-way `ptk-qute-marionette` round-trip;
   `--launch` relays the broker's own `[y/N]` approval to your keystroke
@@ -307,13 +329,68 @@ CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... \
   and waits for a newer capture within the same bounded login window; already
   dispatched actions are never retried. Failed validation before export
   preserves previous artifacts; the two output writes are independent.
+  `--settle-ms` sets the delay in the printed marionette line, so a slow admin
+  page can be given longer without editing the command by hand.
 - `browser-run-assist.exp` wraps `fetch-browser-run-snapshot.sh` and chains
   the result: `--to driver` (default, offline `--html` import; snapshots over
-  512 KiB are refused with a pointer to `--to marionette`, which takes the
-  snapshot file directly but needs a running OpenCode server).
+  512 KiB are refused because the markup travels as an argv argument, with a
+  pointer to `--to marionette`, which reads the snapshot file directly up to the
+  16 MiB snapshot bound but needs a running OpenCode server). Its
+  `--api-only false` keeps every discovered same-origin candidate. For
+  `--to marionette` it also forwards `--verbose`, `--no-xcors`, `--max-steps`,
+  `--max-page-requests`, `--opencode-max-requests`, `--opencode-wait-ms` and
+  `--opencode-api-prefix`, and says so once if they are given with `--to driver`.
+
+## OpenCode marionette over a snapshot
+
+`run-opencode-marionette.sh` feeds a captured snapshot to the OpenCode agent,
+which may only choose among the allow-listed action IDs in
+`marionette-decisions.json`:
+
+```sh
+tools/qutebrowser-bridge/ptk-qute-repl ...          # capture, then :capture
+examples/booking-dotcom-admin-api/run-opencode-marionette.sh \
+  --snapshot /absolute/path/to/snapshot.html \
+  --verbose --max-steps 24 --opencode-api-prefix /api \
+  --output build/qute-booking/openapi.yaml \
+  --postman build/qute-booking/postman.json
+```
+
+This is the offline, JavaScript-disabled path: the page transport is
+deterministic and the runner forces GET schema probes to zero, while the
+separate OpenCode client stays live. It needs a running OpenCode server
+(`opencode serve`). It is not the login path — that is
+`scripts/run-scrape-booking.sh`, which drives a live authenticated session.
+
+The wrapper forwards the runner's snapshot options, and every value reaches the
+runner as exactly one argument, so a selector or beacon containing spaces is not
+re-split or pathname-expanded:
+
+| Option | Meaning |
+|---|---|
+| `--verbose` | Value-free stage, request, proxy and login diagnostics |
+| `--no-xcors BOOL` | Booking.com-only export filter; omitted keeps the runner default |
+| `--max-steps N` | Marionette action budget |
+| `--max-page-requests N` | Marionette page-request budget |
+| `--opencode-max-requests N` | Agent request budget, polls included |
+| `--opencode-wait-ms MS` | Cap on waiting for one agent reply |
+| `--opencode-api-prefix /api` | OpenCode V2 route prefix |
+
+`--booking-config`, `--cookies-json`, `--dotenv`, `--success-beacon`,
+`--success-beacon-type`, `--assistant-browser-force` and `--max-get-probes`
+configure live Booking login preparation. They are accepted only together with
+`--booking-config` (which requires a project whose driver is named
+`booking-dotcom-admin`), because they have no effect without it; supplying them
+alone is a usage error rather than a silently ignored flag.
+
+Unknown options, malformed values and login options used alone exit `2` before
+anything is spawned. Budget ranges belong to the runner, so an out-of-range value
+fails there instead of duplicating its caps in shell.
 - Both scripts default every path/URL/timeout (`--help` lists overrides) and
-  exit `2` on usage errors. `qute-assist.exp` checks the exact admin origin and
-  selects the IPC module beside the chosen CLI build when available.
+  exit `2` on usage errors, including a non-boolean `--api-only`. `qute-assist.exp` checks the exact admin origin and
+  selects the IPC module beside the chosen CLI build when available; the console
+  instead resolves its own adjacent module, so `--repl-bin` and `--cli-bin` may
+  point at different presets without mixing them.
 - `qute-assist.exp` ensures the broker directory is owner-only (`0700`) before
   starting the broker — a hand-made directory with wider permissions would
   otherwise fail with the broker's generic error. A live broker for the

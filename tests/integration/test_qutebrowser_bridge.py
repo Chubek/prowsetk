@@ -319,6 +319,92 @@ class QutebrowserIntegration(unittest.TestCase):
             with self.subTest(two_way=two_way):
                 self.expect_corrected_snapshot(expect, two_way)
 
+    def test_launcher_forwards_settle_delay_and_api_only_to_its_downstream(self):
+        expect = shutil.which("expect")
+        if not expect:
+            self.skipTest("Expect unavailable")
+        script = Path(SOURCE) / "examples/booking-dotcom-admin-api/qute-assist.exp"
+        for api_only, keeps_noise in ((None, False), ("false", True)):
+            with self.subTest(api_only=api_only):
+                with tempfile.TemporaryDirectory(prefix="q-", dir=os.getcwd()) as directory:
+                    root = Path(directory)
+                    command = [expect, str(script), "--one-shot", "--directory", str(root),
+                               "--timeout", "120", "--cli-bin", CLI,
+                               "--output", str(root / "openapi.yaml"),
+                               "--postman", str(root / "postman.json")]
+                    if api_only:
+                        command.extend(["--api-only", api_only])
+                    process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+                    captured = bytearray()
+
+                    def until(marker):
+                        deadline = time.monotonic() + 20
+                        while marker not in captured:
+                            ready, _, _ = select.select([process.stdout], [], [],
+                                                        max(0, deadline - time.monotonic()))
+                            self.assertTrue(ready, "launcher stalled: " + repr(bytes(captured)))
+                            data = os.read(process.stdout.fileno(), 16384)
+                            self.assertTrue(data, "launcher exited early: " + repr(bytes(captured)))
+                            captured.extend(data)
+
+                    try:
+                        until(b"take your time logging in")
+                        page = ("<a href='/logout'>Sign out</a>"
+                                "<script>fetch('/api/first?limit=2');"
+                                "fetch('/js_errors', {method:'POST'});</script>")
+                        self.assertEqual(run_script("ptk-qute-scrape", root, html=page).returncode, 0)
+                        stdout, stderr = process.communicate(timeout=30)
+                        captured.extend(stdout)
+                        self.assertEqual(process.returncode, 0, (bytes(captured), stderr))
+                        self.assertIn(b"specs exported", captured)
+                        self.assertNotIn(b"private_marker", captured + stderr)
+                        yaml = (root / "openapi.yaml").read_text()
+                        self.assertIn("/api/first", yaml)
+                        self.assertEqual("/js_errors" in yaml, keeps_noise)
+                    finally:
+                        if process.poll() is None:
+                            process.terminate()
+                            try:
+                                process.communicate(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                                process.communicate(timeout=5)
+
+    def test_launcher_prints_the_requested_marionette_settle_delay(self):
+        expect = shutil.which("expect")
+        if not expect:
+            self.skipTest("Expect unavailable")
+        with tempfile.TemporaryDirectory(prefix="q-", dir=os.getcwd()) as root:
+            root = Path(root)
+            write_file(root / "actions.json", encode({"version": 1, "actions": []}))
+            script = Path(SOURCE) / "examples/booking-dotcom-admin-api/qute-assist.exp"
+            process = subprocess.Popen([expect, str(script), "--directory", str(root),
+                                        "--timeout", "120", "--cli-bin", CLI,
+                                        "--settle-ms", "1500",
+                                        "--actions-file", str(root / "actions.json")],
+                                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE, bufsize=0)
+            captured = bytearray()
+            try:
+                deadline = time.monotonic() + 20
+                while b"--settle-ms 1500" not in captured and time.monotonic() < deadline:
+                    ready, _, _ = select.select([process.stdout], [], [], 1)
+                    if not ready:
+                        continue
+                    data = os.read(process.stdout.fileno(), 16384)
+                    if not data:
+                        break
+                    captured.extend(data)
+                self.assertIn(b"--settle-ms 1500", captured)
+            finally:
+                process.terminate()
+                try:
+                    process.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate(timeout=5)
+
     def expect_corrected_snapshot(self, expect, two_way):
         with tempfile.TemporaryDirectory(prefix="q-", dir=os.getcwd()) as directory:
             root = Path(directory)

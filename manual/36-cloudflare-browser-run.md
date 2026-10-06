@@ -196,6 +196,56 @@ HTML are static evidence, not observed requests. Preserve redaction, provenance
 and incomplete-coverage metadata in generated specifications. Enrichment probes
 through a local Session are separate requests without remote authentication.
 
+## Shipped snapshot-to-specs launchers
+
+`examples/booking-dotcom-admin-api` ships two shell helpers and two Expect
+wrappers around this pipeline. `fetch-browser-run-snapshot.sh` calls
+`ptk-browser-run content` and writes one owner-only snapshot; `ptk-qute-bridge`
+covers the interactive alternative in [Chapter 31](31-qutebrowser-assistant-browser.md).
+
+| Step | Command |
+|---|---|
+| Fetch | `fetch-browser-run-snapshot.sh --output SNAP.html` |
+| Import | `run-opencode-marionette.sh --snapshot SNAP.html` |
+| Fetch + import | `browser-run-assist.exp [--to driver\|marionette]` |
+
+`--to driver` imports the markup offline with the `booking-admin-api` driver, but
+passes it as an argv argument and so refuses snapshots over 512 KiB. `--to
+marionette` reads the file directly up to the 16 MiB snapshot bound and drives
+the OpenCode agent instead; it needs a running OpenCode server. A marionette
+import is JavaScript-disabled with a deterministic page transport, so the runner
+forces GET schema probes to zero and only the separate agent client is live.
+
+`run-opencode-marionette.sh` forwards the runner's snapshot-relevant options.
+Every value becomes exactly one argument — nothing is re-split or expanded — so a
+selector or beacon containing spaces stays intact:
+
+| Option | Meaning |
+|---|---|
+| `--verbose` | Value-free stage, request, proxy and login diagnostics |
+| `--no-xcors BOOL` | Booking.com-only export filter; omitted keeps the runner's default |
+| `--max-steps N` | Marionette action budget |
+| `--max-page-requests N` | Marionette page-request budget |
+| `--opencode-max-requests N` | Agent request budget, polls included |
+| `--opencode-wait-ms MS` | Cap on waiting for one agent reply |
+| `--opencode-api-prefix /api` | OpenCode V2 route prefix |
+
+The login-preparation options `--booking-config`, `--cookies-json`, `--dotenv`,
+`--success-beacon`, `--success-beacon-type`, `--assistant-browser-force` and
+`--max-get-probes` configure the runner's live Booking session. They are accepted
+only together with `--booking-config`, because they have no effect without it,
+and that config needs a project whose driver is named `booking-dotcom-admin`.
+A snapshot import has no live session, so this launcher is not the login path;
+use `scripts/run-scrape-booking.sh` for that.
+
+The wrapper rejects unknown options, malformed values and login options used
+alone with exit 2 before spawning anything. Budget ranges belong to the runner,
+so an out-of-range value fails there; this keeps one authority for each cap
+rather than copying it into a shell script. `browser-run-assist.exp` exposes the
+same snapshot options for `--to marionette`, reports once when they are supplied
+with `--to driver`, and keeps Cloudflare credentials in the environment so a
+token never reaches a command line.
+
 ## Bounds, policy and troubleshooting
 
 | Setting | Default / bound |
