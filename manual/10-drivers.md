@@ -59,6 +59,7 @@ tool-specific accessor. Follow each host's lifecycle and staging contract.
 | `drivers/crawl_site.lua` | Same-origin, depth-bounded crawl and JSONL page metadata |
 | `drivers/login.lua` | Form login, session cookie reuse, redacted login summary |
 | `examples/booking-dotcom-admin-api/api.lua` | Qutebrowser admin snapshots, optional two-way actions, OpenAPI/Postman |
+| `tools/qutebrowser-bridge/lua/console.lua` | Interactive console controller behind `ptk-qute-repl`; not a `Prowse.toml` driver |
 | `tools/crawler/driver.lua` | Adapter to `lcrawler` |
 | `tools/crawler/booking-dotcom-admin/driver.lua` | Booking crawler adapter with its example `Prowse.toml` |
 
@@ -114,10 +115,16 @@ incomplete specifications. Live export requires DOM login evidence; the
 userscript interface does not expose HTTP status, cookies or response bodies.
 See the [project workflow](../examples/booking-dotcom-admin-api/README.md) and
 [bridge API](../tools/qutebrowser-bridge/README.md) for setup, actions and limits.
+For repeated exploration of an authenticated tab, `ptk-qute-repl` provides a
+Replxx-backed persistent Lua console over the same conversation instead of a
+finite driver run: see [Chapter 38](38-interactive-qute-console.md).
+
 The manual's complete guide starts with
 [Chapter 31](31-qutebrowser-assistant-browser.md), followed by
 [Lua composition](32-lua-snapshots-and-api-discovery.md),
-[marionette actions](33-qutebrowser-marionettes.md), and the
-[Booking project](34-booking-admin-api-snapshots.md).
+[marionette actions](33-qutebrowser-marionettes.md), the
+[Booking project](34-booking-admin-api-snapshots.md), the
+[interactive console](38-interactive-qute-console.md), and the
+[snapshot transport](39-snapshot-bulk-transport.md).
 
 **Next:** [Lua extensions](11-lua-extensions.md).

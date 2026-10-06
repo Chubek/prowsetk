@@ -29,6 +29,7 @@ transport are independent of this assistant connection.
 | `ptk-qute-send` | Publish one current-tab snapshot with purpose `page` |
 | `ptk-qute-scrape` | Publish one current-tab snapshot with purpose `scrape` |
 | `ptk-qute-marionette` | Publish the initial snapshot and accept two-way actions |
+| `ptk-qute-repl` | Optional Replxx-backed terminal host for an interactive session; see [Chapter 38](38-interactive-qute-console.md) |
 
 The `scrape` purpose is a tag for the receiving driver. Extraction happens when
 Lua calls the existing scraper API, as described in Chapter 32.
@@ -37,7 +38,9 @@ Lua calls the existing scraper API, as described in Chapter 32.
 
 The scripts require POSIX and Python 3.9+. Interactive use also requires
 Qutebrowser with userscript support. The existing Lua development dependency
-enables the `lquteipc` build target; no additional linked library is introduced.
+enables the `lquteipc` build target. The optional `ptk-qute-repl` terminal host
+additionally uses Replxx; without it every other component still builds and
+`qute-assist.exp --one-shot` retains the finite driver.
 
 ```sh
 cmake --preset default
@@ -51,8 +54,9 @@ An installation places these components under its configured prefix:
 | Path below the prefix | Contents |
 |---|---|
 | `share/prowsetk/qutebrowser-bridge/` | Four executable scripts, Python helpers, README |
-| `share/prowsetk/qutebrowser-bridge/lua/` | Lua companion and strict JSON helper |
+| `share/prowsetk/qutebrowser-bridge/lua/` | Lua companion, console, login-beacon helper, strict JSON helper |
 | `lib/prowsetk/lua/lquteipc.so` | Native IPC module; library directory can vary |
+| `bin/ptk-qute-repl` | Optional interactive console; omitted without Replxx |
 | `share/prowsetk/examples/booking-dotcom-admin-api/` | Example project, driver, action policy |
 
 Use absolute userscript paths or link the executables into Qutebrowser's
@@ -150,13 +154,14 @@ Snapshots can contain private page values; the broker does not log or persist
 their HTML. Apply the query/export policies in Chapter 32 before writing data.
 
 New senders and Lua clients transfer snapshot bodies through private named
-FIFOs in the runtime directory on both local hops. The socket carries the
-generated FIFO basename and byte count; a FIFO frame is `QHTML1\n`, an unsigned
-64-bit big-endian length, the raw UTF-8 bytes, then EOF. Short/extra bodies,
-mismatched lengths, unsafe file kinds/permissions, symlinks and stalled peers
-fail with value-free errors. Normal exit unlinks transfer FIFO nodes. This
-avoids JSON-escaping overhead and the old 4-MiB snapshot cap; legacy inline
-messages remain supported within the encoded-message bound.
+FIFOs in the runtime directory on both local hops, so bodies stay raw and the
+HTML bound is expressed in bytes rather than in escaped JSON. The socket carries
+the generated FIFO basename and byte count instead of the markup. Framing,
+validation, backpressure, deadlines, cleanup, and the legacy inline fallback
+are specified in
+[Chapter 39](39-snapshot-bulk-transport.md). Short/extra bodies, mismatched
+lengths, unsafe file kinds/permissions, symlinks and stalled peers fail with
+value-free errors, and normal exit unlinks transfer FIFO nodes.
 
 | Bound | Value |
 |---|---|
@@ -186,3 +191,6 @@ Reference: [bridge notes](../tools/qutebrowser-bridge/README.md),
 [Qutebrowser userscript documentation](https://qutebrowser.org/doc/userscripts.html).
 
 **Next:** [Lua snapshots and API discovery](32-lua-snapshots-and-api-discovery.md).
+Snapshot bodies travel over FIFOs rather than inside the control message; that
+transport is specified in
+[Chapter 39](39-snapshot-bulk-transport.md).

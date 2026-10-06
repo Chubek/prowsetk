@@ -106,6 +106,12 @@ exceeds `after`, or `nil` after a bounded wait. Defaults are 0 and 30,000 ms;
 a new browser capture. Invoke a sender again, or use the action loop in
 Chapter 33, to publish a later revision.
 
+When the descriptor negotiates the bulk transport, the socket carries only
+control metadata and the companion reads the body from a private FIFO before
+returning the snapshot table. Callers see the same `{url, html, tab, purpose,
+revision}` shape either way; [Chapter 39](39-snapshot-bulk-transport.md)
+specifies that path.
+
 ## Companion API reference
 
 | Function or method | Contract |
@@ -118,6 +124,8 @@ Chapter 33, to publish a later revision.
 | `qute.load_snapshot{html, url}` | New JavaScript-disabled Session and owning Browser |
 | `qute.scrape(session, {api_only?, include_noise?})` | Real scrape-endpoints Lua result; telemetry/error-reporting noise omitted by default |
 | `qute.enrich(session, endpoints, {api_only?, collection_name?})` | Real schema-grabber Lua result |
+| `qute.login_evidence(session, {success_selector?, success_xpath?})` | Positive-DOM login beacon used by the drivers and the console |
+| `qute.challenge(snapshot)` | Advisory anti-bot triage of a captured page |
 | `qute.write(path, bytes, ipc_module?)` | Atomic owner-only output |
 | `qute.ipc(path?)` | Loaded native IPC/file-I/O module |
 | `qute.plugin(name)` | Load a plugin Lua helper from source/install paths |
@@ -171,9 +179,14 @@ JSON-body inference belongs to the C++ schema-grabber path described in
 Chapter 20. A script mentioning an endpoint does not establish its response
 schema, authentication requirements, or actual execution.
 
-The companion provides no automatic login-evidence check or application-wide
-completeness claim. The Booking driver in Chapter 34 applies its own origin,
-DOM evidence, and explicit incomplete-coverage metadata.
+The companion exposes the positive-DOM login beacon as
+`qute.login_evidence`, but it applies no policy of its own and makes no
+application-wide completeness claim. `qute.challenge` only classifies a capture
+through the optional captcha-handler helper; it never bypasses a challenge. The
+Booking driver in [Chapter 34](34-booking-admin-api-snapshots.md) applies its own
+origin, evidence, and incomplete-coverage policy, and the interactive console in
+[Chapter 38](38-interactive-qute-console.md) accumulates this evidence across
+captures.
 
 ## Output and lower-level IPC
 
@@ -183,11 +196,14 @@ flushes it, and renames it over the destination. New parent directories use
 changed. Multiple outputs are committed independently, not as one transaction.
 
 The native module exposes `exchange(socket, json, timeout_ms)`,
-`read_private(path)`, and `write_private(path, bytes)`. Failures return
-`nil, error`; the Lua companion raises a generic error. Exchange accepts a
-maximum 8-MiB single-line JSON frame and a 1–32,000-ms transport timeout.
-Broker application waits remain bounded to 30 seconds. Private reads reject
-symlinks, nonregular files, and files readable by other users/groups.
+`read_private(path)`, `write_private(path, bytes)`, and `read_fifo(path,
+bytes)` for a bulk-transport body. Failures return `nil, error`; the Lua
+companion raises a generic error. Exchange accepts a maximum 8-MiB single-line
+JSON frame and a 1–32,000-ms transport timeout. Broker application waits remain
+bounded to 30 seconds. Private reads reject symlinks, nonregular files, and
+files readable by other users/groups. `read_fifo` applies the equivalent checks
+to a generated FIFO basename in an owner-only directory; see
+[Chapter 39](39-snapshot-bulk-transport.md).
 
 The JSON helper rejects duplicate members, nonfinite numbers, invalid UTF-8,
 malformed Unicode escapes, excessive nesting, and over-budget data. It never

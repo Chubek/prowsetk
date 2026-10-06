@@ -25,13 +25,15 @@ PNG/JPEG images. Build with `cmake --preset complex-gui` and
 `build/complex-gui/tools/prowse-gui/prowse-gui --file tools/prowse-gui/example.html`.
 `PROWSETK_BUILD_COMPLEX_GUI` defaults OFF and is independent of basic-gui.
 
-Read the [ProwseTk Manual](manual/README.md) for 37 chapters covering installation,
+Read the [ProwseTk Manual](manual/README.md) for 39 chapters covering installation,
 the core APIs, Lua drivers/extensions, plugins, tools, and client interfaces.
 It includes practical examples, configuration references, resource bounds, and
 the current implementation's support levels, including Qutebrowser assistant
 snapshots, Lua discovery, two-way marionettes, and the Booking API project.
 Chapters 35–37 cover outbound CDP control, Cloudflare Browser Run, and OAuth
-assistance with CLI authentication and private token caching.
+assistance with CLI authentication and private token caching. Chapters 38–39
+document the Replxx-backed interactive Qutebrowser Lua console and the
+length-framed FIFO transport that carries snapshot bodies on both local hops.
 
 ## Table of Contents
 
@@ -2823,7 +2825,7 @@ prowsetk/
 ├── drivers/                Lua driver scripts
 ├── examples/               Example C++ and Lua applications
 ├── tools/                  Crawling, DOM watching, IR consumers and terminal tools
-├── manual/                 Markdown manual with an index and 37 chapters
+├── manual/                 Markdown manual with an index and 39 chapters
 ├── resources/              Runtime resources and manifests
 │   └── web/                Static web interface (index.html, app.js, style.css)
 └── scripts/                Developer and scaffolding scripts

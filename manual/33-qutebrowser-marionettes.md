@@ -114,10 +114,13 @@ Acquire new Document/Element handles after each HTML installation. To preserve
 discovery across changes, accumulate endpoints in a bounded map keyed by
 method and URL, then pass the merged array to `qute.enrich`. The shipped Booking
 driver implements this pattern and caps its accumulated seeds at 10,000.
-The Replxx console in Chapter 34 exposes these actions as terminal orders and
-Lua methods. It enriches each capture before replacing it, retaining sanitized
-request schemas across pages and strengthening them when later forms reveal
-additional fields. Numbered targets are invalidated on every capture.
+
+The Replxx console in [Chapter 38](38-interactive-qute-console.md) exposes these
+actions as terminal orders and Lua methods. It enriches each capture before
+replacing it, retaining sanitized request schemas across pages and merging
+repeated method/templated-path operations so an export holds one entry per
+operation. Numbered targets are invalidated on every capture, and on a rejected
+capture or a lost action reply.
 
 ## Interpreting action replies
 

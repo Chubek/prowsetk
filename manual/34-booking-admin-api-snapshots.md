@@ -33,7 +33,10 @@ cmake --build --preset default
 examples/booking-dotcom-admin-api/qute-assist.exp --directory build/qute-booking
 ```
 
-The launcher now defaults to the `ptk-qute-repl` terminal. Attach the printed
+The launcher now defaults to the `ptk-qute-repl` terminal; `--one-shot` selects
+the finite driver described later in this chapter. The console itself, including
+its full order table, `qute` members, bounds, and exit codes, is documented in
+[Chapter 38](38-interactive-qute-console.md). Attach the printed
 `ptk-qute-marionette` userscript to your authenticated admin tab, then enter
 `:capture`, `:links`, `:targets`, `:forms`, `:click NUMBER`, `:fill NUMBER "value"`,
 `:select NUMBER "value"`, `:check NUMBER true`, `:focus`, `:scroll`, `:submit`,
@@ -68,13 +71,15 @@ Login beacons, disabled response probes, provenance and incomplete-coverage
 metadata apply to interactive exports as well.
 
 Bodies travel over private, length-framed FIFOs on both local hops, up to
-16 MiB per capture. Socket JSON carries control metadata; body escaping no
-longer consumes the encoded-message budget. Transfer deadlines and Flatworm's
-250,000-node / 256-level bounds still apply. The optional REPL builds when Lua
-and Replxx are found, unless `PROWSETK_BUILD_QUTE_REPL=OFF`. `--one-shot` selects
-the finite driver below; `--actions-file` also selects that mode. The interactive
-launcher defaults to 1,800 seconds and 256 actions, bounded by configurable
-1–3600-second / 0–256-action limits.
+16 MiB per capture, as specified in
+[Chapter 39](39-snapshot-bulk-transport.md). Socket JSON carries control
+metadata, so body escaping no longer consumes the encoded-message budget.
+Transfer deadlines and Flatworm's 250,000-node / 256-level bounds still apply
+and are independent of each other. The optional REPL builds when Lua and
+Replxx are found, unless `PROWSETK_BUILD_QUTE_REPL=OFF`; see
+[Chapter 2](02-build-and-installation.md). `--actions-file` also selects the
+finite driver. The interactive launcher defaults to 1,800 seconds and 256
+actions, bounded by configurable 1–3600-second / 0–256-action limits.
 
 ## Begin with a deterministic offline run
 

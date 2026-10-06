@@ -99,6 +99,15 @@ files define the callable interfaces.
 37. [OAuth assistance](37-oauth-assistance.md) — provider registration, PKCE,
     manual CLI login, token refresh, private caching, and host integration.
 
+### Interactive assistant sessions
+
+38. [Interactive Qutebrowser Lua console](38-interactive-qute-console.md) — the
+    Replxx-backed terminal host, its orders, persistent Lua state, discovery
+    accumulation, value-display policy, and bounds.
+39. [Snapshot bulk transport](39-snapshot-bulk-transport.md) — FIFO body
+    framing, the two local hops, validation, backpressure, deadlines, and the
+    legacy inline fallback.
+
 ## Conventions
 
 - Shell examples assume the repository root as the working directory, unless a
@@ -138,6 +147,7 @@ record.
 | 9. Desktop inspection | Opt-in FLTK inspector over the same Session: page preview, DOM/source/activity views, synthetic interaction, bounded `pump_events`, and host-configured logical viewport metadata with resize and restricted media-query notifications | `plugins/basic-gui`, `include/prowsetk/browser.hpp`, `src/core/web_platform_shim.hpp` | 12, 21 |
 | 10. Qutebrowser assistant bridge | Owner-only userscript IPC, inert HTML snapshot Sessions, Lua query/discovery composition, fixed two-way actions with fresh captures, and the Booking API snapshot project | `tools/qutebrowser-bridge`, `examples/booking-dotcom-admin-api` | 31–34 |
 | 11. Remote browser control and OAuth | Outbound host-mediated CDP, Cloudflare Browser Run connections and HTML snapshots, OAuth 2.0 PKCE and a private token cache | `src/core/cdp.cpp`, `plugins/browser-run-integration`, `plugins/oauth-assist` | 35–37 |
+| 12. Snapshot transport, then interactive sessions | First, page bodies left the encoded control message: private length-framed FIFOs on both local hops, byte-exact framing, and a 16 MiB capture bound that no longer depends on JSON escaping. Then a Replxx-backed persistent Lua console over one conversation — structural inspection, fixed browser orders, trusted host Lua, accumulated sanitized evidence, and explicit value-display policy | `tools/qutebrowser-bridge/bulk.py`, `fifo.cpp`, `repl.cpp`, `lua/console.lua` | 38, 39 | — structural inspection, fixed browser orders, trusted host Lua, accumulated sanitized evidence, and explicit value-display policy — plus private length-framed FIFO bodies on both local hops so capture size is bounded in bytes rather than by JSON escaping | `tools/qutebrowser-bridge/repl.cpp`, `lua/console.lua`, `bulk.py`, `fifo.cpp` | 38, 39 |
 
 Three rules held across every stage, and they are worth preserving when adding
 the next one:
@@ -154,6 +164,13 @@ the next one:
   cases, so `ctest --preset default` and `ctest --preset asan` remain the
   acceptance check for the whole progression.
 
+Stage 12 is worth reading as an example of that rule applied twice to one
+surface. The transport moved bodies off the control channel before the
+interactive host was added, so the console inherited a byte-bounded capture
+instead of an escaping-bounded one; and both landed with coverage that exercises
+the shipped artifacts rather than mocks — real FIFO frames, real Lua plugins,
+a real terminal through a pseudo-terminal, and the real Expect launcher.
+
 ## Coverage and source map
 
 | Area | Chapters | Primary source locations |
@@ -169,8 +186,9 @@ the next one:
 | AI oracle service | 21 | `plugins/ai-oracle`, `tests/unit/test_ai_oracle*`, `tests/integration/test_ai_oracle.cpp` |
 | IR consumers | 22–23 | `src/core/ir_*.cpp`, `tools/page2pdf`, `tools/page2latex` |
 | Crawling and watching | 24–26 | `tools/crawler`, `tools/pagewatch`, `plugins/spider`, `tools/automation` |
-| Browser handoff | 16, 18, 24, 27, 31–34 | assistant-browser settings, `plugins/beacon`, `tools/qutebrowser-bridge`, Booking.com examples |
+| Browser handoff | 16, 18, 24, 27, 31–34, 38–39 | assistant-browser settings, `plugins/beacon`, `tools/qutebrowser-bridge`, Booking.com examples |
 | Snapshot queries and two-way assistant actions | 31–34 | `tools/qutebrowser-bridge/lua/`, `userscript.py`, `broker.py`, `examples/booking-dotcom-admin-api` |
+| Interactive console and bulk transport | 38–39 | `tools/qutebrowser-bridge/repl.cpp`, `lua/console.lua`, `bulk.py`, `fifo.cpp`, `tests/integration/test_qutebrowser_repl.py` |
 | Service and client interfaces | 28 | `web_interface.hpp`, `interface/web`, `interface/pyprowsetk` |
 | Terminal and instrumentation | 29–30 | `tools/prowse-tui`, `plugins/ebpf-interface` |
 | Desktop inspection GUI | 12, 21 | `plugins/basic-gui`, `tests/unit/test_basic_gui.cpp`, `tests/integration/test_basic_gui*` |
@@ -196,6 +214,6 @@ bash scripts/build-docs.sh
 
 The output is `build/docs/html/index.html` and
 `build/docs/latex/prowsetk.tex`. Supply a directory argument to choose another
-output root. The builder checks for this index and exactly 37 numbered chapters.
+output root. The builder checks for this index and exactly 39 numbered chapters.
 Chapter navigation becomes internal links in the combined outputs; links to
 repository references remain relative to each generated file's location.

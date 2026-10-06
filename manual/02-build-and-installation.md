@@ -61,6 +61,7 @@ For example, use `cmake --preset asan`, `cmake --build --preset asan`, and
 | `PROWSETK_BUILD_AI_ORACLE` | `ON` | Build the AI oracle when OpenAIpp and JSON headers are available |
 | `PROWSETK_BUILD_PYTHON` | `ON` | Build Python bindings when Python development support is found |
 | `PROWSETK_BUILD_TUI` | `ON` | Build terminal tools when the Termlib/Termscript source is available |
+| `PROWSETK_BUILD_QUTE_REPL` | `ON` | Build `ptk-qute-repl` on POSIX when Lua and Replxx are available |
 
 Dependency discovery is centralized in `cmake/Dependencies.cmake`. Lua enables
 driver APIs; tomlplusplus enables project and tool configuration; pugixml enables
@@ -70,10 +71,13 @@ cpp-httplib, MetaTk/DSLtk, and nlohmann-json headers enable the AI oracle
 described in [Chapter 21](21-native-and-wasm-plugins.md). The root README lists
 the complete dependency inventory.
 
-`crawler` builds on POSIX with Lua and tomlplusplus. Pagewatch requires Linux
-and those libraries. Spider additionally requires LMDB and lmdbxx. Missing
-optional dependencies produce a disabled feature or omit its target; inspect
-the configure output before assuming a binary was built. A build with
+``crawler` builds on POSIX with Lua and tomlplusplus. Pagewatch requires Linux
+and those libraries. Spider additionally requires LMDB and lmdbxx. Replxx enables
+the interactive Qutebrowser console documented in
+[Chapter 38](38-interactive-qute-console.md); it is discovered from an installed
+package or `third_party/replxx`, and without it only `ptk-qute-repl` is omitted.
+Missing optional dependencies produce a disabled feature or omit its target;
+inspect the configure output before assuming a binary was built. A build with
 `PROWSETK_BUILD_AI_ORACLE=OFF`, or one where the OpenAIpp headers are absent,
 reports `ai-oracle: OpenAIpp/JSON headers unavailable, skipping` and omits the
 oracle targets without affecting the rest of the build.
@@ -126,6 +130,14 @@ configures sanitizer preloading for Python.
 Build this manual with `bash scripts/build-docs.sh`. Pandoc produces combined
 HTML and LaTeX source under `build/docs`; a TeX engine is a separate requirement
 for compiling LaTeX to PDF.
+
+The interactive Qutebrowser console is covered by a real-terminal test that
+drives the built executable through a pseudo-terminal, plus display-free batch
+and scripted runs:
+
+```sh
+ctest --preset default -R 'qutebrowser|Qutebrowser' --output-on-failure
+```
 
 If configuration omits a target, check its dependency rather than looking for
 a different executable name. Use `scripts/verify-libs-installed.sh` as documented
