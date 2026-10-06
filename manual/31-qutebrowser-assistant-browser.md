@@ -81,7 +81,7 @@ not widen that origin.
 | `--directory` | required | Private runtime directory |
 | `--url` | required | URL defining the approved origin |
 | `--timeout` | 300 | Lifetime in seconds, 1–3600 |
-| `--max-actions` | 32 | Total accepted action budget, 0–32 |
+| `--max-actions` | 256 | Total accepted action budget, 0–256 |
 | `--launch` | off | Ask for approval and launch Qutebrowser at the URL |
 | `--browser` | `qutebrowser` | Executable name/path used by `--launch` |
 
@@ -131,7 +131,8 @@ once the old process has stopped. A second broker must not evict a live one.
 
 ## Protocol and data contract
 
-The descriptor contains `version`, `socket`, `token`, and `origin`. Its directory
+The descriptor contains `version`, `socket`, `token`, `origin`, and optional
+`bulk: "fifo-v1"`. Its directory
 is `0700`, and descriptor/socket modes are `0600`. One socket connection carries
 one newline-terminated JSON request and reply. Requests include version 1,
 the token, and an operation; replies include `ok`.
@@ -148,16 +149,26 @@ and `action_status`. Only the latest capture is retained in broker memory.
 Snapshots can contain private page values; the broker does not log or persist
 their HTML. Apply the query/export policies in Chapter 32 before writing data.
 
+New senders and Lua clients transfer snapshot bodies through private named
+FIFOs in the runtime directory on both local hops. The socket carries the
+generated FIFO basename and byte count; a FIFO frame is `QHTML1\n`, an unsigned
+64-bit big-endian length, the raw UTF-8 bytes, then EOF. Short/extra bodies,
+mismatched lengths, unsafe file kinds/permissions, symlinks and stalled peers
+fail with value-free errors. Normal exit unlinks transfer FIFO nodes. This
+avoids JSON-escaping overhead and the old 4-MiB snapshot cap; legacy inline
+messages remain supported within the encoded-message bound.
+
 | Bound | Value |
 |---|---|
 | Simultaneous clients / attached marionettes | 8 / 1 |
-| HTML / encoded JSON message | 4 MiB / 8 MiB; both limits apply |
+| FIFO HTML / encoded control or legacy inline message | 16 MiB / 8 MiB |
 | JSON nesting | 32 levels |
 | Snapshot/action wait | At most 30 seconds |
 | Partial-client read timeout | 5 seconds |
 | Selector / fill value | 4096 UTF-8 bytes each |
 | Marionette capture delay | 0–5000 ms; default 500 |
 | Private output file | 16 MiB |
+| Bulk transfer deadline | 10 seconds per hop, in addition to the control wait |
 
 The first attachment or capture pins the tab index. Keep that tab active in
 the same window, and do not reorder or close tabs during a marionette run.

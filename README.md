@@ -2399,6 +2399,15 @@ are not available through this userscript interface; exports remain redacted,
 heuristic and incomplete. The external scripts use Python 3.9+'s standard
 library; the optional IPC module reuses Lua. Qutebrowser is only required when
 explicitly using these assistant scripts and is not linked into the core.
+The example's `qute-assist.exp` opens a Replxx-backed persistent Lua console
+(`ptk-qute-repl`); attach its marionette to an already-logged-in tab, then inspect
+targets, click/fill/select/check/focus/scroll/submit, navigate, capture and export.
+Discoveries and sanitized per-page request schemas accumulate across captures;
+telemetry/error-reporting noise is filtered and empty exports are refused.
+Private length-framed FIFOs stream up to 16 MiB of HTML on both local hops;
+JSON carries control metadata. `--one-shot` retains the finite driver workflow.
+Both paths recognize semantic logout controls, preserve CSS/XPath beacons,
+disable response probes and report fixed errors without page/exception values.
 
 ### Lua crawler
 
@@ -2576,6 +2585,7 @@ optional components depending on the build configuration.
 | `pugixml` | XML handling and XPath |
 | `quickjs` | Page JavaScript runtime and backend for native Flatworm module bindings, including `flatworm:rpc` |
 | `re2` | Safe regular-expression matching |
+| `replxx` | Optional line editing, completion and memory-only history for the Qutebrowser Lua REPL |
 | `simdjson` | High-performance JSON parsing |
 | `spdlog` | Structured and asynchronous logging |
 | `termlib` | Optional terminal/Termscript substrate for Prowse-TUI; parser generation uses Perl |
@@ -2592,6 +2602,9 @@ optional components depending on the build configuration.
 Build options disable optional dependencies when their functionality is not
 required. Dependency versions, licensing, build options, and feature mappings are
 documented with the build system.
+`PROWSETK_BUILD_QUTE_REPL=ON` builds `ptk-qute-repl` on POSIX when Lua and
+Replxx are available; `OFF` or missing Replxx preserves the core, scripts and
+one-shot bridge. Dependency discovery is in `cmake/Dependencies.cmake`.
 
 The shipped JSON-RPC module uses the C++20 standard library and the standalone
 Flatworm ABI header, with no additional production dependency. Its library and

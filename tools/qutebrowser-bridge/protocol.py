@@ -12,10 +12,10 @@ import time
 from urllib.parse import urlsplit
 
 VERSION = 1
-MAX_HTML = 4 * 1024 * 1024
+MAX_HTML = 16 * 1024 * 1024
 MAX_MESSAGE = 8 * 1024 * 1024
 MAX_FILE = 16 * 1024 * 1024
-MAX_ACTIONS = 32
+MAX_ACTIONS = 256
 MAX_WAIT_MS = 30000
 
 
@@ -122,20 +122,25 @@ def origin(url):
 
 
 def action(value, allowed_origin):
-    keys(value, ("type",), ("selector", "value", "url"))
+    keys(value, ("type",), ("selector", "value", "url", "checked"))
     kind = value["type"]
-    if kind == "click":
+    if kind in ("click", "focus", "scroll", "submit"):
         keys(value, ("type", "selector"))
         string(value["selector"], 4096)
-    elif kind == "fill":
+    elif kind in ("fill", "select"):
         keys(value, ("type", "selector", "value"))
         string(value["selector"], 4096)
         string(value["value"], 4096, empty=True)
+    elif kind == "check":
+        keys(value, ("type", "selector", "checked"))
+        string(value["selector"], 4096)
+        if type(value["checked"]) is not bool:
+            raise BridgeError("invalid checkbox state")
     elif kind == "navigate":
         keys(value, ("type", "url"))
         if origin(value["url"]) != allowed_origin:
             raise BridgeError("action is outside the approved origin")
-    elif kind == "reload":
+    elif kind in ("reload", "capture"):
         keys(value, ("type",))
     else:
         raise BridgeError("unsupported action")
@@ -191,7 +196,9 @@ def descriptor(path):
     path = Path(path).absolute()
     directory = private_directory(path.parent)
     result = decode(read_file(path, 16384, private=True))
-    keys(result, ("version", "socket", "token", "origin"))
+    keys(result, ("version", "socket", "token", "origin"), ("bulk",))
+    if "bulk" in result and result["bulk"] != "fifo-v1":
+        raise BridgeError("unsupported bulk transport")
     if type(result["version"]) is not int or result["version"] != VERSION or origin(result["origin"]) != result["origin"]:
         raise BridgeError("unsupported bridge descriptor")
     socket_path = Path(string(result["socket"], 4096))
@@ -212,6 +219,8 @@ def authorized(token, expected):
 def exchange(config, request, timeout_ms=MAX_WAIT_MS + 2000):
     integer(timeout_ms, 1, MAX_WAIT_MS + 2000)
     request = dict(request, token=config["token"], version=VERSION)
+    if config.get("bulk") == "fifo-v1" and request.get("op") in ("snapshot", "act"):
+        request["transport"] = "fifo"
     deadline = time.monotonic() + timeout_ms / 1000
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.settimeout(timeout_ms / 1000)
@@ -233,4 +242,9 @@ def exchange(config, request, timeout_ms=MAX_WAIT_MS + 2000):
         if not reply["ok"]:
             # Peer errors are deliberately not displayed verbatim.
             raise BridgeError("bridge operation failed")
+        snap = reply.get("snapshot")
+        if isinstance(snap, dict) and "html_fifo" in snap:
+            from bulk import fifo_path, receive_fifo
+            path = fifo_path(Path(config["socket"]).parent, snap.pop("html_fifo"))
+            snap["html"] = receive_fifo(path, snap.pop("html_bytes")).decode("utf-8")
         return reply

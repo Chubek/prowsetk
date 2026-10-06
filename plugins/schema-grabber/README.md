@@ -57,6 +57,18 @@ local result = grabber.enrich(session, {
 print(result.schema_count, result.probe_count)
 ```
 
+For multi-page snapshot sessions, accumulate the sanitized `result.schemas`
+from each call to `enrich` while that page's forms are available, then call
+`grabber.serialize(schemas, {include_examples=false, redact_secrets=true})`.
+It accepts at most 10,000 previously enriched schema records and returns
+`openapi_yaml`, `postman_json`, merged `schemas` and `schema_count` in deterministic
+order. Repeated method/templated-path operations merge query and request fields,
+widen conflicting scalar types, and prefer observed/richer response evidence;
+duplicate OpenAPI keys are never emitted by this composition. Merged records
+carry an evidence count while the original input records stay intact.
+Serialization makes no requests and does not infer schemas from a later document. Inference
+provenance is retained; a snapshot still supplies no observed response bodies.
+
 ## Options
 
 | Key | Default | Meaning |

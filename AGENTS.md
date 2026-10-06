@@ -1406,9 +1406,9 @@ and FIFO plus owner-only AF_UNIX IPC. Python scripts use only the standard
 library; `lquteipc` is an optional POSIX Lua module, independent of page
 networking and the native plugin ABI. Keep strict bounded JSON, private
 descriptor/socket/output permissions, finite waits/lifetimes, one active
-marionette and fixed `click`/`fill`/`navigate`/`reload` actions. Never pass page
+marionette and validated fixed DOM/capture/navigation actions. Never pass page
 or action values to Qutebrowser command strings or execute arbitrary caller
-code. A new capture userscript must follow each action; the initial QUTE_HTML
+code through the page-action channel. A new capture userscript must follow each action; the initial QUTE_HTML
 file is not a live snapshot. Keep origin checks in the broker and at in-page
 action execution, and document the tab-index limitation honestly.
 
@@ -1419,3 +1419,31 @@ for live exports but never claims HTTP authentication verification. Preserve
 offline `html`, redacted heuristic/incomplete exports, same-origin discovery
 and the caller-owned assistant browser. Register headless protocol, native
 Lua, userscript/FIFO and real driver/CLI tests under `tests/` with finite bounds.
+
+The Booking snapshot driver's implicit login evidence recognizes account-menu
+and semantic logout links/buttons/forms, excluding script/style/template text
+and URL query values. Explicit CSS/XPath beacons override that inference.
+Keep stage-specific failures value-free. `qute-assist.exp` pairs IPC with the
+selected CLI build and can retain the broker for a corrected initial capture
+(`retry_login_evidence`, exit 3); never replay actions after an action has started.
+Use explicit Expect spawn IDs and bounded child shutdown so failure diagnostics
+and final status are delivered without waiting for the broker's whole lifetime.
+
+The interactive `ptk-qute-repl` host uses optional Replxx via
+`cmake/Dependencies.cmake` and the existing `LuaRuntime`; its Lua is explicit,
+trusted host input, never page/model code. Keep editing/completion and bounded
+memory-only history, multiline Lua, generic errors, and explicit local value
+display. `qute-assist.exp` defaults to the REPL; `--one-shot` keeps the finite
+driver. Additional fixed actions are `capture`, `focus`, `scroll`, `select`,
+`check` and `submit`; validate fields, origin and interactability, invalidate
+numbered targets on each capture or lost reply, require fresh evidence after a
+rejected capture, and never retry an outstanding action.
+Snapshot bodies use private length-framed FIFOs on both userscript/broker and
+broker/Lua hops (16 MiB; JSON control remains bounded). Preserve nonblocking I/O,
+exact byte counts, UTF-8 validation, finite deadlines, no-follow/owner/type checks
+and cleanup. Accumulate bounded, sanitized schemas while each captured page is
+available, using schema-grabber's render-only `serialize`; filter telemetry and
+error-reporting noise and refuse empty interactive exports. Keep JS-disabled
+snapshots, same-origin discovery, positive Booking login evidence and disabled
+response probes. CTest covers malformed/large FIFO frames, real Lua/plugins,
+multi-page actions, Replxx through a PTY and the Expect launcher without a display.

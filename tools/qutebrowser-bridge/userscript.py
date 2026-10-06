@@ -16,6 +16,7 @@ import time
 
 from protocol import (BridgeError, MAX_HTML, MAX_WAIT_MS, action, descriptor,
                       exchange, integer, origin, read_file, string)
+from bulk import publish_snapshot
 
 
 class ActionMarker(HTMLParser):
@@ -100,6 +101,8 @@ def action_source(approved, allowed_origin, action_id):
       location.assign(a.url);
     } else if (a.type === 'reload') {
       location.reload();
+    } else if (a.type === 'capture') {
+      // Fresh userscript capture below; never reuse the initial QUTE_HTML.
     } else {
       const e = document.querySelector(a.selector);
       if (!e || e.disabled || e.getAttribute('aria-disabled') === 'true') throw Error();
@@ -108,8 +111,20 @@ def action_source(approved, allowed_origin, action_id):
         if (n.hidden || s.display === 'none' || s.visibility === 'hidden') throw Error();
       }
       if (a.type === 'click') e.click();
-      else {
+      else if (a.type === 'focus') e.focus();
+      else if (a.type === 'scroll') e.scrollIntoView({block: 'center', behavior: 'instant'});
+      else if (a.type === 'submit') {
+        const f = e.tagName === 'FORM' ? e : e.form;
+        if (!f || new URL(f.action || location.href, location.href).origin !== cfg.origin) throw Error();
+        f.requestSubmit();
+      } else if (a.type === 'check') {
+        if (e.tagName !== 'INPUT' || !['checkbox', 'radio'].includes(e.type) || e.readOnly) throw Error();
+        if (e.type === 'radio' && !a.checked) throw Error();
+        if (e.checked !== a.checked) e.click();
+        if (e.checked !== a.checked) throw Error();
+      } else {
         if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(e.tagName)) throw Error();
+        if (a.type === 'select' && e.tagName !== 'SELECT') throw Error();
         const forbidden = ['password', 'file', 'hidden', 'submit', 'button', 'checkbox', 'radio'];
         if (e.tagName === 'INPUT' && forbidden.includes(e.type)) throw Error();
         if (e.readOnly) throw Error();
@@ -118,6 +133,7 @@ def action_source(approved, allowed_origin, action_id):
         while (p && !d) { d = Object.getOwnPropertyDescriptor(p, 'value'); p = Object.getPrototypeOf(p); }
         if (!d || !d.set) throw Error();
         d.set.call(e, a.value);
+        if (a.type === 'select' && e.value !== a.value) throw Error();
         e.dispatchEvent(new Event('input', {bubbles: true, composed: true}));
         e.dispatchEvent(new Event('change', {bubbles: true}));
       }
@@ -139,7 +155,7 @@ def marionette(config, descriptor_path, settle_ms):
     exchange(config, {"op": "attach", "controller": controller, "tab": initial["tab"]})
     files = []
     try:
-        exchange(config, {"op": "publish", "snapshot": initial})
+        publish_snapshot(config, initial)
         sender = command_path(Path(__file__).parent / "ptk-qute-send")
         descriptor_path = command_path(descriptor_path)
         while True:
@@ -192,7 +208,7 @@ def main(mode="page"):
             marionette(config, args.bridge, args.settle_ms)
         else:
             purpose = "action" if args.action_id else mode
-            exchange(config, {"op": "publish", "snapshot": snapshot(config, purpose, args.action_id)})
+            publish_snapshot(config, snapshot(config, purpose, args.action_id))
         return 0
     except (BridgeError, OSError, ValueError, UnicodeError):
         sys.stderr.write("ProwseTk Qutebrowser userscript: operation failed\n")

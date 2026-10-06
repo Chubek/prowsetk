@@ -96,6 +96,14 @@ supply guarded transports; generic embedders can install their own.
 
 Lua results contain `schemas`, `endpoints`, `warnings`, `probe_count`,
 `schema_count`, `openapi_yaml`, and `postman_json`, plus file-writing methods.
+For multi-page capture workflows, retain each enrichment's sanitized `schemas`
+and call `grabber.serialize(schemas, spec)` to render them together. This accepts
+at most 10,000 previously enriched records and returns deterministic
+`openapi_yaml`, `postman_json`, merged `schemas` and `schema_count` without loading a
+document or making requests. Repeated method/templated-path operations merge
+query and request fields, widen conflicting scalar types and retain the
+stronger response evidence, with an evidence count on merged records. Inputs
+remain intact; outputs contain a single entry per operation.
 OpenAPI includes `x-prowsetk-schema` request/response provenance along with
 confidence, normal provenance, and `x-inferred`. Postman includes typed query
 pairs, `:var` path variables, example request bodies, and available example

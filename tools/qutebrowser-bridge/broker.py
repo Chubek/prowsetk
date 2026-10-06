@@ -16,6 +16,7 @@ from protocol import (BridgeError, MAX_ACTIONS, MAX_HTML, MAX_MESSAGE, MAX_WAIT_
                       VERSION, action, authorized, decode, descriptor, encode,
                       exchange, integer, keys, origin, private_directory, string,
                       write_file)
+from bulk import create_fifo, fifo_path, receive_fifo, send_fifo
 
 
 class Conversation:
@@ -180,6 +181,7 @@ async def serve(directory, url, timeout, max_actions, launch=False, browser="qut
         task = asyncio.current_task()
         accepted = len(clients) < 8
         clients.add(task)
+        transfer = None
         try:
             if not accepted:
                 return
@@ -193,14 +195,43 @@ async def serve(directory, url, timeout, max_actions, launch=False, browser="qut
                 line = await asyncio.wait_for(reader.readline(), 5)
                 if not line.endswith(b"\n") or len(line) > MAX_MESSAGE + 1:
                     raise BridgeError("invalid bridge frame")
-                reply = await conversation.handle(decode(line[:-1]))
-            except (BridgeError, ValueError, TypeError, UnicodeError, asyncio.TimeoutError):
+                request = decode(line[:-1])
+                if (not isinstance(request, dict) or not authorized(request.get("token"), token) or
+                        type(request.get("version")) is not int or request["version"] != VERSION):
+                    raise BridgeError("bridge authentication failed")
+                transport = request.pop("transport", None)
+                if transport is not None and (transport != "fifo" or request.get("op") not in ("snapshot", "act")):
+                    raise BridgeError("unsupported bulk transport")
+                if (request.get("op") == "publish" and isinstance(request.get("snapshot"), dict) and
+                        "html_fifo" in request["snapshot"]):
+                    snap = dict(request["snapshot"])
+                    keys(snap, ("url", "tab", "purpose", "html_fifo", "html_bytes"), ("action_id", "action_status"))
+                    if origin(snap["url"]) != conversation.origin:
+                        raise BridgeError("snapshot is outside the approved origin")
+                    path = fifo_path(directory, snap.pop("html_fifo"))
+                    size = integer(snap.pop("html_bytes"), 0, MAX_HTML)
+                    snap["html"] = (await asyncio.to_thread(receive_fifo, path, size)).decode("utf-8")
+                    request["snapshot"] = snap
+                reply = await conversation.handle(request)
+                if transport == "fifo" and isinstance(reply.get("snapshot"), dict):
+                    snap = dict(reply["snapshot"])
+                    data = snap.pop("html").encode("utf-8")
+                    path = create_fifo(directory)
+                    transfer = (path, data)
+                    snap.update(html_fifo=path.name, html_bytes=len(data))
+                    reply = dict(reply, snapshot=snap)
+            except (BridgeError, OSError, ValueError, TypeError, UnicodeError, asyncio.TimeoutError):
                 reply = {"ok": False, "error": "bridge request rejected"}
             writer.write(encode(reply) + b"\n")
             await asyncio.wait_for(writer.drain(), 5)
-        except (OSError, ConnectionError, asyncio.TimeoutError):
+            if transfer:
+                await asyncio.to_thread(send_fifo, *transfer)
+        except (BridgeError, OSError, ConnectionError, asyncio.TimeoutError):
             pass
         finally:
+            if transfer:
+                with contextlib.suppress(FileNotFoundError):
+                    transfer[0].unlink()
             clients.discard(task)
             writer.close()
             try:
@@ -221,7 +252,7 @@ async def serve(directory, url, timeout, max_actions, launch=False, browser="qut
         loop.add_signal_handler(sig, stop.set)
     try:
         write_file(descriptor_path, encode({"version": VERSION, "socket": str(socket_path),
-                                          "token": token, "origin": conversation.origin}))
+                                          "token": token, "origin": conversation.origin, "bulk": "fifo-v1"}))
         descriptor_inode = descriptor_path.lstat().st_ino
         if launch:
             # Commands/URL are distinct argv, and userinfo has already been rejected.

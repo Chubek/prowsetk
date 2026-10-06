@@ -263,6 +263,14 @@ if(PROWSETK_BUILD_CLI)
             set_tests_properties(prowsetk.integration.qutebrowser.userscripts PROPERTIES
                 LABELS "integration;lua;document;endpoint-extraction;web-interface" TIMEOUT 60
                 WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+            if(TARGET ptk_qute_repl)
+                add_test(NAME prowsetk.integration.qutebrowser.repl
+                    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_qutebrowser_repl.py"
+                        "$<TARGET_FILE:ptk_qute_repl>" "$<TARGET_FILE:prowsetk_qute_ipc>" "${PROJECT_SOURCE_DIR}")
+                set_tests_properties(prowsetk.integration.qutebrowser.repl PROPERTIES
+                    LABELS "integration;lua;document;endpoint-extraction;web-interface" TIMEOUT 90
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+            endif()
         endif()
     endif()
     target_sources(prowsetk_integration_cli PRIVATE

@@ -40,6 +40,8 @@ TEST(QutebrowserBridge, SnapshotScriptsAreInertAndPluginExportsAreRedacted) {
     LuaRuntime lua;
     ASSERT_TRUE(setup(lua)) << lua.last_error();
     const auto result = lua.run(R"LUA(
+        assert(not pcall(qute.load_snapshot, {url='https://example.test/', html=string.char(255)}))
+        assert(not pcall(qute.load_snapshot, {url='https://example.test/', html='<p>'..string.char(0)..'</p>'}))
         local active, browser = qute.load_snapshot{
             url='https://example.test/', html=[[
                 <h1>Assistant</h1><script>globalThis.executed=true;fetch('/api/items?token=private_marker')</script>
@@ -88,5 +90,85 @@ TEST(QutebrowserBridge, NativeFilePermissionsAtomicFailureAndSafeErrors) {
         assert(package.loaded.lquteipc.exchange('/missing', '{}', 32001) == nil)
     )LUA").ok) << lua.last_error();
     std::filesystem::remove_all(root);
+}
+
+TEST(QutebrowserBridge, NoiseFilteringAndMultiPageSchemaSerialization) {
+    LuaRuntime lua;
+    ASSERT_TRUE(setup(lua)) << lua.last_error();
+    const auto result = lua.run(R"LUA(
+        local active, owner = qute.load_snapshot{url='https://example.test/', html=[[
+            <script>fetch('/js_errors', {method:'POST'}); fetch('/api/first?limit=2&token=private_marker');
+            fetch('/telemetry', {method:'POST'});</script>
+            <form action='/api/first' method='post'><input name='customer' value='private_form_marker'>
+            <input name='count' type='number' required value='2'></form>
+        ]]}
+        local first = qute.scrape(active)
+        for _, ep in ipairs(first.endpoints) do
+            assert(ep.path ~= '/js_errors' and ep.path ~= '/telemetry')
+        end
+        local previous = qute.enrich(active, first.endpoints).schemas
+        active:load_html([[<script>fetch('/api/first?offset=3&limit=2.5')</script>
+            <form action='/api/first' method='post'><input name='locale'></form>
+            <form action='/api/second' method='post'>
+            <input name='arrival' type='date' required value='private_form_marker'></form>]], 'https://example.test/next')
+        local next_page = qute.enrich(active, qute.scrape(active).endpoints).schemas
+        for _, schema in ipairs(next_page) do previous[#previous + 1] = schema end
+        local serializer = qute.plugin('schema_grabber')
+        local rendered = serializer.serialize(previous, {include_examples=false, redact_secrets=true})
+        assert(rendered.schema_count == 3)
+        assert(#qute.json.decode(rendered.postman_json).item == 3)
+        local _, gets = rendered.openapi_yaml:gsub('\n    get:', '')
+        assert(gets == 1)
+        assert(rendered.openapi_yaml:find('/api/first',1,true))
+        assert(rendered.openapi_yaml:find('/api/second',1,true))
+        assert(rendered.openapi_yaml:find('customer',1,true))
+        assert(rendered.openapi_yaml:find('arrival',1,true))
+        assert(rendered.openapi_yaml:find("name: 'offset'",1,true))
+        assert(rendered.openapi_yaml:find("name: 'limit'\n          in: query\n          required: false\n          schema:\n            type: number",1,true))
+        assert(rendered.openapi_yaml:find('locale',1,true))
+        assert(rendered.openapi_yaml:find('evidence-count: 2',1,true))
+        -- Serialization must not mutate the original per-page evidence.
+        for _, record in ipairs(previous) do assert(record.evidence_count == nil) end
+        assert(serializer.serialize(previous, {include_examples=false}).openapi_yaml == rendered.openapi_yaml)
+        assert(not rendered.openapi_yaml:find('private_marker',1,true))
+        assert(not rendered.postman_json:find('private_form_marker',1,true))
+        assert(not pcall(serializer.serialize, {false}))
+        assert(not pcall(serializer.serialize, {[2]={}}))
+        active:close()
+    )LUA");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(QutebrowserBridge, SchemaCompositionKeepsObservedEvidenceWithoutReprobing) {
+    LuaRuntime lua;
+    ASSERT_TRUE(setup(lua)) << lua.last_error();
+    const auto result = lua.run(R"LUA(
+        local active, owner = qute.load_snapshot{url='https://example.test/', html='<main></main>'}
+        local grabber = qute.plugin('schema_grabber')
+        local calls = 0
+        local observed = grabber.enrich({
+            document=function() return active:document() end,
+            request=function(_, method, url)
+                calls = calls + 1
+                assert(method == 'GET' and url == 'https://example.test/api/items?offset=2')
+                return {status=200, headers={['content-type']='application/json'},
+                    body='{"id":42,"token":"private_response_marker"}'}
+            end
+        }, {endpoints={{url='https://example.test/api/items?offset=2', path='/api/items', method='get'}}})
+        assert(calls == 1 and observed.probe_count == 1)
+        local placeholder = qute.enrich(active, {{url='https://example.test/api/items?limit=2',
+            path='/api/items', method='get'}})
+        local original = {observed.schemas[1], placeholder.schemas[1]}
+        local rendered = grabber.serialize(original, {redact_secrets=true, include_examples=false})
+        assert(calls == 1 and rendered.schema_count == 1)
+        assert(rendered.openapi_yaml:find('Observed response',1,true))
+        assert(rendered.openapi_yaml:find("response-provenance: 'observed-response'",1,true))
+        assert(rendered.openapi_yaml:find('application/json',1,true))
+        assert(not rendered.openapi_yaml:find('private_response_marker',1,true))
+        assert(not rendered.postman_json:find('private_response_marker',1,true))
+        assert(placeholder.schemas[1].responses[1].observed == false)
+        active:close()
+    )LUA");
+    EXPECT_TRUE(result.ok) << result.error;
 }
 }  // namespace

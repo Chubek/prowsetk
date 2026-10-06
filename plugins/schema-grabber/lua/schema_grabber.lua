@@ -711,6 +711,9 @@ local function render_openapi(schemas, opts)
             end
             lines[#lines + 1] = "      x-prowsetk-schema:"
             lines[#lines + 1] = "        path-template: " .. yaml_escape(es.path_template)
+            if es.evidence_count then
+                lines[#lines + 1] = "        evidence-count: " .. tostring(es.evidence_count)
+            end
             if es.request_provenance ~= "" then
                 lines[#lines + 1] = "        request-provenance: "
                     .. yaml_escape(es.request_provenance)
@@ -837,6 +840,9 @@ local function render_postman(schemas, opts)
         end
         local description = "Heuristic discovery; inferred schemas. Confidence: "
             .. tostring(ep.confidence or 0)
+        if es.evidence_count then
+            description = description .. "; Evidence records: " .. tostring(es.evidence_count)
+        end
         items[#items + 1] = '{"name":' .. json_quote(method .. " " .. url)
             .. ',"request":{"method":' .. json_quote(method) .. ',"url":'
             .. json_quote(url) .. ',"description":' .. json_quote(description)
@@ -984,6 +990,111 @@ end
 
 function schema_grabber.grab(session_or_document, spec)
     return schema_grabber.enrich(session_or_document, spec)
+end
+
+-- Render already-enriched schemas collected across multiple DOM captures.
+-- This never re-probes the network or re-infers fields from a later page.
+local function merge_named_fields(first, second)
+    local fields, seen = {}, {}
+    for _, source in ipairs({first or {}, second or {}}) do
+        for _, field in ipairs(source) do
+            local previous = seen[field.name]
+            if not previous then
+                previous = shallow_copy(field)
+                fields[#fields + 1], seen[field.name] = previous, previous
+            else
+                if previous.type ~= field.type then
+                    local numeric = {integer=true, number=true}
+                    previous.type = numeric[previous.type] and numeric[field.type] and 'number' or 'string'
+                    previous.example = ''
+                end
+                previous.required = previous.required == true and field.required == true
+                previous.sensitive = previous.sensitive == true or field.sensitive == true
+            end
+        end
+    end
+    table.sort(fields, function(a, b) return a.name < b.name end)
+    return fields
+end
+
+local function merge_schema_record(previous, current)
+    previous.query = merge_named_fields(previous.query, current.query)
+    if current.request_schema then
+        if not previous.request_schema then
+            previous.request_schema = shallow_copy(current.request_schema)
+            previous.request_provenance = current.request_provenance
+        else
+            previous.request_schema = shallow_copy(previous.request_schema)
+            previous.request_schema.properties = merge_named_fields(
+                previous.request_schema.properties, current.request_schema.properties)
+        end
+        previous.form_fields = merge_named_fields(previous.form_fields, current.form_fields)
+    end
+    -- OpenAPI has one entry per response status. Prefer observed bytes, then
+    -- the richer existing schema, over a later unobserved placeholder.
+    local responses = {}
+    for _, source in ipairs({previous.responses or {}, current.responses or {}}) do
+        for _, response in ipairs(source) do
+            local status = tostring(response.status or 200)
+            local old = responses[status]
+            local old_fields = old and old.schema and #(old.schema.properties or {}) or 0
+            local new_fields = response.schema and #(response.schema.properties or {}) or 0
+            local old_observed, new_observed = old and old.observed == true, response.observed == true
+            local typed = response.content_type and response.content_type ~= ''
+            local old_typed = old and old.content_type and old.content_type ~= ''
+            if not old or (new_observed and not old_observed) or
+               (new_observed == old_observed and (new_fields > old_fields or
+                    (new_fields == old_fields and typed and not old_typed))) then
+                responses[status] = response
+            end
+        end
+    end
+    previous.responses = {}
+    local statuses = {}
+    for status in pairs(responses) do statuses[#statuses + 1] = status end
+    table.sort(statuses)
+    for _, status in ipairs(statuses) do
+        local response = responses[status]
+        previous.responses[#previous.responses + 1] = response
+        if response.observed or response.schema or (response.content_type and response.content_type ~= '') then
+            previous.response_provenance = response.provenance
+        end
+    end
+    previous.evidence_count = (previous.evidence_count or 1) + (current.evidence_count or 1)
+end
+
+function schema_grabber.serialize(schemas, spec)
+    if type(schemas) ~= 'table' or #schemas > 10000 then error('invalid schema collection', 0) end
+    local ordered = {}
+    for key, value in pairs(schemas) do
+        if type(key) ~= 'number' or key % 1 ~= 0 or key < 1 or key > #schemas or
+           type(value) ~= 'table' or type(value.endpoint) ~= 'table' or
+           type(value.path_template) ~= 'string' then error('invalid schema collection', 0) end
+        ordered[key] = value
+    end
+    table.sort(ordered, function(a, b)
+        if a.path_template ~= b.path_template then return a.path_template < b.path_template end
+        local first, second = lower(a.endpoint.method or 'get'), lower(b.endpoint.method or 'get')
+        if first ~= second then return first < second end
+        return (a.endpoint.url or '') < (b.endpoint.url or '')
+    end)
+    local merged, seen = {}, {}
+    for _, record in ipairs(ordered) do
+        local method = lower(record.endpoint.method or 'get')
+        local path = record.path_template ~= '' and record.path_template or '/'
+        local key = method .. '\0' .. path
+        if seen[key] then
+            merge_schema_record(seen[key], record)
+        else
+            local copy = shallow_copy(record)
+            copy.endpoint = shallow_copy(record.endpoint)
+            copy.endpoint.method = method
+            seen[key], merged[#merged + 1] = copy, copy
+        end
+    end
+    local opts = normalize_spec(spec)
+    return {openapi_yaml=render_openapi(merged, opts), postman_json=render_postman(merged, opts),
+        schemas=merged, schema_count=#merged}
 end
 
 schema_grabber.is_api_path = is_api_path

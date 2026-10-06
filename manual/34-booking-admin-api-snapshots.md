@@ -25,6 +25,57 @@ Initial HTML → confirm live DOM evidence → scrape endpoints
 Chapters 31–33 explain installation, the Lua API, and action semantics. This
 chapter is the end-to-end project recipe.
 
+## Interactive Replxx / Lua workflow
+
+```sh
+cmake --preset default
+cmake --build --preset default
+examples/booking-dotcom-admin-api/qute-assist.exp --directory build/qute-booking
+```
+
+The launcher now defaults to the `ptk-qute-repl` terminal. Attach the printed
+`ptk-qute-marionette` userscript to your authenticated admin tab, then enter
+`:capture`, `:links`, `:targets`, `:forms`, `:click NUMBER`, `:fill NUMBER "value"`,
+`:select NUMBER "value"`, `:check NUMBER true`, `:focus`, `:scroll`, `:submit`,
+`:navigate /path`, `:reload`, `:endpoints` and `:export`. Each browser order
+receives a fresh DOM. Target numbers belong to the last inspection list and
+are invalidated by every capture. `:help` lists orders; `:quit` closes the
+conversation and reaps the launcher's broker.
+
+Editing, completion, hints and memory-only history use Replxx. Multiline host
+Lua uses a continuation prompt; globals and functions persist between chunks:
+
+```lua
+qute:click("button[data-next]")
+qute:fill("input[name='date']", "2027-01-01")
+qute:beacon("[data-testid='account-menu']")
+require('lpdql').rows(session, 'select tag, text from <h*>')
+```
+
+`session` / `document` are the current managed snapshot. Built-in lists are
+structural by default; `:values on` enables local target labels. Explicit Lua
+prints/queries can expose private values. Lua is trusted synchronous host
+automation, not a sandbox or page-code execution facility; loops/scripts do
+not have an asynchronous cancellation guarantee. No history file is saved.
+
+The console accumulates at most 10,000 same-origin endpoints and sanitized
+per-page schemas across up to 2,048 captures. Repeated method/templated-path
+operations merge query names and form fields with an evidence count instead of
+duplicate OpenAPI keys. Noise paths such as `/js_errors` and telemetry are
+filtered, and an empty interactive export is refused. Captures still contain
+no external bundles, historical HAR, response bytes or browser credentials.
+Login beacons, disabled response probes, provenance and incomplete-coverage
+metadata apply to interactive exports as well.
+
+Bodies travel over private, length-framed FIFOs on both local hops, up to
+16 MiB per capture. Socket JSON carries control metadata; body escaping no
+longer consumes the encoded-message budget. Transfer deadlines and Flatworm's
+250,000-node / 256-level bounds still apply. The optional REPL builds when Lua
+and Replxx are found, unless `PROWSETK_BUILD_QUTE_REPL=OFF`. `--one-shot` selects
+the finite driver below; `--actions-file` also selects that mode. The interactive
+launcher defaults to 1,800 seconds and 256 actions, bounded by configurable
+1–3600-second / 0–256-action limits.
+
 ## Begin with a deterministic offline run
 
 From the repository root:
@@ -91,16 +142,18 @@ assistant-browser setting rejects live operation. Offline runs remain usable.
 
 ## Configure positive DOM evidence
 
-The default `success_selector` is:
+Without a `success_selector` or `success_xpath` override, the driver recognizes
+`[data-testid='account-menu']` and semantic Log out / Sign out / Log off /
+Sign off controls. Links and form actions can match logout path components
+(including `sign_out.html`); button/link text, accessible labels, and submit
+input labels can match the exact normalized logout phrases. Open the account
+menu on your existing logged-in tab if its controls are not yet in the DOM.
 
-```css
-a[href*='logout'], [data-testid='account-menu']
-```
-
-The driver requires a matching DOM element on the initial live capture and
-after every action. Script/style/meta nodes are excluded from evidence. A
-word in JavaScript source is not a logout control. The default selector is a
-starting point; adjust it to an authenticated-only control in the actual UI.
+The driver requires positive DOM evidence on the initial live capture and
+after every action. Script/style/meta/template nodes are excluded from evidence.
+A word in JavaScript source, ordinary page prose, or a query value is not a
+logout control. Explicit CSS/XPath overrides must match an authenticated-only
+control in the actual UI and do not fall back to the implicit checks.
 
 Alternatively pass an XPath expression:
 
@@ -143,7 +196,7 @@ receiver command, and connect the tab with:
 ```
 
 The policy is trusted, bounded to 256 KiB and 32 actions, and subject to the
-broker's action budget. Actions are fixed click/fill/navigate/reload operations
+broker's action budget. Actions use the fixed operations
 from Chapter 33. The example selector is illustrative.
 
 The driver collects endpoints before and after each action, deduplicating by
@@ -161,8 +214,9 @@ evidence check. The login beacon does not verify every action's intended effect.
 | `bridge` | optional path | Descriptor; otherwise `PROWSETK_QUTE_BRIDGE` |
 | `ipc_module` | optional path | Native module override; otherwise helper discovery |
 | `wait_ms` | integer / 30000 | 1–30,000-ms snapshot/action wait |
-| `success_selector` | string / logout/account selector above | Live DOM evidence |
+| `success_selector` | optional string | Override implicit live DOM evidence |
 | `success_xpath` | optional string | Override evidence with XPath |
+| `retry_login_evidence` | boolean / false | Retain the broker and return 3 for an initial missing beacon, before any action |
 | `actions_file` | optional path | Trusted live action policy; ignored offline |
 | `api_only` | boolean / true | Keep proper API-like endpoints |
 | `output` | path / `_scraped/booking-admin-openapi.yaml` | OpenAPI output |
@@ -187,10 +241,12 @@ provenance, and confidence. There is no automatic link crawl, recursive GET
 resolution, SPA network probe, or response-schema probe in this workflow.
 
 Schema-grabber's Lua path infers typed URL parameters/path templates and request
-fields from matching forms in the final snapshot. Form values are removed in
+fields from matching forms in the final snapshot for the finite driver. Form values are removed in
 a detached copy; the original snapshot remains queryable. Endpoints found on
 earlier captures are retained, but form fields available only on those earlier
-documents are not accumulated as observed request schemas.
+documents are not accumulated as observed request schemas by that finite driver.
+The interactive console enriches each page before replacing it and serializes
+the accumulated schema records with `schema_grabber.serialize`.
 
 Responses without bytes retain heuristic defaults. Captured script references
 are not observed calls. All exports preserve redaction and inference metadata;
@@ -223,7 +279,12 @@ use `0700`. OpenAPI and Postman commits are independent. A failure during the
 second write can leave a new first artifact, so consumers should check the
 driver exit code as well as the files. Login/parse/action failure before export
 preserves previous artifacts. The driver closes its Session and attempts to
-finish the conversation during cleanup; errors are generic and value-free.
+finish the conversation during cleanup. `qute-assist.exp --one-shot` enables
+`retry_login_evidence` to wait for a corrected initial capture using its printed
+`:spawn` capture command. Two-way runs retain the original marionette and use a
+one-shot scraper for this correction. It never repeats dispatched actions. Errors identify the
+stage (IPC loading, receipt, parsing, login beacon/evidence, extraction,
+enrichment, or export) with fixed value-free hints instead of raw exceptions.
 
 ## Verification and further work
 

@@ -3,30 +3,42 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(process.argv[2], 'utf8');
+const kind = process.argv[3] || 'fill';
 function run(origin, hidden = false) {
   const events = [], markers = [];
   let value = '';
   const proto = {};
-  Object.defineProperty(proto, 'value', {set(v) { value = v; }});
+  Object.defineProperty(proto, 'value', {get() { return value; }, set(v) { value = v; }});
   const input = Object.create(proto);
-  Object.assign(input, {tagName: 'INPUT', type: 'text', parentElement: null,
+  Object.assign(input, {tagName: kind === 'select' ? 'SELECT' : kind === 'submit' ? 'FORM' : 'INPUT',
+    type: kind === 'check' ? 'checkbox' : 'text', parentElement: null, checked: false,
+    action: 'https://admin.booking.com/api/form',
     getAttribute() { return null; }, focus() { events.push('focus'); },
+    click() { this.checked = !this.checked; events.push('click'); },
+    scrollIntoView() { events.push('scroll'); }, requestSubmit() { events.push('submit'); },
     dispatchEvent(e) { events.push(e.type); }});
-  const context = {location: {origin}, getComputedStyle() { return {display: hidden ? 'none' : 'block'}; },
+  const context = {location: {origin, href: origin + '/'}, URL,
+    getComputedStyle() { return {display: hidden ? 'none' : 'block'}; },
     Event: class {constructor(type) { this.type = type; }},
     document: {querySelector() { return input; }, querySelectorAll() { return []; },
       createElement() { return {setAttribute() {}}; }, head: {appendChild(e) { markers.push(e); }}}};
   vm.runInNewContext(source, context);
   assert.equal(context.injected, undefined);
-  return {events, markers, value};
+  return {events, markers, value, checked: input.checked};
 }
 const success = run('https://admin.booking.com');
-assert.equal(success.value, "'; injected=true; //");
-assert.deepEqual(success.events, ['focus', 'input', 'change']);
+if (kind === 'fill' || kind === 'select') {
+  assert.equal(success.value, "'; injected=true; //");
+  assert.deepEqual(success.events, ['focus', 'input', 'change']);
+} else {
+  const expected = {click: ['click'], check: ['click'], focus: ['focus'], scroll: ['scroll'], submit: ['submit'], capture: []};
+  assert.deepEqual(success.events, expected[kind]);
+}
+if (kind === 'check') assert.equal(success.checked, true);
 assert.equal(success.markers[0].content, 'ok');
 const outside = run('https://other.test');
 assert.equal(outside.value, '');
 assert.deepEqual(outside.events, []);
 const hidden = run('https://admin.booking.com', true);
 assert.equal(hidden.value, '');
-assert.equal(hidden.markers[0].content, 'error');
+assert.equal(hidden.markers[0].content, kind === 'capture' ? 'ok' : 'error');

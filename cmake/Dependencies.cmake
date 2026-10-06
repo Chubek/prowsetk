@@ -1,5 +1,30 @@
 include_guard(GLOBAL)
 
+# Replxx is used only by the explicit Qutebrowser terminal host.
+if(PROWSETK_BUILD_QUTE_REPL AND UNIX)
+    find_package(replxx CONFIG QUIET)
+    if(NOT TARGET replxx::replxx AND EXISTS "${PROJECT_SOURCE_DIR}/third_party/replxx/CMakeLists.txt")
+        set(REPLXX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(REPLXX_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
+        # The upstream project still declares CMake 3.5; keep it unmodified.
+        set(_prowsetk_policy_minimum "${CMAKE_POLICY_VERSION_MINIMUM}")
+        set(CMAKE_POLICY_VERSION_MINIMUM 3.10)
+        add_subdirectory("${PROJECT_SOURCE_DIR}/third_party/replxx"
+            "${PROJECT_BINARY_DIR}/third_party/replxx" EXCLUDE_FROM_ALL)
+        prowsetk_replxx_compatibility(replxx)
+        set(CMAKE_POLICY_VERSION_MINIMUM "${_prowsetk_policy_minimum}")
+    endif()
+    if(TARGET replxx::replxx)
+        get_target_property(_prowsetk_replxx replxx::replxx ALIASED_TARGET)
+        if(NOT _prowsetk_replxx)
+            set(_prowsetk_replxx replxx::replxx)
+        endif()
+        add_library(ProwseTk::replxx ALIAS ${_prowsetk_replxx})
+    else()
+        message(STATUS "Replxx not found: ptk-qute-repl is unavailable")
+    endif()
+endif()
+
 # stb supplies the optional header-only PNG/JPEG decoder, isolated behind
 # ProwseTk::render_stb, so no stb type reaches a public header. Without it the
 # engine still lays out and paints: images degrade to their alt text and text

@@ -7,6 +7,80 @@ and generate redacted OpenAPI 3.1 and Postman 2.1 specifications with the real
 scrape-endpoints and schema-grabber plugins. Optional trusted actions turn the
 same driver into a two-way marionette.
 
+## Interactive session (recommended)
+
+```sh
+cmake --preset default
+cmake --build --preset default
+examples/booking-dotcom-admin-api/qute-assist.exp --directory build/qute-booking
+```
+
+This now starts a **Replxx-backed Lua REPL**, with editing, tab completion,
+hints, multiline Lua and memory-only history. Run its printed
+`ptk-qute-marionette` command in the already-logged-in admin tab. At `qute>`:
+
+```text
+:capture
+:status
+:links
+:targets
+:click 2
+:forms
+:fill 4 "2027-01-01"
+:select 5 "confirmed"
+:check 6 true
+:scroll 7
+:endpoints
+:export
+```
+
+Numbers above are illustrative: choose a target from the current inspection
+list. A capture invalidates those numbers; inspect again before another
+numbered action. `:focus`, `:submit`, `:navigate /relative/path`, `:reload` and
+`:help` provide more orders. Each browser order returns a fresh capture.
+Use actual application sections, reservation details, filters, pagination and
+lazy-load controls, rather than capturing only the account menu.
+
+You can enter Lua directly and retain globals/functions between responses:
+
+```lua
+qute:click("button[role='tab'][aria-controls='reservations']")
+qute:fill("input[name='date']", "2027-01-01")
+qute:beacon("[data-testid='account-menu']")
+require('lpdql').rows(session, 'select tag, text from <h*>')
+for _, ep in ipairs(qute.endpoints) do print(ep.method, ep.path) end
+```
+
+`session` and `document` refer to the current JavaScript-disabled snapshot.
+Host Lua is trusted, synchronous automation; page/model output is never
+executed. Explicit Lua prints can display private page values. Built-in orders
+omit labels/form values by default; `:values on` or `--show-values` opts into
+local labels. History is never written to disk. `:quit` finishes the
+conversation and the launcher reaps its broker, leaving Qutebrowser open.
+
+The console accumulates same-origin endpoints and sanitized **per-page** form
+schemas through the existing scrape-endpoints and schema-grabber plugins. Later
+captures merge query names and form fields by method/templated path, producing
+one operation with an evidence count instead of duplicate OpenAPI keys. Error-reporting and
+telemetry candidates such as `/js_errors` are filtered, and `:export` refuses an
+empty result instead of replacing useful artifacts with noise-only specs.
+Exports happen only on `:export`, use the configured `_scraped/` destinations,
+and remain redacted, heuristic and incomplete. DOM captures do not contain
+external bundles, historical network requests or response bodies, so response
+schemas cannot be verified through this interface.
+
+HTML now streams through owner-only, length-framed **FIFOs on both hops**, from
+the userscript to the broker and from the broker to Lua. The old 4 MiB HTML cap
+and JSON-escaping overhead are removed; the current bound is **16 MiB per
+capture**, with Flatworm's node/depth bounds still applying. Transfers handle
+backpressure, truncation and peer failure with finite deadlines. Tokens and
+page bodies are never put in Qutebrowser commands.
+
+The default session lasts 1,800 seconds with at most 256 actions; override with
+`--timeout` (1–3600) and `--max-actions` (0–256). Use `--repl-bin` for another
+preset's `ptk-qute-repl`. Replxx is optional at build time
+(`PROWSETK_BUILD_QUTE_REPL`); `--one-shot` retains the workflow below.
+
 ## One-shot workflow
 
 From the repository root:
@@ -39,10 +113,13 @@ You can send the snapshot before starting the driver; the broker retains its
 latest capture until the conversation ends or its lifetime expires. Restart
 the broker for a new run. `serve --launch` can open Qutebrowser after approval.
 
-Live exports require an actual DOM account/logout control matching
-`success_selector`, defaulting to
-`a[href*='logout'], [data-testid='account-menu']`. Adjust this for your account's
-current UI, or use `--success_xpath "//h1[contains(normalize-space(.), 'Your property')]"`.
+Use your existing logged-in admin tab; another login is not required. Live
+exports require positive DOM account/logout evidence. Without an override, the
+driver recognizes `[data-testid='account-menu']`, Log out / Sign out / Log off /
+Sign off link or button labels (including nested spans and accessible labels),
+and matching logout path components in links or form actions. An explicit
+`success_selector` or `success_xpath` overrides these heuristics; for example,
+`--success_xpath "//h1[contains(normalize-space(.), 'Your property')]"`.
 Words inside scripts do not count as evidence. MFA/human verification happens
 in the assistant browser. No credentials are accepted or logged by this driver.
 
@@ -106,7 +183,7 @@ The supported handling path is the assistant browser you already run:
 2. Send a fresh snapshot with `ptk-qute-scrape` (or `ptk-qute-marionette`).
 3. The driver re-checks same-origin scope and positive DOM login evidence
    before exporting. A snapshot without login evidence still fails with the
-   generic `Booking assistant snapshot was not confirmed` error and preserves
+    stage-specific `login evidence failed` diagnostic and preserves
    previous artifacts.
 
 If the helper is absent, the driver keeps working: the login-evidence gate is
@@ -207,10 +284,11 @@ when the environment carries neither credential, read with echo disabled and
 passed to children via the environment (never argv, logs, or specs).
 
 ```sh
-# Qutebrowser one-shot: starts the broker, prints the one :spawn line to run
-# in the logged-in tab, then runs the driver until it consumes the snapshot.
+# Qutebrowser interactive Lua: starts the broker, prints one marionette
+# :spawn line, then accepts inspection/navigation/Lua in the terminal.
 examples/booking-dotcom-admin-api/qute-assist.exp \
-  --directory build/qute-booking --timeout 300
+  --directory build/qute-booking --timeout 1800
+# Add --one-shot for the finite scrape-and-export workflow.
 
 # Cloudflare snapshot-to-specs: prompts for missing credentials only, fetches
 # the rendered snapshot, then runs the driver on it (needs nothing else).
@@ -219,21 +297,72 @@ CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... \
   --output _scraped/booking-admin-browser-run.html
 ```
 
-- `qute-assist.exp` wraps the one-shot workflow (`--actions-file` switches the
+- `qute-assist.exp` defaults to the Lua REPL above. `--one-shot` wraps the
+  finite driver workflow (`--actions-file` also selects the driver and switches the
   printed line and driver to the two-way `ptk-qute-marionette` round-trip;
   `--launch` relays the broker's own `[y/N]` approval to your keystroke
-  instead of answering it). Exit is the driver's exit: `0` on exported specs,
-  `1` on bridge/driver failure with previous exports preserved.
+  instead of answering it). In driver mode, exit is the driver's exit: `0` on exported specs,
+  `1` on bridge/driver failure. It waits for the first capture before starting
+  the driver. If that capture lacks login evidence, it keeps the broker open
+  and waits for a newer capture within the same bounded login window; already
+  dispatched actions are never retried. Failed validation before export
+  preserves previous artifacts; the two output writes are independent.
 - `browser-run-assist.exp` wraps `fetch-browser-run-snapshot.sh` and chains
   the result: `--to driver` (default, offline `--html` import; snapshots over
   512 KiB are refused with a pointer to `--to marionette`, which takes the
   snapshot file directly but needs a running OpenCode server).
-- Both scripts default every path/URL/timeout (`--help` lists overrides), pin
-  the URL to `https://admin.booking.com*`, and exit `2` on usage errors.
+- Both scripts default every path/URL/timeout (`--help` lists overrides) and
+  exit `2` on usage errors. `qute-assist.exp` checks the exact admin origin and
+  selects the IPC module beside the chosen CLI build when available.
 - `qute-assist.exp` ensures the broker directory is owner-only (`0700`) before
   starting the broker — a hand-made directory with wider permissions would
   otherwise fail with the broker's generic error. A live broker for the
   directory is never evicted; only provably stale state is cleared.
+
+### Logged in, but the export still fails?
+
+In `--one-shot` mode, `snapshot received` means Qutebrowser delivered the HTML successfully. The
+driver now reports the failed stage instead of just `operation failed`:
+
+- **login evidence:** Open the account menu in your already-logged-in tab so
+  its logout control is in the captured DOM, and run the printed capture
+  command again. `qute-assist.exp` keeps waiting for that newer capture. For
+  two-way runs it prints a one-shot `ptk-qute-scrape` command, retaining the
+  already-connected marionette. The implicit
+  check matches only actual controls and their logout paths/labels: script,
+  style and template content, ordinary page prose, and query values such as
+  `redirect=logout` are excluded. Custom CSS/XPath beacons take precedence.
+- **IPC module loading:** Build the CLI's preset or use `--ipc-module` with
+  the matching `lquteipc.so`.
+- **snapshot parsing:** The capture must fit the bridge's 16 MiB HTML limit
+  and Flatworm's 250,000-node / 256-level parser bounds.
+- **endpoint extraction / schema enrichment:** Check the named Lua plugin
+  helper and the extraction bounds.
+- **OpenAPI export / Postman export:** Check the output parent directories
+  and write permissions.
+
+Diagnostics use fixed stage names and hints; page values, selectors, private
+paths from exceptions, credentials, and raw Lua exceptions are not printed.
+
+If the implicit controls do not match your UI, choose an authenticated-only
+control in the current DOM and pass it through:
+
+```sh
+examples/booking-dotcom-admin-api/qute-assist.exp --directory build/qute-booking \
+  --success-selector "a[href*='signout']"
+# or an XPath beacon instead:
+#   --success-xpath "//h1[contains(normalize-space(.), 'Your property')]"
+```
+
+The same two flags exist on the raw driver as `--success_selector` /
+`--success_xpath`. An XPath, when nonempty, takes precedence over the CSS
+selector. The raw driver normally finishes the conversation on failure;
+`--retry_login_evidence true` (used by `qute-assist.exp --one-shot`) returns exit code 3
+and retains the conversation only when the initial capture lacks login
+evidence and no browser action has started. The exported
+`authentication-verified: false` line is unchanged:
+it records that no HTTP/session authentication was verified, regardless of
+which evidence control matched.
 
 ## Offline run and installed use
 

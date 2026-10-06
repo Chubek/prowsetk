@@ -32,8 +32,12 @@ arguments = [
   { name = "bridge", type = "path" },
   { name = "ipc_module", type = "path" },
   { name = "wait_ms", type = "integer", default = 30000 },
-  { name = "success_selector", type = "string", default = "a[href*='logout'], [data-testid='account-menu']" },
+  # Optional overrides; without one, the driver recognizes account-menu and
+  # semantic Log out / Sign out links, buttons and forms in the captured DOM.
+  { name = "success_selector", type = "string" },
   { name = "success_xpath", type = "string" },
+  # qute-assist keeps the conversation open for a corrected initial snapshot.
+  { name = "retry_login_evidence", type = "boolean", default = false },
   { name = "actions_file", type = "path" },
   { name = "api_only", type = "boolean", default = true },
   { name = "output", type = "path", default = "_scraped/booking-admin-openapi.yaml" },

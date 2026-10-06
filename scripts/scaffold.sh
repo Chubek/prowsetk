@@ -291,6 +291,10 @@ write_file "${ROOT}/.gitmodules" <<'GITMODULES_EOF'
 	path = third_party/re2
 	url = https://github.com/google/re2.git
 
+[submodule "third_party/replxx"]
+	path = third_party/replxx
+	url = https://github.com/AmokHuginnsson/replxx.git
+
 [submodule "third_party/simdjson"]
 	path = third_party/simdjson
 	url = https://github.com/simdjson/simdjson.git

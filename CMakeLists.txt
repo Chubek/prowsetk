@@ -9,6 +9,8 @@ option(PROWSETK_ENABLE_JAVASCRIPT
     "Build the QuickJS page JavaScript runtime" ON)
 option(PROWSETK_BUILD_AI_ORACLE
     "Build the optional OpenAI oracle plugin when its headers are available" ON)
+option(PROWSETK_BUILD_QUTE_REPL
+    "Build the Qutebrowser Lua console when Replxx and Lua are available" ON)
 option(PROWSETK_BUILD_BASIC_GUI
     "Build the optional FLTK desktop browser inspector" ON)
 option(PROWSETK_BUILD_COMPLEX_GUI

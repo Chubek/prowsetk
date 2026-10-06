@@ -21,6 +21,7 @@ extern "C" {
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include "fifo.hpp"
 
 namespace {
 constexpr std::size_t kMessageLimit = 8 * 1024 * 1024;
@@ -211,11 +212,23 @@ int lua_write(lua_State* state) {
         return 1;
     } catch (...) { return failure(state); }
 }
+
+int lua_read_fifo(lua_State* state) {
+    std::size_t path_size = 0;
+    const char* path = luaL_checklstring(state, 1, &path_size);
+    const auto size = luaL_checkinteger(state, 2);
+    if (size < 0 || size > static_cast<lua_Integer>(kFileLimit)) return failure(state);
+    try {
+        const auto data = prowsetk::qute::read_fifo(std::string(path, path_size), static_cast<std::size_t>(size));
+        lua_pushlstring(state, data.data(), data.size());
+        return 1;
+    } catch (...) { return failure(state); }
+}
 }  // namespace
 
 extern "C" int luaopen_lquteipc(lua_State* state) {
     const luaL_Reg functions[] = {{"exchange", lua_exchange}, {"read_private", lua_read},
-                                 {"write_private", lua_write}, {nullptr, nullptr}};
+                                 {"write_private", lua_write}, {"read_fifo", lua_read_fifo}, {nullptr, nullptr}};
     luaL_newlib(state, functions);
     return 1;
 }

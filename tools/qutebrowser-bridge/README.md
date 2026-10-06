@@ -11,11 +11,77 @@ They use Qutebrowser's documented `QUTE_HTML`, `QUTE_URL`, `QUTE_TAB_INDEX` and
 | `ptk-qute-scrape` | Send a snapshot tagged for scrape-endpoints consumption |
 | `ptk-qute-marionette` | Send the initial page, accept bounded Lua actions, and return fresh snapshots |
 | `ptk-qute-bridge` | Start the local broker, inspect status, or finish a conversation |
+| `ptk-qute-repl` | Persistent Replxx/Lua terminal for inspection, browser orders and accumulated exports |
 
 The scripts require POSIX, Python 3.9+ (standard library only), and Qutebrowser
 with userscript support. The optional `lquteipc` Lua module uses the existing
 Lua dependency and builds with ProwseTk on POSIX. Qutebrowser remains an explicit
 external assistant; the Flatworm core has no graphical or browser dependency.
+
+## Interactive Lua session
+
+```sh
+cmake --preset default
+cmake --build --preset default
+examples/booking-dotcom-admin-api/qute-assist.exp --directory build/qute-booking
+```
+
+The launcher starts the broker and `ptk-qute-repl`, and prints one
+`ptk-qute-marionette` userscript command to run in your already-logged-in tab.
+Use `:capture`, `:targets`, `:links`, `:forms`, `:click NUMBER`, `:fill NUMBER
+"value"`, `:select NUMBER "value"`, `:check NUMBER true`, `:focus`, `:scroll`,
+`:submit`, `:navigate /path`, `:reload`, `:discover`, `:endpoints`, `:export`,
+`:status`, `:help`, and `:quit`. Target numbers belong to the last inspection
+list and are invalidated by every capture. Orders return a fresh DOM; inspect it
+to confirm workflow success. Capture waits and action counts remain bounded.
+A rejected capture or lost action reply also invalidates targets and login
+evidence; obtain a fresh valid capture before discovery or export.
+
+The console supports editing, tab completion, hints, multiline Lua (continuation
+prompt), `:cancel` and in-memory history. State is persistent; use Lua globals
+to retain values between separately evaluated chunks. No history file is saved.
+The globals `qute`, `session` and `document` expose the controller and current
+managed snapshot. For example:
+
+```lua
+qute:click("button[data-next]")
+qute:fill("input[name='date']", "2027-01-01")
+qute:beacon("[data-testid='account-menu']")
+require('lpdql').rows(session, 'select tag, text from <h*>')
+for _, ep in ipairs(qute.endpoints) do print(ep.method, ep.path) end
+```
+
+Terminal orders omit page labels and form values by default; `:values on` or
+`--show-values` opts into local target labels. Explicit Lua queries/prints can
+display private values. Host Lua is trusted automation, not a sandbox; loops
+and scripts run synchronously, with no asynchronous cancellation guarantee.
+Page/model output is never executed. Errors omit source and raw exceptions.
+
+Every confirmed page contributes same-origin discoveries and sanitized schemas
+from scrape-endpoints/schema-grabber. Repeated methods and templated paths merge
+query names and form fields across captures into a single operation, with an
+evidence count and conservatively widened scalar types. It drops error-reporting/telemetry paths
+(including `/js_errors`), and refuses empty exports so noise-only captures do
+not overwrite useful files. `--include-noise` restores those candidates.
+Schema inference remains heuristic, and no response requests are issued.
+Explore application sections, filters, pagination, details and lazy-load
+controls; a DOM snapshot does not contain external bundles or historical HAR.
+The optional captcha-handler classifies captured challenges without bypassing
+them. Complete login/MFA/challenges in Qutebrowser and capture again.
+
+For an already-running broker, run the executable directly:
+
+```sh
+build/default/tools/qutebrowser-bridge/ptk-qute-repl \
+  --bridge "$PWD/build/qute-booking/bridge.json" --require-login
+```
+
+`--batch` evaluates commands/Lua from stdin; `--script FILE` runs trusted Lua
+through the same controller then closes the conversation. `--root DIR` and
+`--ipc-module FILE` override helper locations. The executable picks the IPC
+module beside its preset and supports installed/relocatable helper paths.
+`PROWSETK_BUILD_QUTE_REPL=OFF` or missing Lua/Replxx omits only this executable;
+the launcher supports `--one-shot` for the finite driver below.
 
 ## Build and one-shot scrape
 
@@ -94,12 +160,16 @@ API is:
 | `client:act(action, wait_ms?)` | Fresh snapshot with action ID and `action_status` |
 | `client:finish()` | Close the conversation and stop its marionette |
 | `load_snapshot(snapshot)` | JavaScript-disabled Session and its owning Browser |
-| `scrape(session, {api_only?})` | scrape-endpoints result |
+| `scrape(session, {api_only?, include_noise?})` | scrape-endpoints result; telemetry/noise omitted by default |
 | `enrich(session, endpoints, {api_only?, collection_name?})` | schema-grabber result; no GET probes |
 | `write(path, bytes, ipc_module?)` | Atomic `0600` file; new directories are `0700` |
 
-Supported actions are strictly `click {selector}`, `fill {selector, value}`,
-`navigate {url}` and `reload`. `fill` uses the prototype value setter plus
+Supported actions are `click {selector}`, `fill {selector, value}`,
+`navigate {url}`, `reload`, `capture`, `focus {selector}`, `scroll {selector}`,
+`select {selector, value}`, `check {selector, checked}` and `submit {selector}`.
+`select` requires a select element, `check` uses checkbox/radio activation,
+`scroll` calls `scrollIntoView`, and `submit` uses `requestSubmit` on a same-origin
+form. `fill` uses the prototype value setter plus
 input/change events; it rejects password/file/hidden/button/checkable controls.
 Actions check the approved origin at execution and reject hidden/disabled
 targets. There is no arbitrary JavaScript, Qutebrowser command, shell, or model
@@ -114,7 +184,7 @@ the fresh DOM. Actions are never automatically retried after a timeout.
 
 CMake installs scripts/helpers together under
 `share/prowsetk/qutebrowser-bridge/`, Lua under its `lua/` subdirectory, the native
-module under `lib/prowsetk/lua/lquteipc.so`, and the Booking project under
+module under `lib/prowsetk/lua/lquteipc.so`, the REPL under `bin/ptk-qute-repl`, and the Booking project under
 `share/prowsetk/examples/booking-dotcom-admin-api/`. Use absolute userscript
 paths, or link the scripts into `~/.local/share/qutebrowser/userscripts/`.
 For example, a binding in Qutebrowser's `config.py` can run:
@@ -143,11 +213,22 @@ runtime is refused; after an abrupt kill, remove stale `bridge.sock` and
 ## Scope, protocol and bounds
 
 The private descriptor (`0700` directory, `0600` file/socket) contains
-`{version: 1, socket, token, origin}`. Each socket connection sends one
+`{version: 1, socket, token, origin, bulk: "fifo-v1"}`. The optional bulk field
+preserves legacy inline clients. Each socket connection sends one
 newline-terminated JSON request containing `version`, `token`, and `op`, and
 receives one JSON reply with `ok`. Operations are `publish`, `snapshot`,
 `attach`, `next`, `act`, `detach`, `status`, and `finish`. Duplicate keys, unknown
 fields/actions, excessive nesting and unauthenticated requests are rejected.
+New senders and Lua clients stream HTML through `0600` named FIFOs in the private
+runtime directory; the Unix socket exchanges only metadata/control for those
+transfers. An upload carries `html_fifo` (a generated basename) and `html_bytes`;
+snapshot/action requests select `transport: "fifo"`. The body frame is ASCII
+`QHTML1\n`, an unsigned 64-bit big-endian byte count, and exactly that many raw
+UTF-8 bytes followed by EOF. Extra/truncated data, wrong lengths/types/owners,
+symlinks, unsafe paths and stalled peers fail. JSON escaping no longer inflates
+the HTML body. FIFO backpressure is handled with partial nonblocking reads and
+writes, not one large PIPE_BUF write. Normal exit/failure unlinks transfer FIFOs;
+an abrupt process kill may require removing its leftover empty FIFO node.
 Linux also checks the peer UID. Same-user processes are trusted and can read
 the token; this is not isolation from other programs owned by that user.
 
@@ -162,12 +243,15 @@ field names/types/required flags without changing the caller's document.
 |---|---|
 | Broker lifetime | 1–3600 seconds; default 300 |
 | Simultaneous clients / active marionettes | 8 / 1 |
-| HTML / encoded message | 4 MiB / 8 MiB (both bounds apply) |
-| JSON nesting / total actions | 32 / 0–32, default 32 |
+| FIFO HTML / encoded control or legacy inline message | 16 MiB / 8 MiB |
+| JSON nesting / total actions | 32 / 0–256, default 256 |
 | Action selector / fill value | 4096 UTF-8 bytes each |
 | IPC wait / partial-client timeout | 0–30 seconds / 5 seconds |
 | Settling interval | 0–5000 ms; default 500 |
 | Private output file | 16 MiB |
+| Bulk FIFO transfer | 10 seconds per hop, in addition to the control wait |
+| REPL captures / accumulated schemas / inspection list | 2,048 / 10,000 / 200 |
+| REPL line / multiline chunk / memory history | 64 KiB / 256 KiB / 200 entries |
 
 The first capture/attachment pins the Qutebrowser **tab index**. Keep that tab
 active in the same window, and do not reorder/close tabs during a marionette.

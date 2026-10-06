@@ -50,6 +50,12 @@ application state you need. `client:snapshot` alone does not trigger recapture.
 | `{type='fill', selector='input[name=filter]', value='available'}` | Focus a supported control, use its prototype value setter, dispatch input/change |
 | `{type='navigate', url='https://example.test/catalog'}` | Assign a validated same-origin HTTP(S) URL |
 | `{type='reload'}` | Reload the current approved-origin page |
+| `{type='capture'}` | Request a fresh DOM without changing the page |
+| `{type='focus', selector='input'}` | Focus an interactable target |
+| `{type='scroll', selector='section'}` | Scroll an interactable target into view |
+| `{type='select', selector='select', value='available'}` | Set an existing option and emit input/change |
+| `{type='check', selector='input[type=checkbox]', checked=true}` | Activate a checkbox/radio to reach the requested state |
+| `{type='submit', selector='form'}` | `requestSubmit` on a form with a same-origin action |
 
 Only the fields shown for each action are accepted. Selectors and fill values
 are limited to 4096 UTF-8 bytes each. Unknown actions and extra fields fail
@@ -108,6 +114,10 @@ Acquire new Document/Element handles after each HTML installation. To preserve
 discovery across changes, accumulate endpoints in a bounded map keyed by
 method and URL, then pass the merged array to `qute.enrich`. The shipped Booking
 driver implements this pattern and caps its accumulated seeds at 10,000.
+The Replxx console in Chapter 34 exposes these actions as terminal orders and
+Lua methods. It enriches each capture before replacing it, retaining sanitized
+request schemas across pages and strengthening them when later forms reveal
+additional fields. Numbered targets are invalidated on every capture.
 
 ## Interpreting action replies
 

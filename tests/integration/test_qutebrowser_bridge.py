@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 CLI, IPC, SOURCE = sys.argv[1:4]
@@ -96,6 +97,98 @@ class QutebrowserIntegration(unittest.TestCase):
             self.assertEqual((root / "openapi.yaml").read_bytes(), b"previous export")
             self.assertFalse((root / "postman.json").exists())
             self.assertNotIn(b"must-not-export", result.stdout + result.stderr)
+            self.assertIn(b"login evidence failed", result.stderr)
+            self.assertIn(b"--success-selector", result.stderr)
+
+    def test_already_logged_in_semantic_controls_need_no_selector_override(self):
+        controls = [
+            "<a href='/hotel/hoteladmin/sign_out.html?token=private_marker'>Exit</a>",
+            "<a href='/account/LogOut'>Exit</a>",
+            "<button><span> Log out </span></button>",
+            "<button aria-label='Sign out'><svg></svg></button>",
+            "<form action='/account/logoff.php'><button>Exit</button></form>",
+            "<input type='submit' value='Sign out'>",
+        ]
+        for control in controls:
+            with self.subTest(control=control), broker() as (root, _):
+                self.assertEqual(run_script("ptk-qute-scrape", root, html=control +
+                    "<script>fetch('/api/already-logged-in?token=private_marker')</script>").returncode, 0)
+                result = subprocess.run(driver_args(root), capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                yaml = (root / "openapi.yaml").read_text()
+                self.assertIn("login-evidence: true", yaml)
+                self.assertIn("authentication-verified: false", yaml)
+                self.assertIn("/api/already-logged-in", yaml)
+                self.assertNotIn("private_marker", yaml)
+                self.assertNotIn(b"private_marker", result.stdout + result.stderr)
+
+    def test_implicit_login_evidence_excludes_scripts_templates_and_query_values(self):
+        pages = [
+            "<button><script>Log out</script></button>",
+            "<template><button>Sign out</button></template>",
+            "<p>Log out</p><h1>Account</h1>",
+            "<a href='/help?redirect=logout'>Help</a>",
+            "<input type='hidden' value='Sign out' href='/logout'>",
+        ]
+        for page in pages:
+            with self.subTest(page=page), broker() as (root, _):
+                write_file(root / "openapi.yaml", b"previous export")
+                self.assertEqual(run_script("ptk-qute-scrape", root, html=page).returncode, 0)
+                result = subprocess.run(driver_args(root), capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(b"login evidence failed", result.stderr)
+                self.assertEqual((root / "openapi.yaml").read_bytes(), b"previous export")
+
+    def test_explicit_login_beacons_do_not_fall_back_to_implicit_evidence(self):
+        for flag, beacon in (("--success_selector", "#missing"), ("--success_xpath", "//h1[@id='missing']")):
+            with self.subTest(flag=flag), broker() as (root, _):
+                self.assertEqual(run_script("ptk-qute-scrape", root).returncode, 0)
+                result = subprocess.run(driver_args(root, flag, beacon), capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(b"login evidence failed", result.stderr)
+
+    def test_diagnostics_distinguish_module_beacon_and_output_failures_without_values(self):
+        cases = [
+            (["--ipc_module", "/missing/private_marker.so"], b"IPC module loading failed"),
+            (["--success_selector", ":private_marker"], b"login beacon validation failed"),
+            (["--output", None], b"OpenAPI export failed"),
+        ]
+        for extra, marker in cases:
+            with self.subTest(marker=marker), broker() as (root, _):
+                self.assertEqual(run_script("ptk-qute-scrape", root).returncode, 0)
+                options = [str(root / "page.html/private_marker.yaml") if value is None else value for value in extra]
+                result = subprocess.run(driver_args(root, *options), capture_output=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(marker, result.stderr)
+                self.assertNotIn(b"private_marker", result.stdout + result.stderr)
+
+    def test_missing_evidence_after_a_dispatched_action_cannot_be_retried(self):
+        with broker() as (root, config):
+            self.assertEqual(run_script("ptk-qute-scrape", root).returncode, 0)
+            controller = "fixture-controller"
+            exchange(config, {"op": "attach", "controller": controller, "tab": 1})
+            write_file(root / "actions.json", encode({"version": 1, "actions": [
+                {"type": "click", "selector": "button[data-next]"}]}))
+            process = subprocess.Popen(driver_args(root, "--retry_login_evidence", "true",
+                "--actions_file", str(root / "actions.json")), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                action = exchange(config, {"op": "next", "controller": controller, "wait_ms": 3000})["action"]
+                self.assertIsNotNone(action)
+                exchange(config, {"op": "publish", "snapshot": {
+                    "url": BASE + "/", "html": "<p>private_marker</p>", "tab": 1,
+                    "purpose": "action", "action_id": action["id"], "action_status": "ok"}})
+                stdout, stderr = process.communicate(timeout=10)
+                self.assertEqual(process.returncode, 1, stderr)
+                self.assertIn(b"login evidence failed", stderr)
+                self.assertNotIn(b"private_marker", stdout + stderr)
+                status = exchange(config, {"op": "status"})
+                self.assertTrue(status["closed"])
+                self.assertEqual(status["actions_used"], 1)
+                self.assertFalse((root / "openapi.yaml").exists())
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    process.communicate(timeout=5)
 
     def test_wrong_origin_hint_mode_and_tab_rejected(self):
         with broker() as (root, config):
@@ -119,6 +212,7 @@ class QutebrowserIntegration(unittest.TestCase):
             self.assertEqual(run_script("ptk-qute-send", root, html="<div>" * 300).returncode, 0)
             result = subprocess.run(driver_args(root), capture_output=True, timeout=10)
             self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"snapshot parsing failed", result.stderr)
             self.assertTrue(exchange(config, {"op": "status"})["closed"])
             self.assertFalse((root / "openapi.yaml").exists())
 
@@ -207,11 +301,77 @@ class QutebrowserIntegration(unittest.TestCase):
             self.skipTest("Node.js unavailable for JS simulation")
         with tempfile.TemporaryDirectory(prefix="q-", dir=os.getcwd()) as root:
             path = Path(root) / "action.js"
-            write_file(path, action_source({"type": "fill", "selector": "input", "value": "'; injected=true; //"},
-                                           BASE, "1" * 32))
-            result = subprocess.run([node, str(Path(SOURCE) / "tests/integration/test_qutebrowser_actions.js"), str(path)],
-                                    capture_output=True, timeout=5)
-            self.assertEqual(result.returncode, 0, result.stderr)
+            for kind in ('fill', 'select', 'check', 'focus', 'scroll', 'submit', 'click', 'capture'):
+                order = {'type': kind}
+                if kind != 'capture': order['selector'] = 'input'
+                if kind in ('fill', 'select'): order['value'] = "'; injected=true; //"
+                if kind == 'check': order['checked'] = True
+                write_file(path, action_source(order, BASE, '1' * 32))
+                result = subprocess.run([node, str(Path(SOURCE) / 'tests/integration/test_qutebrowser_actions.js'),
+                    str(path), kind], capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_expect_waits_for_a_corrected_authenticated_snapshot_and_reports_final_status(self):
+        expect = shutil.which("expect")
+        if not expect:
+            self.skipTest("Expect unavailable")
+        for two_way in (False, True):
+            with self.subTest(two_way=two_way):
+                self.expect_corrected_snapshot(expect, two_way)
+
+    def expect_corrected_snapshot(self, expect, two_way):
+        with tempfile.TemporaryDirectory(prefix="q-", dir=os.getcwd()) as directory:
+            root = Path(directory)
+            script = Path(SOURCE) / "examples/booking-dotcom-admin-api/qute-assist.exp"
+            command = [expect, str(script), "--one-shot", "--directory", str(root), "--timeout", "120",
+                "--cli-bin", CLI, "--output", str(root / "openapi.yaml"),
+                "--postman", str(root / "postman.json")]
+            if two_way:
+                write_file(root / "actions.json", encode({"version": 1, "actions": []}))
+                command.extend(["--actions-file", str(root / "actions.json")])
+            process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+            captured = bytearray()
+
+            def until(marker):
+                deadline = time.monotonic() + 15
+                while marker not in captured:
+                    ready, _, _ = select.select([process.stdout], [], [], max(0, deadline - time.monotonic()))
+                    self.assertTrue(ready, "Expect did not report its stage: " + repr(bytes(captured)))
+                    data = os.read(process.stdout.fileno(), 16384)
+                    self.assertTrue(data, "Expect exited before the expected stage: " + repr(bytes(captured)))
+                    captured.extend(data)
+
+            try:
+                until(b"take your time logging in")
+                config = descriptor(root / "bridge.json")
+                if two_way:
+                    exchange(config, {"op": "attach", "controller": "fixture-controller", "tab": 1})
+                self.assertEqual(run_script("ptk-qute-scrape", root, html="<p>private_marker</p>").returncode, 0)
+                until(b"keeping the bridge open")
+                self.assertIn(b"login evidence failed", captured)
+                self.assertFalse(exchange(config, {"op": "status"})["closed"])
+                if two_way:
+                    self.assertTrue(exchange(config, {"op": "status"})["connected"])
+                self.assertFalse((root / "openapi.yaml").exists())
+                page = "<button><span>Sign out</span></button>" + PAGE
+                self.assertEqual(run_script("ptk-qute-scrape", root, html=page).returncode, 0)
+                stdout, stderr = process.communicate(timeout=15)
+                captured.extend(stdout)
+                self.assertEqual(process.returncode, 0, (bytes(captured), stderr))
+                self.assertIn(b"specs exported", captured)
+                self.assertNotIn(b"private_marker", captured + stderr)
+                self.assertIn("login-evidence: true", (root / "openapi.yaml").read_text())
+                self.assertFalse((root / "bridge.sock").exists())
+                self.assertFalse((root / "bridge.json").exists())
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.communicate(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.communicate(timeout=5)
 
 
 if __name__ == "__main__":

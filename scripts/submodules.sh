@@ -16,6 +16,7 @@ git submodule add https://github.com/cbodley/nexus.git		    third_party/nexus
 git submodule add https://github.com/zeux/pugixml.git		    third_party/pugixml
 git submodule add https://github.com/quickjs-ng/quickjs.git	    third_party/quickjs
 git submodule add https://github.com/google/re2.git		    third_party/re2
+git submodule add https://github.com/AmokHuginnsson/replxx.git       third_party/replxx
 git submodule add https://github.com/simdjson/simdjson.git	    third_party/simdjson
 git submodule add https://github.com/gabime/spdlog.git		    third_party/spdlog
 git submodule add https://github.com/marzer/tomlplusplus.git	    third_party/tomlplusplus

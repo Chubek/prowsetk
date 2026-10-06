@@ -4,6 +4,7 @@ local source = debug.getinfo(1, 'S').source:gsub('^@', '')
 local directory = source:match('^(.*[/\\])') or './'
 local json = dofile(directory .. 'json.lua')
 local bridge = { json = json }
+bridge.login_evidence = dofile(directory .. 'evidence.lua')
 local function fail() error('qutebrowser bridge operation failed', 0) end
 
 function bridge.ipc(path)
@@ -33,10 +34,23 @@ local Client = {}
 Client.__index = Client
 function Client:request(request, timeout)
     request.version, request.token = 1, self.config.token
+    if self.config.bulk == 'fifo-v1' and (request.op == 'snapshot' or request.op == 'act') then
+        request.transport = 'fifo'
+    end
     local data = self.ipc.exchange(self.config.socket, json.encode(request), timeout or 32000)
     if not data then fail() end
     local reply = json.decode(data)
     if type(reply) ~= 'table' or reply.ok ~= true then fail() end
+    if type(reply.snapshot) == 'table' and reply.snapshot ~= json.null and reply.snapshot.html_fifo then
+        local name, size = reply.snapshot.html_fifo, reply.snapshot.html_bytes
+        if type(name) ~= 'string' or #name ~= 42 or not name:match('^bulk%-%x+%.fifo$') or
+           type(size) ~= 'number' or size % 1 ~= 0 or size < 0 or size > 16 * 1024 * 1024 then fail() end
+        local root = self.config.socket:match('^(.*)/bridge%.sock$')
+        if not root or type(self.ipc.read_fifo) ~= 'function' then fail() end
+        local body = self.ipc.read_fifo(root .. '/' .. name, size)
+        if not body or #body ~= size or not utf8.len(body) or body:find('\0', 1, true) then fail() end
+        reply.snapshot.html, reply.snapshot.html_fifo, reply.snapshot.html_bytes = body, nil, nil
+    end
     return reply
 end
 
@@ -50,8 +64,9 @@ function bridge.connect(options)
        type(config.token) ~= 'string' or not config.token:match('^[0-9a-f]+$') or #config.token ~= 64 or
        type(config.origin) ~= 'string' or require('lprowse').url.origin(config.origin) ~= config.origin then fail() end
     for key in pairs(config) do
-        if key ~= 'version' and key ~= 'socket' and key ~= 'token' and key ~= 'origin' then fail() end
+        if key ~= 'version' and key ~= 'socket' and key ~= 'token' and key ~= 'origin' and key ~= 'bulk' then fail() end
     end
+    if config.bulk ~= nil and config.bulk ~= 'fifo-v1' then fail() end
     return setmetatable({ config = config, ipc = ipc }, Client)
 end
 
@@ -67,8 +82,9 @@ end
 function Client:finish() return self:request{op='finish'}.ok end
 
 function bridge.load_snapshot(snapshot)
-    if type(snapshot) ~= 'table' or type(snapshot.html) ~= 'string' or #snapshot.html > 4 * 1024 * 1024 or
-       type(snapshot.url) ~= 'string' then fail() end
+    if type(snapshot) ~= 'table' or type(snapshot.html) ~= 'string' or #snapshot.html > 16 * 1024 * 1024 or
+        type(snapshot.url) ~= 'string' then fail() end
+    if not utf8.len(snapshot.html) or snapshot.html:find('\0', 1, true) then fail() end
     require('lprowse').url.origin(snapshot.url)
     local browser = require('lprowse').browser.new{javascript=false, follow_redirects=false, observe_network=false}
     local active = browser:create_session()
@@ -95,16 +111,33 @@ function bridge.plugin(name)
     fail()
 end
 
+function bridge.challenge(snapshot)
+    local ok, handler = pcall(bridge.plugin, 'captcha_handler')
+    if not ok then return false end
+    local valid, result = pcall(handler.inspect_response, 'GET', snapshot.url, {
+        status=200, headers={}, body=snapshot.html, final_url=snapshot.url
+    })
+    return valid and type(result) == 'table' and result.activated == true
+end
+
 -- Discovery is document/script-based. Qutebrowser userscripts supply neither
 -- historical requests nor response bodies. GET response probing is disabled.
 function bridge.scrape(active, options)
     options = options or {}
-    return bridge.plugin('scrape_endpoints').scrape(active, {
+    local plugin = bridge.plugin('scrape_endpoints')
+    local spec = plugin.normalize_spec{
         follow_links=false, resolve_chain=false, spa_probe=false,
         observe_network=false, inspect_scripts=true, redact_secrets=true,
         include_provenance=true, scrape_all_paths=true,
         api_only=options.api_only ~= false, require_api_pattern=options.api_only ~= false
-    })
+    }
+    if options.include_noise ~= true then
+        for _, path in ipairs({'/js_errors', '/telemetry', '/analytics', '/tracking', '/beacon',
+            '/collect', '/metrics', '/cdn-cgi/', '/__challenge'}) do
+            spec.garbage_patterns[#spec.garbage_patterns + 1] = path
+        end
+    end
+    return plugin.scrape(active, spec)
 end
 
 function bridge.enrich(active, endpoints, options)

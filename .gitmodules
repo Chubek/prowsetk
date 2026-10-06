@@ -162,3 +162,7 @@
 [submodule "third_party/liboauthpp"]
 	path = third_party/liboauthpp
 	url = https://github.com/sirikata/liboauthcpp.git
+
+[submodule "third_party/replxx"]
+	path = third_party/replxx
+	url = https://github.com/AmokHuginnsson/replxx.git

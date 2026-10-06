@@ -38,19 +38,7 @@ local function challenge_triage(current)
 end
 
 local function evidence(active, args)
-    local doc = active:document()
-    local nodes
-    if args.success_xpath and args.success_xpath ~= '' then
-        nodes = doc:xpath(args.success_xpath)
-    else
-        nodes = doc:query_selector_all(args.success_selector or
-            "a[href*='logout'], [data-testid='account-menu']")
-    end
-    for _, node in ipairs(nodes) do
-        local tag = node:tag_name():lower()
-        if tag ~= 'script' and tag ~= 'style' and tag ~= 'meta' then return true end
-    end
-    return false
+    return bridge.login_evidence(active, args)
 end
 
 local function actions_for(args)
@@ -69,7 +57,7 @@ local function actions_for(args)
     return policy.actions
 end
 
-local function run(args)
+local function run(args, diagnostic)
     args = args or {}
     local offline = args.html ~= nil
     if not offline and args.assistant_browser_enabled == false then fail() end
@@ -79,16 +67,21 @@ local function run(args)
     local wait_ms = args.wait_ms or 30000
     if type(wait_ms) ~= 'number' or wait_ms % 1 ~= 0 or wait_ms < 1 or wait_ms > 30000 then fail() end
     local client, snap, active, browser
-    local ok = pcall(function()
+    local ok, failure = pcall(function()
+        diagnostic.stage = 'IPC module loading'
+        bridge.ipc(args.ipc_module)
         if offline then
             snap = {url=url, html=args.html, revision=0, purpose='offline'}
         else
+            diagnostic.stage = 'bridge connection'
             local candidate = bridge.connect{descriptor=args.bridge, ipc_module=args.ipc_module}
             if candidate.config.origin ~= 'https://admin.booking.com' then fail() end
             client = candidate
+            diagnostic.stage = 'snapshot receipt'
             snap = client:snapshot(0, wait_ms)
             if not snap then fail() end
         end
+        diagnostic.stage = 'snapshot parsing'
         active, browser = bridge.load_snapshot(snap)
         -- Retain the Lua-owned Browser for the whole managed Session lifetime.
         local seeds, seen, snapshots, actions, confirmed = {}, {}, 0, 0, 0
@@ -96,11 +89,15 @@ local function run(args)
         local function collect(current)
             challenge_triage(current)
             if not offline then
+                diagnostic.stage = 'snapshot origin check'
                 if prowse.url.origin(current.url) ~= 'https://admin.booking.com' then fail() end
+                diagnostic.stage = 'login beacon validation'
                 login_evidence = evidence(active, args)
+                diagnostic.stage = 'login evidence'
                 if not login_evidence then fail() end
             end
             snapshots = snapshots + 1
+            diagnostic.stage = 'endpoint extraction'
             local result = bridge.scrape(active, {api_only=args.api_only})
             for _, ep in ipairs(result.endpoints) do
                 local valid, ep_origin = pcall(prowse.url.origin, ep.url)
@@ -113,15 +110,21 @@ local function run(args)
         end
         collect(snap)
         if not offline then
+            diagnostic.stage = 'action policy loading'
             for _, action in ipairs(actions_for(args)) do
+                diagnostic.actions_started = true
+                diagnostic.stage = 'browser action'
                 snap = client:act(action, wait_ms)
                 actions = actions + 1
+                diagnostic.stage = 'snapshot parsing'
                 active:load_html(snap.html, snap.url)
+                diagnostic.stage = 'browser action'
                 if snap.action_status == 'error' then fail() end
                 if snap.action_status == 'ok' then confirmed = confirmed + 1 end
                 collect(snap)
             end
         end
+        diagnostic.stage = 'schema enrichment'
         local enriched = bridge.enrich(active, seeds, {
             api_only=args.api_only, collection_name='Discovered API (Booking.com Admin / Qutebrowser)'
         })
@@ -137,9 +140,11 @@ local function run(args)
             "  source: 'Assistant DOM and inline scripts; heuristic discovery.'\n" ..
             "  response-probes: false\n"
         if args.output and args.output ~= '' then
+            diagnostic.stage = 'OpenAPI export'
             bridge.write(args.output, enriched.openapi_yaml .. metadata, args.ipc_module)
         end
         if args.postman and args.postman ~= '' then
+            diagnostic.stage = 'Postman export'
             local postman = bridge.json.decode(enriched.postman_json)
             postman['x-prowsetk-qutebrowser'] = {
                 used=not offline, offline=offline, complete=false,
@@ -152,15 +157,39 @@ local function run(args)
     end)
     if active then pcall(function() active:close() end) end
     browser = nil
-    if client then pcall(function() client:finish() end) end
-    if not ok then fail() end
+    diagnostic.retryable = not ok and diagnostic.stage == 'login evidence' and
+        not diagnostic.actions_started and args.retry_login_evidence == true
+    if client and not diagnostic.retryable then pcall(function() client:finish() end) end
+    if not ok then error(failure, 0) end
     return 0
 end
 
+local failure_hints = {
+    ['configuration'] = 'check the URL, assistant-browser setting and wait_ms bounds',
+    ['IPC module loading'] = 'lquteipc is unavailable; build the selected preset or pass --ipc-module with its lquteipc.so',
+    ['bridge connection'] = 'cannot read the private descriptor or connect to its broker; keep qute-assist running',
+    ['snapshot receipt'] = 'the broker did not return a snapshot; resend it while qute-assist is running',
+    ['snapshot parsing'] = 'captured HTML could not be parsed; check the 16 MiB snapshot and Flatworm node/depth limits',
+    ['snapshot origin check'] = 'the captured tab must be on https://admin.booking.com',
+    ['login beacon validation'] = 'invalid login beacon; check --success-selector or --success-xpath syntax',
+    ['login evidence'] = 'snapshot received, but no account/logout control matched; if already logged in, open the account menu and resend, or set --success-selector / --success-xpath to an authenticated-only DOM control',
+    ['action policy loading'] = 'cannot read or validate the actions file',
+    ['browser action'] = 'the assistant action failed or did not return a fresh snapshot',
+    ['endpoint extraction'] = 'endpoint discovery failed; check the scrape-endpoints Lua helper and extraction bounds',
+    ['schema enrichment'] = 'schema enrichment failed; check the schema-grabber Lua helper and snapshot bounds',
+    ['OpenAPI export'] = 'cannot write OpenAPI output; check the output parent directory and permissions',
+    ['Postman export'] = 'cannot serialize or write Postman output; check the output parent directory and permissions'
+}
+
 function main(args)
-    local ok, code = pcall(run, args)
+    local diagnostic = {stage='configuration'}
+    local ok, code = pcall(run, args, diagnostic)
     if not ok then
-        io.stderr:write('booking-admin-api: operation failed\n')
+        -- Raw Lua/selector/page/IPC exceptions may contain credentials. Only
+        -- trusted stage names and fixed hints cross the diagnostic boundary.
+        io.stderr:write('booking-admin-api: ' .. diagnostic.stage .. ' failed: ' ..
+            (failure_hints[diagnostic.stage] or 'operation failed') .. '\n')
+        if diagnostic.retryable then return 3 end
         return 1
     end
     return code

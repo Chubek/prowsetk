@@ -60,7 +60,7 @@ if not ok then error('Snapshot extraction failed', 0) end
 
 `load_snapshot` returns a managed Session and its owning Browser. Keep the
 Browser alive until the Session is closed. The helper requires `html` and
-`url`, enforces the 4-MiB HTML bound, and closes its Session if HTML parsing
+`url`, enforces the 16-MiB HTML bound, and closes its Session if HTML parsing
 fails. Flatworm's own node/depth limits also apply.
 
 The created Browser disables JavaScript, redirect following, and network
@@ -116,7 +116,7 @@ Chapter 33, to publish a later revision.
 | `client:act(action, wait_ms?)` | Fresh action capture; details in Chapter 33 |
 | `client:finish()` | Close the broker conversation; returns true on success |
 | `qute.load_snapshot{html, url}` | New JavaScript-disabled Session and owning Browser |
-| `qute.scrape(session, {api_only?})` | Real scrape-endpoints Lua result |
+| `qute.scrape(session, {api_only?, include_noise?})` | Real scrape-endpoints Lua result; telemetry/error-reporting noise omitted by default |
 | `qute.enrich(session, endpoints, {api_only?, collection_name?})` | Real schema-grabber Lua result |
 | `qute.write(path, bytes, ipc_module?)` | Atomic owner-only output |
 | `qute.ipc(path?)` | Loaded native IPC/file-I/O module |
