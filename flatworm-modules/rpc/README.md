@@ -2,7 +2,7 @@
 
 `rpc` is the first shipped native Flatworm module. It implements bounded
 [JSON-RPC 2.0](https://www.jsonrpc.org/specification) protocol helpers through
-`Flatwork-Module.h` ABI version 1. Its module version is `1.0.0`.
+`Flatworm-Module.h` ABI version 1. Its module version is `1.0.0`.
 Functions return ordinary page-owned JavaScript objects/arrays. The export
 namespace is frozen.
 

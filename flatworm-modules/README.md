@@ -1,7 +1,7 @@
 # Native Flatworm modules
 
 These shipped modules extend Flatworm's page JavaScript through the independent
-version-1 ABI in [`include/Flatwork-Module.h`](../include/Flatwork-Module.h).
+version-1 ABI in [`include/Flatworm-Module.h`](../include/Flatworm-Module.h).
 The C++ host explicitly selects libraries using `Browser::modules()` or
 `JavaScriptRuntime::install_module`.
 
