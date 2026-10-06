@@ -34,6 +34,7 @@ set(PROWSETK_CORE_SOURCES
     core/render/text_metrics.cpp
     core/render/style_resolver.cpp
     core/render/box_layout.cpp
+    core/render/flex_layout.cpp
     core/render/paint.cpp
     core/render/image.cpp
     core/render/hit_test.cpp

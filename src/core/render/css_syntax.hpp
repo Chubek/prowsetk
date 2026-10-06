@@ -43,13 +43,13 @@ struct ValueList {
 
 // A box shorthand: one to four lengths in CSS order (top, right, bottom, left).
 struct BoxValues {
-    // std::nullopt means the component was `auto`.
+    // std::nullopt means absent; Length::is_auto distinguishes explicit auto.
     std::optional<Length> top;
     std::optional<Length> right;
     std::optional<Length> bottom;
     std::optional<Length> left;
 
-    // True when the component was absent rather than present-but-auto.
+    // True when the component was present in the declaration.
     bool present[4] = {false, false, false, false};
 
     std::optional<Length> at(std::size_t index) const;
@@ -64,6 +64,14 @@ std::optional<Display> parse_display(std::string_view value);
 std::optional<Position> parse_position(std::string_view value);
 std::optional<WhiteSpace> parse_white_space(std::string_view value);
 std::optional<TextAlign> parse_text_align(std::string_view value);
+std::optional<AlignItems> parse_align_items(std::string_view value);
+std::optional<JustifyContent> parse_justify_content(std::string_view value);
+struct FlexValues {
+    double grow = 1;
+    double shrink = 1;
+    Length basis = Length::px(0);
+};
+std::optional<FlexValues> parse_flex(std::string_view value);
 std::optional<Overflow> parse_overflow(std::string_view value);
 std::optional<Visibility> parse_visibility(std::string_view value);
 std::optional<VerticalAlignHint> parse_vertical_align(std::string_view value);

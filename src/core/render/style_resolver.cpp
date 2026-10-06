@@ -429,6 +429,35 @@ void expand_shorthands(const DeclaredMap& in, DeclaredMap& out) {
     expand_border_shorthands(in, out);
     expand_font(in, out);
     expand_list_style(in, out);
+    const auto record = [&](const Declared& source, const char* name, std::string value) {
+        Declared part = source;
+        part.value = std::move(value);
+        const auto existing = out.find(name);
+        if (existing == out.end() || part.beats(existing->second)) out[name] = std::move(part);
+    };
+    if (const auto it = in.find("flex"); it != in.end()) {
+        if (const auto parsed = parse_flex(it->second.value)) {
+            record(it->second, "flex-grow", std::to_string(parsed->grow));
+            record(it->second, "flex-shrink", std::to_string(parsed->shrink));
+            record(it->second, "flex-basis", length_to_text(parsed->basis));
+        }
+    }
+    if (const auto it = in.find("gap"); it != in.end()) {
+        const auto tokens = split_top_level(it->second.value, true);
+        if (!tokens.empty() && tokens.size() <= 2) {
+            const auto row = parse_length(tokens[0]);
+            const auto column = parse_length(tokens.back());
+            if (row && column && !row->is_auto && !column->is_auto && row->value >= 0 && column->value >= 0) {
+                record(it->second, "row-gap", tokens[0]);
+                record(it->second, "column-gap", tokens.back());
+            }
+        }
+    }
+    // Solid-color backgrounds are the supported shorthand slice. Do not turn
+    // gradients or URL layers into a guessed color.
+    if (const auto it = in.find("background"); it != in.end()) {
+        if (parse_color(it->second.value)) record(it->second, "background-color", it->second.value);
+    }
 }
 
 // --- inherited properties ----------------------------------------------------
@@ -546,6 +575,18 @@ ComputedStyle compute(const Element& element, const DeclaredMap& declared,
     style.min_height = Length::auto_length();
     style.max_width = Length::auto_length();
     style.max_height = Length::auto_length();
+    style.box_sizing = BoxSizing::ContentBox;
+    style.margin_left_auto = style.margin_right_auto = false;
+    style.flex_direction = FlexDirection::Row;
+    style.flex_wrap = FlexWrap::NoWrap;
+    style.justify_content = JustifyContent::Start;
+    style.align_items = AlignItems::Stretch;
+    style.align_self.reset();
+    style.flex_grow = 0;
+    style.flex_shrink = 1;
+    style.flex_basis = Length::auto_length();
+    style.row_gap = style.column_gap = Length::px(0);
+    style.order = 0;
     style.margin = Insets{};
     style.padding = Insets{};
     for (double& width : style.border_width) width = 0.0;
@@ -593,6 +634,37 @@ ComputedStyle compute(const Element& element, const DeclaredMap& declared,
     }
     if (const auto* value = get("position")) {
         if (const auto parsed = parse_position(value->value)) style.position = *parsed;
+    }
+    if (const auto* value = get("box-sizing")) {
+        if (iequals(value->value, "border-box")) style.box_sizing = BoxSizing::BorderBox;
+    }
+    if (const auto* value = get("flex-direction")) {
+        if (iequals(value->value, "row-reverse")) style.flex_direction = FlexDirection::RowReverse;
+        // Unsupported column layouts use normal block flow, rather than
+        // silently laying a requested column out horizontally.
+        if ((iequals(value->value, "column") || iequals(value->value, "column-reverse")) &&
+            style.display == Display::Flex) style.display = Display::Block;
+    }
+    if (const auto* value = get("flex-wrap")) {
+        if (iequals(value->value, "wrap")) style.flex_wrap = FlexWrap::Wrap;
+    }
+    if (const auto* value = get("justify-content")) {
+        if (const auto parsed = parse_justify_content(value->value)) style.justify_content = *parsed;
+    }
+    if (const auto* value = get("align-items")) {
+        if (const auto parsed = parse_align_items(value->value)) style.align_items = *parsed;
+    }
+    if (const auto* value = get("align-self")) style.align_self = parse_align_items(value->value);
+    for (const auto& [name, target] : {std::pair{"flex-grow", &style.flex_grow},
+                                     std::pair{"flex-shrink", &style.flex_shrink}}) {
+        if (const auto* value = get(name)) {
+            if (const auto parsed = parse_number(value->value); parsed && *parsed >= 0 && *parsed <= 1.0e6)
+                *target = *parsed;
+        }
+    }
+    if (const auto* value = get("order")) {
+        if (const auto parsed = parse_number(value->value); parsed && std::abs(*parsed) <= 1000000 && std::floor(*parsed) == *parsed)
+            style.order = static_cast<int>(*parsed);
     }
     for (const char* property : {"left", "top"}) {
         const auto* value = get(property);
@@ -677,11 +749,13 @@ ComputedStyle compute(const Element& element, const DeclaredMap& declared,
         {"width", &style.width},         {"height", &style.height},
         {"min-width", &style.min_width}, {"min-height", &style.min_height},
         {"max-width", &style.max_width}, {"max-height", &style.max_height},
+        {"flex-basis", &style.flex_basis}, {"row-gap", &style.row_gap},
+        {"column-gap", &style.column_gap},
     };
     for (const auto& slot : sizes) {
         const auto* value = get(slot.property);
         if (value == nullptr) continue;
-        if (const auto length = parse_length(value->value)) *slot.target = *length;
+        if (const auto length = parse_length(value->value); length && length->value >= 0) *slot.target = *length;
     }
 
     // Box model. Percentages here resolve against the viewport width, which is
@@ -705,7 +779,9 @@ ComputedStyle compute(const Element& element, const DeclaredMap& declared,
     }
     style.margin = to_insets(margins, font_size, context.root_font_size,
                              context.viewport_width, context.viewport_height,
-                             context.viewport_width, false);
+                              context.viewport_width, false);
+    style.margin_left_auto = margins.left && margins.left->is_auto;
+    style.margin_right_auto = margins.right && margins.right->is_auto;
     style.padding = to_insets(padding, font_size, context.root_font_size,
                               context.viewport_width, context.viewport_height,
                               context.viewport_width, true);

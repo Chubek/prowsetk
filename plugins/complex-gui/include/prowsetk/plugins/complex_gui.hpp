@@ -1,6 +1,7 @@
 #ifndef PROWSETK_PLUGINS_COMPLEX_GUI_HPP
 #define PROWSETK_PLUGINS_COMPLEX_GUI_HPP
 #include <prowsetk/browser.hpp>
+#include <prowsetk/gui_platform.hpp>
 #include <prowsetk/render.hpp>
 #include <cstdint>
 #include <memory>
@@ -9,6 +10,8 @@
 #include <vector>
 
 namespace prowsetk::complex_gui {
+
+bool display_available() noexcept;
 struct Target {
     std::uint64_t revision = 0;
     std::size_t item = 0;

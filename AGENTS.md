@@ -973,6 +973,18 @@ browser table layout, stacking contexts or text shaping. README's explicit
 display-list section is the supported contract. Keep unit and Session integration
 coverage under tests with labels and finite timeouts.
 
+Horizontal flex sizing lives in `src/core/render/flex_layout.cpp` as a value-only
+constraint/distribution algorithm; DOM item collection and fragment placement
+remain in `box_layout.cpp`. Preserve row/reverse-row wrapping, weighted grow/shrink
+with min/max freezing, order-modified paint order, gaps, horizontal auto margins,
+cross-axis alignment, border-box sizing and whole-line text alignment. Translate
+local clips with their fragments, then apply ancestor clips; never translate an
+ancestor clip with a child. Layout each subtree once and bound aggregate flex
+work/intrinsic text measurement. Stretch must not resize descendant images or
+controls. Keep README's explicit approximate auto-basis, zero auto minimum,
+stretch and unsupported-column/inline-flex contracts, along with headless geometry,
+hit-testing, redaction and Session/rerender tests. No new dependency is needed.
+
 ### Implemented PDQL and automation tools
 
 `tools/crawler` is the POSIX Lua/TOML crawler host. Keep crawl scheduling in

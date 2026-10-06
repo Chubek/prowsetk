@@ -1,0 +1,24 @@
+package(name: "prowsetk", version: "0.1.0", license: "NOASSERTION")
+deps {
+  dep "_scraped" from: git("https://github.com/Gaurav-Gosain/scraped"), rev: "5a26fcdb6bf2ee4e3268892b54ca606625689308"
+  dep "cmake" from: git("https://github.com/Kitware/CMake"), rev: "ffd907df649793fa8ea2030c125e49e8ce4709ee"
+  dep "devtools" from: git("https://github.com/nuxt/devtools"), rev: "03ea9932024d308c4d2101959caee3812e9f59af"
+  dep "docs" from: git("https://github.com/inkonchain/docs"), rev: "93261617a5c4ed477e1956bc828bf3da69bdf086"
+  dep "drivers" from: git("https://github.com/tinygo-org/drivers"), rev: "b395827eb9ebcbce8a0f099bde0f23f5347c09ca"
+  dep "examples" from: git("https://github.com/pytorch/examples"), rev: "acc295dc7b90714f1bf47f06004fc19a7fe235c4"
+  dep "interface" from: git("https://github.com/Uniswap/interface"), rev: "95fccc9b9b992f5af26c2e723cf56347d3503e6a"
+}
+# Unresolved library: build
+# Unresolved library: flatworm-modules
+# Unresolved library: include
+# Unresolved library: lua
+# Unresolved library: man
+# Unresolved library: manual
+# Unresolved library: plugins
+# Unresolved library: resources
+# Unresolved library: scripts
+# Unresolved library: src
+# Unresolved library: tests
+# Unresolved library: third_party
+# Unresolved library: tools
+# Unresolved library: wit

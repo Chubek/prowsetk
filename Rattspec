@@ -1,0 +1,4 @@
+project(name: "prowsetk", version: "0.1.0", kind: "single")
+import "fs"
+import "target"
+target.executable(name: "prowsetk", language: "cxx", sources: fs.glob("**/*.cc") + fs.glob("**/*.cpp"))

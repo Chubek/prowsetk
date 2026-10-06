@@ -4,6 +4,9 @@ target_include_directories(prowsetk_basic_gui_model PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 target_link_libraries(prowsetk_basic_gui_model PUBLIC ProwseTk::core)
+if(TARGET ProwseTk::gui_platform)
+    target_link_libraries(prowsetk_basic_gui_model PUBLIC ProwseTk::gui_platform)
+endif()
 set_target_properties(prowsetk_basic_gui_model PROPERTIES EXPORT_NAME basic_gui_model)
 if(PROWSETK_BUILD_BASIC_GUI)
     target_compile_definitions(prowsetk_basic_gui_model PUBLIC PROWSETK_HAVE_BASIC_GUI=1)

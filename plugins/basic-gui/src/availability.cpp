@@ -15,4 +15,5 @@ bool available() noexcept {
     return false;
 #endif
 }
+bool display_available() noexcept { return available() && gui::x11_display_available(); }
 }  // namespace prowsetk::basic_gui

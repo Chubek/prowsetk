@@ -1,13 +1,33 @@
 <!doctype html><html><head><title>Display-list browser demo</title>
-<style>body{margin:24px;color:#203040}h1{color:#205ab0}section{background-color:#eef4ff;padding:18px;margin-bottom:20px;border:1px solid #8ba4cc}button{padding:8px}input{width:240px}p{line-height:24px}</style>
-</head><body><h1>Flatworm display-list browser</h1>
+<style>
+body{margin:24px;color:#203040;background:#f5f7fc}
+main{max-width:960px;margin:0 auto}
+h1{color:#205ab0;text-align:center}
+nav{display:flex;gap:12px;align-items:center;padding:16px;background:#203040;color:white;margin-bottom:20px}
+nav .brand{flex:1;font-weight:bold}
+nav a{color:white}
+.cards{display:flex;flex-wrap:wrap;gap:16px;margin-bottom:20px}
+.card{flex:1 1 240px;box-sizing:border-box;background:white;padding:18px;border:1px solid #8ba4cc;margin:0}
+.card h2{text-align:center;color:#205ab0}
+section{background:#eef4ff;padding:18px;margin-bottom:20px;border:1px solid #8ba4cc}
+button{padding:8px}input{width:240px}p{line-height:24px}
+</style>
+</head><body><main>
+<nav><span class="brand">ProwseTk</span><a href="#demo">Interactions</a><a href="#end">Details</a></nav>
+<h1>Flatworm display-list browser</h1>
+<div class="cards">
+  <section class="card"><h2>Flexible layout</h2><p>These cards share available width and wrap onto new rows. Resize the window to try it.</p></section>
+  <section class="card"><h2>Aligned content</h2><p>The page is centered with automatic margins. Card widths include their padding and borders.</p></section>
+  <section class="card"><h2>Headless core</h2><p>Geometry and hit testing come from the core engine. The desktop adapter paints its display list.</p></section>
+</div>
+<div id="demo"></div>
 <section><p>The page is painted from the core renderer's display list.</p>
 <button id="increment">Increment</button><p id="count">Count: 0</p></section>
 <section><p>Click the input, enter a replacement in the bottom editor, and Apply.</p>
 <input id="name" placeholder="Your name"><button id="greet">Greet</button><p id="greeting">Ready</p></section>
 <details><summary>Open details</summary><p>This disclosure is handled by Flatworm.</p></details>
 <div style="height:700px;background-color:#f4f4f4"><p>Scroll down to the final section.</p></div>
-<section><h2>End of the page</h2><a href="https://example.com/">Example link (offline mode blocks networking)</a></section>
+<section id="end"><h2>End of the page</h2><a href="https://example.com/">Example link (offline mode blocks networking)</a></section>
 <script>let count=0;document.querySelector('#increment').onclick=()=>{document.querySelector('#count').textContent='Count: '+(++count)};
 document.querySelector('#greet').onclick=()=>{document.querySelector('#greeting').textContent='Hello '+document.querySelector('#name').value};</script>
-</body></html>
+</main></body></html>

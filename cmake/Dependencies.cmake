@@ -44,6 +44,22 @@ endif()
 # FLTK is confined to the opt-in basic-gui and complex-gui adapters. Controllers and the
 # core remain usable on machines without desktop development packages.
 if(PROWSETK_BUILD_BASIC_GUI OR PROWSETK_BUILD_COMPLEX_GUI)
+    find_package(X11 QUIET)
+    if(NOT X11_FOUND)
+        message(FATAL_ERROR "Graphical adapters require libX11 (X11 development headers and library)")
+    endif()
+    add_library(prowsetk_gui_platform STATIC
+        "${PROJECT_SOURCE_DIR}/src/gui/x11_platform.cpp")
+    target_compile_features(prowsetk_gui_platform PUBLIC cxx_std_20)
+    target_include_directories(prowsetk_gui_platform PUBLIC
+        "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+    target_compile_definitions(prowsetk_gui_platform PRIVATE PROWSETK_GUI_HAVE_X11=1)
+    target_link_libraries(prowsetk_gui_platform PUBLIC X11::X11)
+    add_library(ProwseTk::gui_platform ALIAS prowsetk_gui_platform)
+    install(TARGETS prowsetk_gui_platform EXPORT ProwseTkTargets
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+
     find_package(FLTK CONFIG QUIET)
     if(NOT TARGET fltk::fltk)
         if(NOT EXISTS "${PROJECT_SOURCE_DIR}/third_party/fltk/CMakeLists.txt")

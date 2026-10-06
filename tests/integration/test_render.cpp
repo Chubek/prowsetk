@@ -34,3 +34,42 @@ TEST(RenderIntegration, HitTargetRunsSessionScriptAndRefreshesGeometry) {
     }
     EXPECT_TRUE(found);
 }
+
+TEST(RenderIntegration, ResponsiveFlexSnapshotHitTestingAndScriptMutation) {
+    if (make_javascript_runtime()->name() == "null") GTEST_SKIP();
+    Browser browser;
+    auto session = browser.create_session();
+    session->load_html(R"(<style>
+      #cards { display:flex; flex-wrap:wrap; gap:12px; }
+      button { box-sizing:border-box; flex:0 0 140px; height:40px; }
+    </style><div id='cards'><button id='first'>First</button><button id='second'>Second</button></div>
+    <script>document.querySelector('#second').onclick=()=>{
+      document.querySelector('#second').setAttribute('style','order:-1');
+    };</script>)", "https://app.test/");
+    const auto find = [](const RenderedPage& page, std::string_view id) -> const PaintItem* {
+        for (const auto& p : page.paint.items)
+            if (p.kind == PaintKind::Control && p.element->id() == id) return &p;
+        return nullptr;
+    };
+    RenderOptions options;
+    options.viewport_width = 320;
+    auto page = render_document(*session->document(), options);
+    auto first = find(page, "first"), second = find(page, "second");
+    ASSERT_NE(first, nullptr); ASSERT_NE(second, nullptr);
+    EXPECT_DOUBLE_EQ(first->rect.y, second->rect.y);
+    EXPECT_GT(second->rect.x, first->rect.x);
+    options.viewport_width = 200;
+    page = render_document(*session->document(), options);
+    first = find(page, "first"); second = find(page, "second");
+    ASSERT_NE(first, nullptr); ASSERT_NE(second, nullptr);
+    EXPECT_GT(second->rect.y, first->rect.bottom());
+    const auto hit = hit_test(page.paint, second->rect.x + 2, second->rect.y + 2);
+    ASSERT_NE(hit.interactive, nullptr);
+    EXPECT_EQ(hit.interactive->id(), "second");
+    ASSERT_TRUE(hit.interactive->click(*session));
+    page = render_document(*session->document(), options);
+    first = find(page, "first"); second = find(page, "second");
+    ASSERT_NE(first, nullptr); ASSERT_NE(second, nullptr);
+    EXPECT_LT(second->rect.y, first->rect.y);
+    EXPECT_TRUE(session->page_script_requests().empty());
+}

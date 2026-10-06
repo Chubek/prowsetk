@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <prowsetk/browser.hpp>
+#include <prowsetk/gui_platform.hpp>
 
 namespace prowsetk::basic_gui {
 
@@ -152,6 +153,8 @@ private:
 // a consumer of `ProwseTk::basic_gui_model` can query it without FLTK headers
 // or libraries.
 bool available() noexcept;
+// True when the optional native X11 display can be opened by the adapter.
+bool display_available() noexcept;
 int run(Session& session);
 
 }  // namespace prowsetk::basic_gui

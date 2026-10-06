@@ -26,6 +26,13 @@ This API has no desktop dependency and no implicit network loading. Its snapshot
 must be refreshed after DOM changes. It is separate from the GUI's sanitized
 ProwseEvent preview and from page-JavaScript geometry support.
 
+The core also lays out horizontal flex rows (`display:flex`) with wrapping, gaps,
+weighted grow/shrink, min/max constraints, ordering and main/cross-axis alignment.
+Border-box sizing, automatic horizontal margins and left/center/right text alignment
+support centered pages and responsive cards. These features require no additional
+library. See `tools/prowse-gui/example.html` for a runnable offline example, and the
+core README for the auto-size approximations and unsupported flex features.
+
 The optional [basic-gui](../plugins/basic-gui/README.md) plugin supplies an FLTK
 desktop inspector. `cmake --preset gui` enables its graphical adapter;
 `tools/launch-gui.sh --file plugins/basic-gui/example.html` opens the offline

@@ -93,7 +93,7 @@ WebPlatform default_web_platform() {
                      "no pixel rendering");
     platform.declare("WebGL", ImplementationClass::Unsupported);
     platform.declare("CSS layout", ImplementationClass::PartiallyImplemented,
-                     "explicit C++ render_document normal-flow display lists; no page-JS geometry, flex/grid, floats or stacking contexts");
+                     "explicit C++ render_document block/inline and wrapping horizontal flex display lists; no page-JS geometry, grid, floats or stacking contexts");
     return platform;
 }
 

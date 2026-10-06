@@ -4,6 +4,7 @@
 #include <algorithm>
 
 namespace prowsetk::complex_gui {
+bool display_available() noexcept { return gui::x11_display_available(); }
 namespace {
 constexpr std::size_t html_budget = 16u * 1024u * 1024u;
 struct Operation {

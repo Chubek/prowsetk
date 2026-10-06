@@ -3,6 +3,9 @@ target_include_directories(prowsetk_complex_gui_model PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 target_link_libraries(prowsetk_complex_gui_model PUBLIC ProwseTk::core)
+if(TARGET ProwseTk::gui_platform)
+    target_link_libraries(prowsetk_complex_gui_model PUBLIC ProwseTk::gui_platform)
+endif()
 set_target_properties(prowsetk_complex_gui_model PROPERTIES EXPORT_NAME complex_gui_model)
 add_library(ProwseTk::complex_gui_model ALIAS prowsetk_complex_gui_model)
 prowsetk_install_library(prowsetk_complex_gui_model)

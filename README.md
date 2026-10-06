@@ -265,16 +265,45 @@ auto page = prowsetk::render_document(*document, options);
 auto hit = prowsetk::hit_test(page.paint, 20, 40);
 ```
 
-The supported subset is normal block/inline flow, atomic inline boxes, explicit
-width/height and min/max sizes, margins/padding/borders, relative left/top offsets,
-text wrapping, visibility, ancestor clipping, list markers, and form-control
-records. The cascade reads embedded styles and inline declarations, with
+The supported subset is normal block/inline flow, atomic inline boxes, horizontal
+flex rows, explicit width/height and min/max sizes, content-box/border-box sizing,
+automatic horizontal margins, margins/padding/borders, relative left/top offsets,
+text wrapping and left/center/right line alignment, visibility, ancestor clipping,
+list markers, and form-control records. Solid-color `background` shorthands are
+supported alongside `background-color`. The cascade reads embedded styles and inline declarations, with
 importance, specificity, source order, and inherited text properties. External
 stylesheets are not fetched. Unrecognized selectors and properties are ignored.
-Table boxes currently use block-flow fallback; flex/grid, floats, absolute
+
+`display:flex` supports `row`/`row-reverse`, `flex-wrap:wrap`, `gap`/`row-gap`/
+`column-gap`, `flex`/`flex-grow`/`flex-shrink`/`flex-basis`, min/max width constraints,
+`order`, `justify-content` (start/end/center/space-between/space-around/space-evenly),
+and `align-items`/`align-self` (start/end/center/stretch). Items shrink by weighted
+basis and redistribute remaining space when size constraints are reached. Whitespace-only
+text is excluded; other direct text becomes an anonymous item. Nested rows use the
+same layout and paint order, including local clips and hit testing. Wrapping reacts
+to the supplied viewport without a desktop dependency. For example:
+
+```html
+<style>
+  main { max-width: 960px; margin: 0 auto; }
+  .cards { display: flex; flex-wrap: wrap; gap: 16px; }
+  .card { flex: 1 1 240px; box-sizing: border-box; padding: 20px;
+          background: #eef4ff; border: 1px solid #8ba4cc; }
+</style>
+<main><div class="cards"><section class="card">First card</section>
+<section class="card">Second card</section></div></main>
+```
+
+This is a bounded horizontal flex subset: auto basis approximates subtree text
+advances rather than intrinsic browser sizing, `min-width:auto` is zero, and
+stretch adjusts the item's outer box without relaying out descendants against its
+new height. Gaps resolve against container width. Flex columns and inline-flex
+use block-flow fallback; wrap-reverse, baseline alignment, align-content, flex-flow,
+vertical auto margins and writing modes are unsupported. Table boxes also use
+block-flow fallback; grid, floats, absolute
 positioning, stacking contexts, text shaping, full inline box decoration, and
 browser-conformant table layout are unsupported. Percentage margins/padding use
-the viewport width. The default measurer approximates UTF-8 advances; consumers
+the viewport width. Text justification falls back to start alignment. The default measurer approximates UTF-8 advances; consumers
 can supply a `TextMeasurer`. This API does not change page-JavaScript geometry or
 canvas support, or replace the GUI's existing sanitized ProwseEvent preview.
 
@@ -288,7 +317,8 @@ so display lists are local presentation objects, not sanitized exports.
 
 Bounds include 40,000 elements, 256 node levels, 16 MiB of text/attributes, 4 MiB of
 stylesheet text, 40,000 rules/declarations, two million cascade candidate checks,
-400,000 paint items, and an 8 MiB/256-entry image cache. Invalid render dimensions
+400,000 paint items, two million flex sizing visits, 16 MiB of aggregate flex
+intrinsic text measurement, and an 8 MiB/256-entry image cache. Invalid render dimensions
 throw `InvalidArgument`; document/style/line limits throw `ResourceLimit`.
 Paint/image truncation sets `RenderedPage::limited`. Loader exceptions propagate.
 No plugin ABI or WIT contract changes are required.
@@ -2604,6 +2634,8 @@ optional components depending on the build configuration.
 Build options disable optional dependencies when their functionality is not
 required. Dependency versions, licensing, build options, and feature mappings are
 documented with the build system.
+The core's horizontal flex layout and box/text alignment use C++20 only; they
+add no dependency or display requirement.
 `PROWSETK_BUILD_QUTE_REPL=ON` builds `ptk-qute-repl` on POSIX when Lua and
 Replxx are available; `OFF` or missing Replxx preserves the core, scripts and
 one-shot bridge. Dependency discovery is in `cmake/Dependencies.cmake`.

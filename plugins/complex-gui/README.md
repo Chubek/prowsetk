@@ -55,11 +55,15 @@ with the renderer's approximate measurer, or supply a borrowed `TextMeasurer`.
   destination boxes fall back to alt text, and over-budget cover scaling is omitted.
 
 The CSS subset is the [core display-list renderer](../../README.md#explicit-headless-display-lists):
-normal flow, with block fallback for tables and no flex/grid, browser stacking
+normal flow and wrapping horizontal flex rows, border-box sizing, automatic horizontal
+margins and left/center/right text alignment. Tables and flex columns use block
+fallback; there is no grid, browser stacking
 contexts, or full inline decoration. Alpha is approximated against white; border
 groove/ridge/double styles use solid strokes. Image boxes use CSS dimensions or
 the core's alt-text-sized fallback. This is a usable small browser, not a claim of
 modern-browser visual compatibility or page-JavaScript layout geometry.
+The offline `tools/prowse-gui/example.html` demonstrates a centered page, aligned
+navigation and flexible cards that wrap when the window narrows.
 
 Navigation and resource fetching are synchronous: the window may pause up to the
 configured Session timeout; cancellation and background browsing are not provided.

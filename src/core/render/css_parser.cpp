@@ -362,6 +362,7 @@ std::optional<Display> parse_display(std::string_view value) {
     if (iequals(value, "block")) return Display::Block;
     if (iequals(value, "inline")) return Display::Inline;
     if (iequals(value, "inline-block")) return Display::InlineBlock;
+    if (iequals(value, "flex")) return Display::Flex;
     if (iequals(value, "list-item")) return Display::ListItem;
     if (iequals(value, "table")) return Display::Table;
     if (iequals(value, "inline-table")) return Display::Table;
@@ -369,11 +370,9 @@ std::optional<Display> parse_display(std::string_view value) {
     if (iequals(value, "inline-table-row")) return Display::TableRow;
     if (iequals(value, "table-cell")) return Display::TableCell;
     if (iequals(value, "inline-table-cell")) return Display::TableCell;
-    // Grid and flex are recognized as display values but not implemented by the
-    // layout subset; reporting them as block keeps content readable instead of
-    // dropping it, and web_platform() states the absence.
+    // Unsupported formatting contexts keep a readable block fallback.
     if (iequals(value, "grid") || iequals(value, "inline-grid") ||
-        iequals(value, "flex") || iequals(value, "inline-flex")) {
+        iequals(value, "inline-flex")) {
         return Display::Block;
     }
     return std::nullopt;
@@ -406,6 +405,45 @@ std::optional<Overflow> parse_overflow(std::string_view value) {
     if (iequals(value, "visible")) return Overflow::Visible;
     if (iequals(value, "hidden")) return Overflow::Hidden;
     return std::nullopt;
+}
+
+std::optional<AlignItems> parse_align_items(std::string_view value) {
+    if (iequals(value, "stretch")) return AlignItems::Stretch;
+    if (iequals(value, "start") || iequals(value, "flex-start")) return AlignItems::Start;
+    if (iequals(value, "end") || iequals(value, "flex-end")) return AlignItems::End;
+    if (iequals(value, "center")) return AlignItems::Center;
+    return std::nullopt;
+}
+
+std::optional<JustifyContent> parse_justify_content(std::string_view value) {
+    if (iequals(value, "start") || iequals(value, "flex-start")) return JustifyContent::Start;
+    if (iequals(value, "end") || iequals(value, "flex-end")) return JustifyContent::End;
+    if (iequals(value, "center")) return JustifyContent::Center;
+    if (iequals(value, "space-between")) return JustifyContent::SpaceBetween;
+    if (iequals(value, "space-around")) return JustifyContent::SpaceAround;
+    if (iequals(value, "space-evenly")) return JustifyContent::SpaceEvenly;
+    return std::nullopt;
+}
+
+std::optional<FlexValues> parse_flex(std::string_view value) {
+    if (iequals(value, "none")) return FlexValues{0, 0, Length::auto_length()};
+    if (iequals(value, "auto")) return FlexValues{1, 1, Length::auto_length()};
+    if (iequals(value, "initial")) return FlexValues{0, 1, Length::auto_length()};
+    const auto tokens = split_top_level(value, true);
+    if (tokens.empty() || tokens.size() > 3) return std::nullopt;
+    FlexValues result;
+    std::size_t numbers = 0;
+    bool basis = false;
+    for (const auto& token : tokens) {
+        if (const auto number = parse_number(token); number && numbers < 2 && !basis) {
+            if (*number < 0 || *number > 1.0e6) return std::nullopt;
+            if (numbers++ == 0) result.grow = *number; else result.shrink = *number;
+        } else if (const auto parsed = parse_length(token); parsed && !basis && parsed->value >= 0) {
+            result.basis = *parsed;
+            basis = true;
+        } else return std::nullopt;
+    }
+    return result;
 }
 
 std::optional<Visibility> parse_visibility(std::string_view value) {

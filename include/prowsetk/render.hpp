@@ -48,12 +48,12 @@ namespace prowsetk {
 // - **Hit testing** (`hit_test.cpp`): maps a document-space point back to the
 //   element a host should interact with, honouring paint order and clipping.
 //
-// Layout support is deliberately a subset: block, inline, inline-block,
+// Layout support is deliberately a subset: block, inline, inline-block, flex rows,
 // list-item and replaced boxes (tables fall back to block flow); static and relative positioning; the
 // margin/padding/border box model; backgrounds, borders, text, list markers,
-// images and form controls. Flex, grid, floats, multi-column, transforms,
+// images and form controls. Flex columns, grid, floats, multi-column, transforms,
 // stacking contexts, and text shaping beyond simple advance measurement are
-// not implemented and are reported as Unsupported.
+// not implemented; see README for the ignored properties and block fallbacks.
 
 // --- Bounds ------------------------------------------------------------------
 // Document, stylesheet and text/line limits throw ResourceLimit. Paint/image
@@ -200,6 +200,7 @@ enum class Display {
     Table,
     TableRow,
     TableCell,
+    Flex,
 };
 
 // A form control the paint stratum draws natively rather than as text.
@@ -216,6 +217,12 @@ enum class ControlKindHint {
 };
 
 enum class Position { Static, Relative };
+
+enum class BoxSizing { ContentBox, BorderBox };
+enum class FlexDirection { Row, RowReverse };
+enum class FlexWrap { NoWrap, Wrap };
+enum class JustifyContent { Start, End, Center, SpaceBetween, SpaceAround, SpaceEvenly };
+enum class AlignItems { Stretch, Start, End, Center };
 
 enum class WhiteSpace { Normal, Pre, NoWrap, PreWrap, PreLine };
 
@@ -255,6 +262,25 @@ struct ComputedStyle {
     Length min_height;
     Length max_width;
     Length max_height;
+
+    BoxSizing box_sizing = BoxSizing::ContentBox;
+    bool margin_left_auto = false;
+    bool margin_right_auto = false;
+
+    // Horizontal flex formatting. Auto basis uses approximate text advances;
+    // min-width:auto is zero. Columns, baseline alignment and align-content
+    // are outside this subset. Gaps resolve against the container width.
+    FlexDirection flex_direction = FlexDirection::Row;
+    FlexWrap flex_wrap = FlexWrap::NoWrap;
+    JustifyContent justify_content = JustifyContent::Start;
+    AlignItems align_items = AlignItems::Stretch;
+    std::optional<AlignItems> align_self;
+    double flex_grow = 0.0;
+    double flex_shrink = 1.0;
+    Length flex_basis = Length::auto_length();
+    Length row_gap;
+    Length column_gap;
+    int order = 0;
 
     Insets margin;
     Insets padding;
