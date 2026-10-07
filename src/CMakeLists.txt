@@ -40,6 +40,9 @@ set(PROWSETK_CORE_SOURCES
     core/render/hit_test.cpp
     core/render/renderer.cpp
     core/embedding.cpp
+    core/event_stream.cpp
+    core/gfx_ir.cpp
+    core/gfx_encoding.cpp
     core/web_interface.cpp
     core/playwright.cpp
     flatworm/html5_parser.cpp
@@ -119,10 +122,9 @@ add_library(ProwseTk::core ALIAS prowsetk_core)
 prowsetk_install_library(prowsetk_core)
 
 add_subdirectory(session)
+add_subdirectory(gfx_backend)
 add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/oauth-assist" "${CMAKE_BINARY_DIR}/plugins/oauth-assist")
 add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/browser-run-integration" "${CMAKE_BINARY_DIR}/plugins/browser-run-integration")
-add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/basic-gui" "${CMAKE_BINARY_DIR}/plugins/basic-gui")
-add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/complex-gui" "${CMAKE_BINARY_DIR}/plugins/complex-gui")
 
 if(PROWSETK_BUILD_AI_ORACLE)
     add_subdirectory("${PROJECT_SOURCE_DIR}/plugins/ai-oracle" "${CMAKE_BINARY_DIR}/plugins/ai-oracle")

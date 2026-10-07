@@ -15,7 +15,7 @@
 #include "prowsetk/document.hpp"
 #include "prowsetk/endpoint_extraction.hpp"
 #include "prowsetk/error.hpp"
-#include "prowsetk/ir.hpp"
+#include "prowsetk/event_ir.hpp"
 #include "prowsetk/pdql.hpp"
 #include "prowsetk/url.hpp"
 #include "prowsetk/xpath.hpp"

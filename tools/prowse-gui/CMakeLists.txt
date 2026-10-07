@@ -1,0 +1,6 @@
+if(PROWSETK_BUILD_PROWSE_GUI)
+    prowsetk_add_executable(prowse_gui main.cpp)
+    set_target_properties(prowse_gui PROPERTIES OUTPUT_NAME prowse-gui)
+    target_link_libraries(prowse_gui PRIVATE ProwseTk::gfx)
+    install(TARGETS prowse_gui RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+endif()

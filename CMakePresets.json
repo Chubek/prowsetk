@@ -1,6 +1,10 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "default",
@@ -60,12 +64,6 @@
       }
     },
     {
-      "name": "gui",
-      "displayName": "Default + FLTK desktop inspector",
-      "inherits": "default",
-      "cacheVariables": { "PROWSETK_BUILD_BASIC_GUI": "ON" }
-    },
-    {
       "name": "wasm",
       "displayName": "Default + WebAssembly runtime (tests)",
       "inherits": "default",
@@ -74,42 +72,64 @@
         "PROWSETK_WASM_RUNTIME": "wasmtime",
         "PROWSETK_ENABLE_WASI": "OFF"
       }
-    },
-    {
-      "name": "complex-gui",
-      "displayName": "Flatworm display-list desktop browser",
-      "inherits": "default",
-      "cacheVariables": { "PROWSETK_BUILD_COMPLEX_GUI": "ON" }
     }
   ],
   "buildPresets": [
-    { "name": "default",  "configurePreset": "default" },
-    { "name": "debug",    "configurePreset": "debug" },
-    { "name": "release",  "configurePreset": "release" },
-    { "name": "asan",     "configurePreset": "asan" },
-    { "name": "coverage", "configurePreset": "coverage" },
-    { "name": "gui",      "configurePreset": "gui" },
-    { "name": "complex-gui", "configurePreset": "complex-gui" },
-    { "name": "wasm",     "configurePreset": "wasm" }
+    {
+      "name": "default",
+      "configurePreset": "default"
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage"
+    },
+    {
+      "name": "wasm",
+      "configurePreset": "wasm"
+    }
   ],
   "testPresets": [
     {
       "name": "default",
       "configurePreset": "default",
-      "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
     },
     {
       "name": "debug",
       "configurePreset": "debug",
-      "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
     },
     {
       "name": "release",
       "configurePreset": "release",
-      "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "ignore" }
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "ignore"
+      }
     },
     {
       "name": "asan",
@@ -118,32 +138,32 @@
         "ASAN_OPTIONS": "detect_leaks=0:detect_odr_violation=1",
         "LSAN_OPTIONS": "detect_leaks=0"
       },
-      "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
     },
     {
       "name": "coverage",
       "configurePreset": "coverage",
-      "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
-    },
-    {
-      "name": "gui",
-      "configurePreset": "gui",
-      "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
     },
     {
       "name": "wasm",
       "configurePreset": "wasm",
-      "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
-    },
-    {
-      "name": "complex-gui",
-      "configurePreset": "complex-gui",
-      "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
     }
   ],
   "workflowPresets": [
@@ -151,27 +171,54 @@
       "name": "ci",
       "displayName": "CI: default",
       "steps": [
-        { "type": "configure", "name": "default" },
-        { "type": "build",     "name": "default" },
-        { "type": "test",      "name": "default" }
+        {
+          "type": "configure",
+          "name": "default"
+        },
+        {
+          "type": "build",
+          "name": "default"
+        },
+        {
+          "type": "test",
+          "name": "default"
+        }
       ]
     },
     {
       "name": "ci-asan",
       "displayName": "CI: AddressSanitizer/UBSan",
       "steps": [
-        { "type": "configure", "name": "asan" },
-        { "type": "build",     "name": "asan" },
-        { "type": "test",      "name": "asan" }
+        {
+          "type": "configure",
+          "name": "asan"
+        },
+        {
+          "type": "build",
+          "name": "asan"
+        },
+        {
+          "type": "test",
+          "name": "asan"
+        }
       ]
     },
     {
       "name": "ci-wasm",
       "displayName": "CI: WebAssembly runtime",
       "steps": [
-        { "type": "configure", "name": "wasm" },
-        { "type": "build",     "name": "wasm" },
-        { "type": "test",      "name": "wasm" }
+        {
+          "type": "configure",
+          "name": "wasm"
+        },
+        {
+          "type": "build",
+          "name": "wasm"
+        },
+        {
+          "type": "test",
+          "name": "wasm"
+        }
       ]
     }
   ]

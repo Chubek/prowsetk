@@ -24,7 +24,7 @@
 #include <prowsetk/cookie_import.hpp>
 #include <prowsetk/endpoint_extraction.hpp>
 #include <prowsetk/error.hpp>
-#include <prowsetk/ir.hpp>
+#include <prowsetk/event_ir.hpp>
 #include <prowsetk/lua_runtime.hpp>
 #include <prowsetk/project_config.hpp>
 #include <prowsetk/version.hpp>

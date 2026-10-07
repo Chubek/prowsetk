@@ -11,11 +11,9 @@ option(PROWSETK_BUILD_AI_ORACLE
     "Build the optional OpenAI oracle plugin when its headers are available" ON)
 option(PROWSETK_BUILD_QUTE_REPL
     "Build the Qutebrowser Lua console when Replxx and Lua are available" ON)
-option(PROWSETK_BUILD_BASIC_GUI
-    "Build the optional FLTK desktop browser inspector" ON)
-option(PROWSETK_BUILD_COMPLEX_GUI
-    "Build the FLTK display-list browser and complex-gui adapter" ON) 
-
+option(PROWSETK_BUILD_PROWSE_GUI "Build the event-stream GUI consumer" ON)
+option(PROWSETK_GFX_X11 "Build the optional X11 GFX adapter" OFF)
+option(PROWSETK_GFX_FLTK "Build the optional FLTK GFX adapter" OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(ProwseTkHelpers)
 include(CompilerWarnings)
@@ -48,15 +46,6 @@ endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/CMakeLists.txt")
     add_subdirectory(tools)
 endif()
-
-# Developer launchers are plain scripts next to the sources they wrap; install
-# them so an installed tree can still start its own frontends.
-foreach(_pwtk_launcher launch-gui)
-    if(EXISTS "${PROJECT_SOURCE_DIR}/tools/${_pwtk_launcher}.sh")
-        prowsetk_install_launcher("prowsetk-${_pwtk_launcher}"
-            "${PROJECT_SOURCE_DIR}/tools/${_pwtk_launcher}.sh")
-    endif()
-endforeach()
 
 prowsetk_export_package()
 

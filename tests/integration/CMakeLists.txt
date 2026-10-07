@@ -1,82 +1,17 @@
 prowsetk_gtest(prowsetk_integration_navigation "prowsetk.integration.network."
     "integration;network" test_navigation.cpp)
 
-prowsetk_gtest(prowsetk_integration_complex_gui "prowsetk.integration.complex-gui."
-    "integration;plugin;document;javascript" test_complex_gui.cpp)
-target_link_libraries(prowsetk_integration_complex_gui PRIVATE ProwseTk::complex_gui)
-target_compile_definitions(prowsetk_integration_complex_gui PRIVATE
-    COMPLEX_GUI_PLUGIN_PATH="$<TARGET_FILE:prowsetk_complex_gui>")
-if(PROWSETK_BUILD_COMPLEX_GUI)
-    prowsetk_gtest(prowsetk_integration_complex_gui_window "prowsetk.integration.complex-gui.window."
-        "integration;plugin;gui" test_complex_gui_window.cpp TIMEOUT 20)
-    target_link_libraries(prowsetk_integration_complex_gui_window PRIVATE ProwseTk::complex_gui ProwseTk::fltk)
-    if(TARGET prowse_gui)
-        add_test(NAME prowsetk.integration.prowse-gui.help COMMAND prowse_gui --help)
-        set_tests_properties(prowsetk.integration.prowse-gui.help PROPERTIES
-            LABELS "integration;plugin;gui" TIMEOUT 10 PASS_REGULAR_EXPRESSION "display-list browser")
-        add_test(NAME prowsetk.integration.prowse-gui.invalid COMMAND prowse_gui --invalid)
-        set_tests_properties(prowsetk.integration.prowse-gui.invalid PROPERTIES
-            LABELS "integration;plugin;gui" TIMEOUT 10 WILL_FAIL TRUE)
-    endif()
-endif()
-
-prowsetk_gtest(prowsetk_integration_basic_gui "prowsetk.integration.basic-gui."
-    "integration;plugin;javascript;document;lua" test_basic_gui.cpp)
-target_link_libraries(prowsetk_integration_basic_gui PRIVATE prowsetk_basic_gui_model prowsetk_basic_gui)
-target_compile_definitions(prowsetk_integration_basic_gui PRIVATE
-    BASIC_GUI_PLUGIN_PATH="$<TARGET_FILE:prowsetk_basic_gui>")
-add_dependencies(prowsetk_integration_basic_gui prowsetk_basic_gui)
-
-# The launcher script's help and preflight checks are display-free, so they are
-# covered in every configuration, not only the FLTK-enabled one.
-find_program(PROWSETK_LAUNCHER_BASH bash)
-if(PROWSETK_LAUNCHER_BASH)
-    add_test(NAME prowsetk.integration.basic-gui.launcher.script
-        COMMAND "${PROWSETK_LAUNCHER_BASH}" "${PROJECT_SOURCE_DIR}/tools/launch-gui.sh" --help)
-    set_tests_properties(prowsetk.integration.basic-gui.launcher.script PROPERTIES
-        LABELS "integration;plugin;gui" TIMEOUT 15
-        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
-endif()
-if(PROWSETK_BUILD_BASIC_GUI)
-    prowsetk_add_executable(prowsetk_integration_basic_gui_window test_basic_gui_window.cpp)
-    target_link_libraries(prowsetk_integration_basic_gui_window PRIVATE
-        prowsetk_basic_gui ProwseTk::core ProwseTk::fltk GTest::gtest_main)
-    target_compile_definitions(prowsetk_integration_basic_gui_window PRIVATE
-        PROWSETK_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-    find_program(PROWSETK_XVFB_RUN xvfb-run)
-    if(PROWSETK_XVFB_RUN)
-        add_test(NAME prowsetk.integration.basic-gui.window
-            COMMAND "${PROWSETK_XVFB_RUN}" -a $<TARGET_FILE:prowsetk_integration_basic_gui_window>)
-    else()
-        add_test(NAME prowsetk.integration.basic-gui.window COMMAND prowsetk_integration_basic_gui_window)
-    endif()
-    set_tests_properties(prowsetk.integration.basic-gui.window PROPERTIES
-        LABELS "integration;plugin;document;gui" TIMEOUT 30)
-    add_test(NAME prowsetk.integration.basic-gui.cli.help COMMAND ptk_basic_gui --help)
-    set_tests_properties(prowsetk.integration.basic-gui.cli.help PROPERTIES
-        LABELS "integration;plugin;gui" TIMEOUT 10)
-    add_test(NAME prowsetk.integration.basic-gui.cli.goal-without-script
-        COMMAND ptk_basic_gui --goal "Explore page")
-    set_tests_properties(prowsetk.integration.basic-gui.cli.goal-without-script PROPERTIES
-        LABELS "integration;plugin;gui;lua" TIMEOUT 10 WILL_FAIL TRUE)
-    add_test(NAME prowsetk.integration.basic-gui.cli.invalid COMMAND ptk_basic_gui --unknown)
-    set_tests_properties(prowsetk.integration.basic-gui.cli.invalid PROPERTIES
-        LABELS "integration;plugin;gui" TIMEOUT 10 WILL_FAIL TRUE)
-
-    # The launcher needs no build or display for help/preflight, so it is
-    # registered under every configuration where the repository is present.
-    find_program(PROWSETK_BASH bash)
-    if(PROWSETK_BASH)
-        add_test(NAME prowsetk.integration.basic-gui.launcher.help
-            COMMAND "${PROWSETK_BASH}" "${PROJECT_SOURCE_DIR}/tools/launch-gui.sh" --help)
-        set_tests_properties(prowsetk.integration.basic-gui.launcher.help PROPERTIES
-            LABELS "integration;plugin;gui" TIMEOUT 15
-            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
-        add_test(NAME prowsetk.integration.basic-gui.launcher.preflight
-            COMMAND "${PROWSETK_BASH}"
-                "${PROJECT_SOURCE_DIR}/tools/launch-gui.sh" --url https://example.test --file x.html)
-        set_tests_properties(prowsetk.integration.basic-gui.launcher.preflight PROPERTIES
-            LABELS "integration;plugin;gui" TIMEOUT 15 WILL_FAIL TRUE
+prowsetk_gtest(prowsetk_integration_gfx "prowsetk.integration.gfx."
+    "integration;document" test_gfx.cpp)
+target_link_libraries(prowsetk_integration_gfx PRIVATE ProwseTk::gfx)
+if(TARGET prowse_gui)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME prowsetk.integration.prowse-gui.cli
+            COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/integration/test_prowse_gui.py"
+                $<TARGET_FILE:prowse_gui>)
+        set_tests_properties(prowsetk.integration.prowse-gui.cli PROPERTIES
+            LABELS "integration;document" TIMEOUT 60
             WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
     endif()
 endif()

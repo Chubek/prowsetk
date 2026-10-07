@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-#include "Flatwork-Module.h"
+#include "Flatworm-Module.hpp"
 
 namespace prowsetk {
 namespace flatworm { class ModuleBindings; }

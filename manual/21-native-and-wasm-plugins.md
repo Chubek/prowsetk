@@ -8,13 +8,7 @@ Flatworm's native page-JavaScript bindings use the independent
 
 ## Registry lifecycle
 
-The independent [complex-gui](../plugins/complex-gui/README.md) plugin paints
-Flatworm's display-list records into a custom FLTK canvas. Enable
-`PROWSETK_BUILD_COMPLEX_GUI` or use the `complex-gui` preset; launch
-`build/complex-gui/tools/prowse-gui/prowse-gui`. It provides scrolling, browser
-history, hit-tested controls, masked form replacement and optional image loading.
-It has its own headless Controller and ABI-v2 facade and does not depend on
-basic-gui. Native loading remains network/display-free. Navigation is synchronous,
+Navigation is synchronous,
 and the renderer's limited CSS support applies. File startup uses an offline
 transport; see the tool README for command-line options.
 
@@ -30,17 +24,8 @@ The core also lays out horizontal flex rows (`display:flex`) with wrapping, gaps
 weighted grow/shrink, min/max constraints, ordering and main/cross-axis alignment.
 Border-box sizing, automatic horizontal margins and left/center/right text alignment
 support centered pages and responsive cards. These features require no additional
-library. See `tools/prowse-gui/example.html` for a runnable offline example, and the
-core README for the auto-size approximations and unsupported flex features.
+library. The core README documents auto-size approximations and unsupported flex features.
 
-The optional [basic-gui](../plugins/basic-gui/README.md) plugin supplies an FLTK
-desktop inspector. `cmake --preset gui` enables its graphical adapter;
-`tools/launch-gui.sh --file plugins/basic-gui/example.html` opens the offline
-demo. The script locates the executable across presets, applies its runtime
-library path and reports a missing display before launching; `--check` verifies
-a build without a window. Native loading remains display/network-free and
-retains the version-2 C ABI. Opening a live viewer is an explicit C++
-`basic_gui::Viewer(session)` operation. The core/default build and the plugin's
 controller/projection tests remain headless. Preview clicks and typing use
 Session synthetic interactions; networking, cookies, TLS and request hooks stay
 in the host engine. The OpenCode tab uses `opencode-bridge` to check server

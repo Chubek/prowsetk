@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include "prowsetk/browser.hpp"
-#include "prowsetk/ir.hpp"
+#include "prowsetk/event_ir.hpp"
 
 namespace prowsetk {
 

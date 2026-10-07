@@ -22,7 +22,7 @@ namespace prowsetk {
 // third-party browser engine and remains headless by default. Nothing here
 // opens a socket, needs a display server, or rasterizes pixels: the result is a
 // display list in document coordinates that a host (the optional
-// `plugins/basic-gui` FLTK frontend, a print backend, a test, or a native
+// a print backend, a test, or a native
 // plugin) paints with its own toolkit.
 //
 // The implementation is stratified the same way as the IR emitters (see

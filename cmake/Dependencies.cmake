@@ -1,5 +1,35 @@
 include_guard(GLOBAL)
 
+# Desktop dependencies belong only to ProwseTk::gfx, never the headless core.
+if(PROWSETK_GFX_X11 OR (PROWSETK_GFX_FLTK AND CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+    find_package(X11 REQUIRED)
+endif()
+if(PROWSETK_GFX_X11)
+    add_library(ProwseTk::gfx_x11 ALIAS X11::X11)
+endif()
+if(PROWSETK_GFX_FLTK)
+    find_package(FLTK CONFIG QUIET)
+    if(NOT TARGET fltk::fltk)
+        if(NOT EXISTS "${PROJECT_SOURCE_DIR}/third_party/fltk/CMakeLists.txt")
+            message(FATAL_ERROR "FLTK GFX adapter requested but FLTK is unavailable")
+        endif()
+        foreach(component FLUID FLTK_OPTIONS EXAMPLES TEST SCREENSHOTS HTML_DOCS PDF_DOCS)
+            set(FLTK_BUILD_${component} OFF CACHE BOOL "" FORCE)
+        endforeach()
+        set(FLTK_BUILD_GL OFF CACHE BOOL "" FORCE)
+        set(FLTK_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+        set(FLTK_BACKEND_WAYLAND OFF CACHE BOOL "FLTK X11 adapter" FORCE)
+        add_subdirectory("${PROJECT_SOURCE_DIR}/third_party/fltk"
+                         "${CMAKE_BINARY_DIR}/third_party/fltk" EXCLUDE_FROM_ALL)
+        set_target_properties(fltk PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    endif()
+    get_target_property(_prowsetk_fltk fltk::fltk ALIASED_TARGET)
+    if(NOT _prowsetk_fltk)
+        set(_prowsetk_fltk fltk::fltk)
+    endif()
+    add_library(ProwseTk::gfx_fltk ALIAS ${_prowsetk_fltk})
+endif()
+
 # Replxx is used only by the explicit Qutebrowser terminal host.
 if(PROWSETK_BUILD_QUTE_REPL AND UNIX)
     find_package(replxx CONFIG QUIET)
@@ -39,48 +69,6 @@ elseif(EXISTS "${PROJECT_SOURCE_DIR}/third_party/stb/stb_image.h")
     add_library(ProwseTk::render_stb ALIAS prowsetk_render_stb)
 else()
     message(STATUS "stb not found: image decoding falls back to alt text")
-endif()
-
-# FLTK is confined to the opt-in basic-gui and complex-gui adapters. Controllers and the
-# core remain usable on machines without desktop development packages.
-if(PROWSETK_BUILD_BASIC_GUI OR PROWSETK_BUILD_COMPLEX_GUI)
-    find_package(X11 QUIET)
-    if(NOT X11_FOUND)
-        message(FATAL_ERROR "Graphical adapters require libX11 (X11 development headers and library)")
-    endif()
-    add_library(prowsetk_gui_platform STATIC
-        "${PROJECT_SOURCE_DIR}/src/gui/x11_platform.cpp")
-    target_compile_features(prowsetk_gui_platform PUBLIC cxx_std_20)
-    target_include_directories(prowsetk_gui_platform PUBLIC
-        "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
-        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
-    target_compile_definitions(prowsetk_gui_platform PRIVATE PROWSETK_GUI_HAVE_X11=1)
-    target_link_libraries(prowsetk_gui_platform PUBLIC X11::X11)
-    add_library(ProwseTk::gui_platform ALIAS prowsetk_gui_platform)
-    install(TARGETS prowsetk_gui_platform EXPORT ProwseTkTargets
-        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
-
-    find_package(FLTK CONFIG QUIET)
-    if(NOT TARGET fltk::fltk)
-        if(NOT EXISTS "${PROJECT_SOURCE_DIR}/third_party/fltk/CMakeLists.txt")
-            message(FATAL_ERROR "basic-gui requires FLTK; populate third_party/fltk")
-        endif()
-        foreach(component FLUID FLTK_OPTIONS EXAMPLES TEST SCREENSHOTS HTML_DOCS PDF_DOCS)
-            set(FLTK_BUILD_${component} OFF CACHE BOOL "" FORCE)
-        endforeach()
-        set(FLTK_BUILD_GL OFF CACHE BOOL "" FORCE)
-        set(FLTK_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-        # X11 is the small portable Linux backend; users can select Wayland.
-        set(FLTK_BACKEND_WAYLAND OFF CACHE BOOL "FLTK Wayland backend")
-        add_subdirectory("${PROJECT_SOURCE_DIR}/third_party/fltk"
-                         "${CMAKE_BINARY_DIR}/third_party/fltk" EXCLUDE_FROM_ALL)
-        set_target_properties(fltk PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    endif()
-    get_target_property(_prowsetk_fltk_target fltk::fltk ALIASED_TARGET)
-    if(NOT _prowsetk_fltk_target)
-        set(_prowsetk_fltk_target fltk::fltk)
-    endif()
-    add_library(ProwseTk::fltk ALIAS ${_prowsetk_fltk_target})
 endif()
 
 # ai-oracle uses OpenAIpp's wire/authentication helpers with NetworkClient,

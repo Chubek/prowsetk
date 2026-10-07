@@ -129,7 +129,7 @@ characters and the runtime at 256 live lists. No stylesheet layout is implied.
 `pump_events` never sleeps and runs at most 16 bounded lifecycle passes with the
 supplied ScriptOptions. Hosts serialize these calls with other session work;
 closed or reentrant calls report InvalidArgument. Network time remains
-host-mediated. The optional [basic GUI](../plugins/basic-gui/README.md) uses this
+host-mediated.
 checkpoint from its FLTK loop.
 
 Details summaries toggle `open`, coalescing `toggle` notifications. Dialogs

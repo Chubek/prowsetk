@@ -1,4 +1,4 @@
-z AGENTS.md — ProwseTk Implementation Guide
+AGENTS.md — ProwseTk Implementation Guide
 
 This file is derived from `README.md` and is binding for every agent that
 implements, extends, or reviews ProwseTk. Read `README.md` first; it is the
@@ -46,12 +46,8 @@ in `tests/integration/test_drivers.cpp` and a `prowsetk run` CLI test in
 ## 2. Non-Negotiable Constraints
 
 - The core and default build are headless: no display server, windowing system,
-  GPU, or desktop environment may be required. `plugins/basic-gui` is an explicit,
-  opt-in FLTK desktop inspector (`PROWSETK_BUILD_BASIC_GUI=OFF` by default).
-  Keep its graphical dependency confined to its adapter; native plugin loading,
+  GPU, or desktop environment may be required.   Keep its graphical dependency confined to its adapter; native plugin loading,
   the model/controller, and ordinary tests remain display-free.
-  The separate `plugins/complex-gui` adapter and `tools/prowse-gui` browser are
-  opt-in through `PROWSETK_BUILD_COMPLEX_GUI=OFF` by default as well.
 - No dependency on a third-party browser engine.
 - The public C++ API is decomposed into `Browser`, `Session`, `Document`,
   `Element`, `NetworkClient`, `JavaScriptRuntime`, `LuaRuntime`, `WebPlatform`,
@@ -97,7 +93,7 @@ prowsetk/
 `third_party/` is populated from `.gitmodules` and is excluded by `.gitignore`.
 `scripts/scaffold.sh` creates or refreshes this skeleton.
 
-`manual/README.md` indexes 37 separate numbered Markdown chapters covering the
+`manual/README.md` indexes 39 separate numbered Markdown chapters covering the
 implemented engine, APIs, Lua extensions, plugins, tools and Qutebrowser
 assistant-browser workflows. Keep examples and support levels aligned with
 callable interfaces when extending those surfaces.
@@ -398,7 +394,37 @@ Owner-only cache/socket permissions remain required. Keep new tests under
 registered with labels and finite timeouts. See `plugins/spider/README.md`
 for the exact supported command, robots and recovery contracts.
 
+## GFX backends and prowse-gui
+
+`src/core/event_stream.hpp` delivers bounded snapshots of the canonical
+`ProwseEvent` contract in `include/prowsetk/event.hpp`. That header also retains
+browser lifecycle Event/EventDispatcher. `gfx_ir.hpp` lowers page events to
+PGFX1; `GFX-Backend.h` defines its independent, version-1 C-compatible ABI.
+Keep preview semantics in `core/gfx_ir.cpp`, strict wire encoding/decoding in
+`core/gfx_encoding.cpp`, and surface implementations in `src/gfx_backend/`.
+Backends never access DOM/Session internals or open page-network sockets.
+
+`ProwseTk::gfx` supplies the reusable ABI client/selection layer;
+`tools/prowse-gui` is a consumer, selected by `-T` / `--backend`. Headless is
+always available. X11/FLTK adapters are opt-in, with dependencies confined to
+that library and discovered in `cmake/Dependencies.cmake`. BGFX, ImGui and
+direct Wayland currently report unavailable. Keep descriptor validation,
+opaque-state ownership, exception containment and atomic validated submission.
+External definitions/library lifetimes are host-owned; no dynamic discovery is
+implemented. Do not conflate this fixed-cell sanitized text preview with the
+independent `render_document` CSS display-list API or page hit testing.
+
+Preserve bounded source/bytecode/text allocations, strict UTF-8 and framing,
+generic errors, hidden subtree handling and private control-value exclusion.
+Other page text is caller data. Default GUI JavaScript is off. Keep headless
+unit, C ABI, embedding and CLI coverage under tests with finite CTest bounds.
+See README's GFX section and `tools/prowse-gui/README.md` for supported behavior.
+
 ## The IR Emitters
+
+The canonical page IR is declared in `include/prowsetk/event.hpp`, alongside
+the distinct browser lifecycle Event/EventDispatcher contract. `ir.hpp` and
+`event_ir.hpp` are compatibility includes.
 
 Although ProwseTk is a headless browser and it does not render anything, the engine can generate an *intermediate representation* for the page. Its canonical in-memory IR is the ProwseEvent stream; the Lua engine exposes `lprowseir` for handling it and its wire encodings:
 
@@ -871,68 +897,6 @@ queued navigation before returning. Form-control `value` prototype descriptors
 are configurable so framework setter wrappers can observe the native setter
 path. Repeated clicks on an already-active element omit the focus event.
 A rejected HTML parse preserves the previously installed document and session URL.
-
-### Basic GUI and logical viewport
-
-`plugins/basic-gui` provides the FLTK `ptk-basic-gui` executable and C++ Viewer,
-plus a display-free controller/projection and network-free ABI-v2 facade.
-The preview consumes canonical ProwseEvent records, uses synthetic revision/node
-IDs for actions and never passes resource URLs to FLTK's file/image/URI loaders.
-Preserve sanitized source/form values, opt-in local console values, bounded
-snapshots/history/activity and stale/disconnected-node rejection. GUI calls are
-serialized on the desktop thread and all requests remain Session-mediated.
-
-`Session::set_viewport` supplies bounded logical metadata independently of
-layout; `pump_events` is a bounded, non-sleeping host checkpoint. Page bindings
-read host viewport dimensions, notify resize/visualViewport/media listeners and
-support semantic details/dialog state and form-control activation. Do not claim
-CSS geometry, top-layer/focus-trapping or full media-query conformance. Keep
-display-free unit/integration coverage and the optional window CTest under tests.
-The GUI's OpenCode tab uses `opencode-bridge` for explicit API/authentication
-checks and advisory inquiries. Its validated server override also applies to
-`opencode-marionette`. Send only bounded structural page context to inquiries,
-with no page text/attribute values/scripts/credentials or URL query/fragment.
-Replies must remain advisory, unexecuted and hidden by default until local
-console-value opt-in. Agent IPC uses its own transport and authentication; do
-not change page networking or connect implicitly on facade loading. Reject
-reentry and configuration changes during any active agent operation.
-GUI marionettes are trusted Lua preparation scripts whose `main(args)` returns
-version-1 decisions JSON; this differs from the CLI driver's integer result.
-Bind the displayed session only for the synchronous run, destroy the fresh Lua
-runtime/subscriptions before returning, and never execute model responses as
-code. Reuse the OpenCode marionette controller's validated actions, same-origin
-policy and bounded V2 bridge with separate agent authentication/transport. Keep
-source/goal bounds, generic errors, suppressed routine Lua print, and refresh
-DOM/history after success or partial-action failure. Preparation remains trusted
-and synchronous, outside the subsequent action policy; document blocking waits
-and the absence of GUI cancellation honestly. Native facade loading stays
-network/display-free. No additional production dependency is needed.
-See `plugins/basic-gui/README.md` for the supported preview and Web API slice.
-
-`tools/launch-gui.sh` starts that executable. It searches CMake presets for the
-binary, applies the matching runtime library path, validates the display and
-page arguments, and rejects a `--proxy` URL carrying userinfo so credentials
-never reach a process listing. Forward unrecognized arguments instead of
-guessing them, keep `--help`/`--check` working with no build and no display, and
-never log page values, URLs or proxy values. Its help/preflight paths are
-CTest cases in every configuration; only the window test needs a display.
-
-### Complex GUI / prowse-gui
-
-`plugins/complex-gui` has a display-free controller/model and a network-free ABI-v2
-facade in every build. Its optional FLTK Viewer is independent of basic-gui and
-paints the core `render_document` display list; do not substitute Fl_Help_View or
-add a parallel HTML/CSS parser. `tools/prowse-gui` is the executable consumer.
-Keep its `complex-gui` configure/build/test presets and OFF-by-default option.
-FLTK sees decoded image pixels only. Opt-in resource requests and all synthetic
-interactions use Session; page script policies, cookies and redirects still apply.
-Keep bounded history/offline HTML, per-page image budgets, live-node/revision
-validation, masked editor values, generic errors and explicit synchronous network
-limitations. Calls, checkpoints and drawing belong on the desktop thread. Never
-invoke page networking from a draw callback. No renderer values are exported or
-logged. Preserve headless model/Session tests and the finite, display-conditional
-window smoke test. See `plugins/complex-gui/README.md` for the exact supported
-browser workflow and image/layout restrictions.
 
 ### Python build isolation
 

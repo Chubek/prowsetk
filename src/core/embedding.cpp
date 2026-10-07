@@ -1,6 +1,7 @@
 #include "prowsetk/embedding.hpp"
 
 #include "prowsetk/error.hpp"
+#include "core/event_stream.hpp"
 
 namespace prowsetk {
 
@@ -39,14 +40,15 @@ EventStreamResult EmbeddedBrowser::stream_events(
                     "embedded event stream visitor must not be empty");
     }
     EventStreamResult result;
-    const auto stream = events();
-    for (const auto& event : stream) {
+    const EventStreamReader stream(document());
+    stream.replay([&](const ProwseEvent& event) {
         ++result.delivered;
         if (visitor(event) == EventStreamControl::Stop) {
             result.complete = false;
-            break;
+            return EventStreamAction::Stop;
         }
-    }
+        return EventStreamAction::Continue;
+    });
     return result;
 }
 

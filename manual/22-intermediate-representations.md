@@ -4,6 +4,9 @@
 
 ## Canonical page events
 
+`include/prowsetk/event.hpp` defines the page IR alongside the separate browser
+lifecycle event contract. `ir.hpp` and `event_ir.hpp` remain compatibility includes.
+
 ProwseEvent is the canonical in-memory page IR. It records `start`, `attribute`,
 `text`, and `end` events, with stable XPath-like paths, owning tags, values, and
 depths. Start records additionally contain source-order attributes and subtree
@@ -20,6 +23,23 @@ start records into flattened nodes. New emitters and consumers should use the
 canonical event stream rather than inventing a second DOM IR.
 
 ## Wire formats
+
+### Graphics consumer
+
+`EmbeddedBrowser::stream_events` uses `src/core/event_stream.hpp` to deliver a
+bounded immutable snapshot. `emit_gfx_ir(events, options)` consumes those records
+and produces strict PGFX1 text-preview bytecode. `ProwseTk::gfx` sends it through
+the C-compatible `GFX-Backend.h` contract to an adapter in `src/gfx_backend/`.
+
+`prowse-gui -T headless --file page.html --dump-text` is display-free. Enable
+`PROWSETK_GFX_X11` or `PROWSETK_GFX_FLTK` for desktop surfaces, then use `-T x11`
+or `-T fltk`. `--list-backends` reports availability; BGFX, ImGui and direct
+Wayland are currently unavailable. The headless core has no windowing dependency.
+
+The preview omits script/style/head/template and private control contents, uses
+semantic block breaks, and does not perform CSS layout or page-action hit testing.
+Other page text remains caller data. See the
+[GUI tool contract](../tools/prowse-gui/README.md) for wire limits and ownership.
 
 | Name | Encoding | Typical consumer |
 |---|---|---|

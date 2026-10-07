@@ -8,7 +8,7 @@
 
 namespace prowsetk::flatworm {
 
-// QuickJS lowering of the backend-independent Flatwork-Module.h contract.
+// QuickJS lowering of the backend-independent Flatworm-Module.h contract.
 // Owned by one runtime; no browser plugins, Lua, network or DOM dependencies.
 class ModuleBindings {
 public:

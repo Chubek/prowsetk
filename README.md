@@ -11,19 +11,7 @@ ProwseTk does not depend on WebKit, Blink, or Gecko. It ships its own lightweigh
 engine, **Flatworm**, optimized for automation and programmability rather than
 complete browser compatibility or pixel-perfect rendering.
 
-An optional [FLTK desktop inspector](plugins/basic-gui/README.md) provides a
-basic browser GUI for viewing the live page, DOM, source and activity. Its
-graphical dependencies are confined to `plugins/basic-gui`; the core and
-default build remain headless.
 
-The separate [complex-gui](plugins/complex-gui/README.md) plugin paints the core
-display-list renderer into a custom FLTK canvas. Its browser executable lives in
-[`tools/prowse-gui`](tools/prowse-gui/README.md): navigation/history, scrolling,
-hit-tested links and controls, masked form editing, and opt-in Session-mediated
-PNG/JPEG images. Build with `cmake --preset complex-gui` and
-`cmake --build --preset complex-gui`, then run
-`build/complex-gui/tools/prowse-gui/prowse-gui --file tools/prowse-gui/example.html`.
-`PROWSETK_BUILD_COMPLEX_GUI` defaults OFF and is independent of basic-gui.
 
 Read the [ProwseTk Manual](manual/README.md) for 39 chapters covering installation,
 the core APIs, Lua drivers/extensions, plugins, tools, and client interfaces.
@@ -53,6 +41,7 @@ length-framed FIFO transport that carries snapshot bodies on both local hops.
 - [Native Flatworm Modules](#native-flatworm-modules)
 - [Asynchronous Operation](#asynchronous-operation)
 - [Events and Hooks](#events-and-hooks)
+- [GFX Backends and Prowse-GUI](#gfx-backends-and-prowse-gui)
 - [Unsupported Web APIs](#unsupported-web-apis)
 - [Diagnostics and Instrumentation](#diagnostics-and-instrumentation)
 - [Security and Resource Limits](#security-and-resource-limits)
@@ -305,7 +294,7 @@ positioning, stacking contexts, text shaping, full inline box decoration, and
 browser-conformant table layout are unsupported. Percentage margins/padding use
 the viewport width. Text justification falls back to start alignment. The default measurer approximates UTF-8 advances; consumers
 can supply a `TextMeasurer`. This API does not change page-JavaScript geometry or
-canvas support, or replace the GUI's existing sanitized ProwseEvent preview.
+canvas support, or replace the event-stream GFX preview.
 
 Image loading is opt-in through a caller-owned `ImageLoader` and `ImageCache`.
 The host must apply its Session network policy and bound response bytes. The
@@ -504,6 +493,58 @@ browser.stream_events([](const prowsetk::ProwseEvent& event) {
 });
 ```
 
+## GFX Backends and Prowse-GUI
+
+Graphics consumers share a downstream pipeline:
+
+```text
+Document → include/prowsetk/event.hpp (ProwseEvent)
+         → src/core/event_stream.hpp (bounded snapshot delivery)
+         → include/prowsetk/gfx_ir.hpp (PGFX1 bytecode)
+         → include/GFX-Backend.h (version-1 C ABI)
+         → src/gfx_backend/ (selected adapter)
+         → tools/prowse-gui/ (host application)
+```
+
+`event.hpp` defines both canonical page IR and the separate mutable browser
+lifecycle hooks; `ir.hpp` and `event_ir.hpp` are compatibility includes.
+`ProwseTk::core` emits the events and graphics bytecode without any display
+dependency. `ProwseTk::gfx` owns reusable backend selection and ABI instances;
+`prowse-gui` owns its EmbeddedBrowser and is one consumer of that library.
+Adapters receive validated bytecode, never DOM, Session or toolkit-specific host
+handles. Page networking continues through the owning Session/NetworkClient.
+
+```sh
+cmake --preset default -DPROWSETK_GFX_X11=ON
+cmake --build --preset default
+build/default/tools/prowse-gui/prowse-gui -T x11 --file tools/prowse-gui/example.html
+build/default/tools/prowse-gui/prowse-gui -T headless --file tools/prowse-gui/example.html --dump-text
+```
+
+`-T NAME` / `--backend NAME` selects the GFX backend; `--list-backends` reports
+compiled availability without opening a display. `PROWSETK_BUILD_PROWSE_GUI` is
+on by default, with the display-free headless adapter. Optional
+`PROWSETK_GFX_X11` and `PROWSETK_GFX_FLTK` default off. The default preference is
+FLTK, then X11, then headless. BGFX, ImGui and direct Wayland are reserved names
+that currently report unavailable. Custom trusted C definitions can be supplied
+explicitly to `GfxBackend`; automatic shared-library discovery is not implemented.
+
+PGFX1 currently encodes a fixed-cell UTF-8 text preview with semantic block
+breaks. It excludes head/script/style/template, hidden subtrees, and private
+input/textarea/select contents and values. Other page text remains caller data.
+It is independent of the explicit CSS display-list renderer. Preview surfaces
+support scrolling and closure; resizing clips the snapshot rather than reflowing
+it. X11's core font does not shape UTF-8 glyphs. JavaScript is off unless the
+tool's `--javascript` option is supplied. `--check` validates/submits without
+opening a window; `--dump-text` explicitly prints preview text. Errors contain
+codes only.
+
+Bounds are 400,000 source events / 32 MiB aggregate event strings, 256 nested
+elements, 4 MiB bytecode, 50,000 text commands, 4,096 bytes per command,
+1..16,384 surface pixels and 1,000,000 vertical content pixels. Decoding rejects
+invalid UTF-8, dimensions, opcodes, truncation and trailing data. See
+[tools/prowse-gui/README.md](tools/prowse-gui/README.md) for the ABI and CLI contract.
+
 ## Lua Control Layer (`lprowse`)
 
 ProwseTk uses Lua as its primary scripting and automation language.
@@ -634,24 +675,6 @@ host HTTP. Cloudflare client registration/scopes must be supplied by the host;
 no Wrangler identity is borrowed and no OAuth grant is assumed to authorize
 Browser Run. Both native ABI-v2 facades load without network activity.
 
-The repository includes `plugins/basic-gui`, an optional FLTK browser inspector.
-`ptk-basic-gui` supplies URL navigation/history, a basic HTML page preview,
-DOM/attribute inspection, sanitized source, console/network activity, synthetic
-clicks/typing, explicit page-JavaScript evaluation and Lua-configured OpenCode
-marionette runs. Its OpenCode tab checks a server and requests advisory replies
-through `opencode-bridge` using structural page context; both tabs share the
-server override and keep agent authentication separate from page networking.
-The Marionette tab loads trusted Lua `main(args)` scripts that
-return bounded action policies; OpenCode chooses permitted action IDs on the
-displayed Session. See the plugin guide for connection setup and script examples.
-It uses the owning Flatworm Session; every network request retains host policies, cookies and
-hooks. Preview links carry revision/node action IDs, and FLTK never loads page
-resource files or external URIs. Loading the ABI-v2 facade is display/network-free;
-the C++ `Viewer` explicitly opens a window. The `Controller` and snapshot model
-work without a display. Enable the desktop adapter with `PROWSETK_BUILD_BASIC_GUI=ON`
-or the `gui` preset, then start it with `tools/launch-gui.sh --url URL` or
-`tools/launch-gui.sh --file PAGE.html`. See
-[the plugin guide](plugins/basic-gui/README.md) for
 embedding, supported preview markup, redaction and bounds.
 
 The repository includes `plugins/ai-oracle`, an optional OpenAI Responses API
@@ -2494,27 +2517,6 @@ aggregates. Unsupported expressions fail explicitly; the full proposed
 marionette/RE2 language is not implemented. C and C++ APIs remain available in
 `pdql.h` / `pdql.hpp`. Both tools reuse existing Lua, tomlplusplus and optional
 pugixml dependencies and need no WASM toolchain.
-
-### Desktop inspector launcher
-
-`tools/launch-gui.sh` starts the optional FLTK inspector. It searches the CMake
-presets for `ptk-basic-gui`, applies the matching runtime library path, and
-validates its inputs before launching:
-
-```sh
-tools/launch-gui.sh --file plugins/basic-gui/example.html   # offline
-tools/launch-gui.sh --url https://example.com               # live
-tools/launch-gui.sh --check                                # build/display check
-tools/launch-gui.sh --print-bin                            # resolved binary
-```
-
-`--url`, `--file`, `--base-url`, `--proxy`, `--no-javascript`, `--preset`,
-`--bin`, `--print-bin`, `--check` and `--verbose` are handled here; anything
-else (and everything after `--`) passes through to the executable. A missing
-display and an unreachable build tree are reported before a window would open.
-`PROWSETK_GUI_BIN` overrides discovery. See
-[plugins/basic-gui/README.md](plugins/basic-gui/README.md).
-
 ## Build and Runtime Strategy
 
 The command reference lives in `man/man1/prowsetk.1` and
@@ -2589,7 +2591,8 @@ optional components depending on the build configuration.
 |---|---|
 | `c-ares` | Asynchronous DNS resolution |
 | `fmt` | Type-safe formatting (`{fmt}`) |
-| `fltk` | Optional desktop adapters for `basic-gui` and the separate display-list `complex-gui`/`prowse-gui`; core and default builds are display-free |
+| `fltk` | Optional `ProwseTk::gfx` desktop adapter (`PROWSETK_GFX_FLTK=ON`); isolated from the core |
+| `libX11` | Optional X11 GFX adapter (`PROWSETK_GFX_X11=ON`); also used by the vendored FLTK X11 build |
 | `stb` | Optional header-only PNG/JPEG decoder for explicit core display lists; no windowing or network dependency |
 | `gumbo-parser` | Lenient HTML parsing fallback |
 | `googletest` | CTest-registered unit and integration suites (test-only) |
@@ -2847,7 +2850,8 @@ prowsetk/
 ├── cmake/                  Build helper modules and dependency wiring
 ├── include/                Flatwork-Module.h and prowsetk/ public C/C++ headers
 ├── src/                    Core engine, Flatworm, and plugin implementations
-│   └── cli/                The `prowsetk` command-line interface
+│   ├── cli/                The `prowsetk` command-line interface
+│   └── gfx_backend/        Independent C-ABI graphics adapters
 ├── tests/                  CTest-conformant unit and integration suites
 ├── third_party/            Vendored dependencies (git submodules)
 ├── wit/                    WIT interface definitions for WASM plugins
@@ -2856,7 +2860,7 @@ prowsetk/
 ├── flatworm-modules/       Shipped native page-runtime modules (`rpc`)
 ├── drivers/                Lua driver scripts
 ├── examples/               Example C++ and Lua applications
-├── tools/                  Crawling, DOM watching, IR consumers and terminal tools
+├── tools/                  Crawling, DOM watching, IR consumers, prowse-gui and terminal tools
 ├── manual/                 Markdown manual with an index and 39 chapters
 ├── resources/              Runtime resources and manifests
 │   └── web/                Static web interface (index.html, app.js, style.css)

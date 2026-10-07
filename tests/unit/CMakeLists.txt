@@ -1,10 +1,6 @@
 prowsetk_gtest(prowsetk_unit_version "prowsetk.unit.version."
     "unit;core" test_version.cpp)
 
-prowsetk_gtest(prowsetk_unit_complex_gui "prowsetk.unit.complex-gui."
-    "unit;plugin;document" test_complex_gui.cpp)
-target_link_libraries(prowsetk_unit_complex_gui PRIVATE ProwseTk::complex_gui)
-
 prowsetk_gtest(prowsetk_unit_render "prowsetk.unit.render."
     "unit;document" test_render.cpp)
 if(TARGET ProwseTk::render_stb)
@@ -34,6 +30,15 @@ prowsetk_gtest(prowsetk_unit_capability "prowsetk.unit.capability."
 
 prowsetk_gtest(prowsetk_unit_events "prowsetk.unit.event."
     "unit;core" test_events.cpp)
+
+prowsetk_gtest(prowsetk_unit_event_stream "prowsetk.unit.event-stream."
+    "unit;document" test_event_stream.cpp)
+target_include_directories(prowsetk_unit_event_stream PRIVATE "${PROJECT_SOURCE_DIR}/src")
+prowsetk_gtest(prowsetk_unit_gfx_ir "prowsetk.unit.gfx-ir."
+    "unit;document" test_gfx_ir.cpp)
+prowsetk_gtest(prowsetk_unit_gfx_backend "prowsetk.unit.gfx-backend."
+    "unit;plugin" test_gfx_backend.cpp test_gfx_backend_c.c)
+target_link_libraries(prowsetk_unit_gfx_backend PRIVATE ProwseTk::gfx)
 
 prowsetk_gtest(prowsetk_unit_anti_bot_detection "prowsetk.unit.anti-bot."
     "unit;core;captcha" test_anti_bot_detection.cpp)
@@ -144,11 +149,6 @@ prowsetk_gtest(prowsetk_unit_javascript_platform "prowsetk.unit.javascript_platf
 
 prowsetk_gtest(prowsetk_unit_viewport "prowsetk.unit.viewport."
     "unit;javascript;document" test_viewport.cpp)
-prowsetk_gtest(prowsetk_unit_basic_gui "prowsetk.unit.basic-gui."
-    "unit;plugin;document;lua" test_basic_gui.cpp)
-target_link_libraries(prowsetk_unit_basic_gui PRIVATE
-    prowsetk_basic_gui_model prowsetk_basic_gui)
-
 prowsetk_gtest(prowsetk_unit_web_platform "prowsetk.unit.web-platform."
     "unit;javascript" test_web_platform.cpp)
 
